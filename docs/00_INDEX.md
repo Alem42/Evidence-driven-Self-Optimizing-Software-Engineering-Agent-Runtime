@@ -10,6 +10,8 @@
 
 | 文件 | 用途 | 读者 |
 |---|---|---|
+| [USER_CODE_INTELLIGENCE_GUIDE.md](USER_CODE_INTELLIGENCE_GUIDE.md) | Go AST、代码检索、版本化记忆与上下文的运行和限制 | 当前代码使用 |
+| [progress/PROGRESS_2026-09-27_001_intelligence-context.md](progress/PROGRESS_2026-09-27_001_intelligence-context.md) | P1-02/P1-03 实现与验收 | 最新进展 |
 | [USER_P1_PATCH_QUICKSTART.md](USER_P1_PATCH_QUICKSTART.md) | 受控补丁示例、JSON 格式与恢复边界 | 当前代码使用 |
 | [USER_GO_TODO_CONTRACT.md](USER_GO_TODO_CONTRACT.md) | Go Todo 修复契约与代码阅读顺序 | 用户与 LLM |
 | [progress/PROGRESS_2026-09-26_004_controlled-patches.md](progress/PROGRESS_2026-09-26_004_controlled-patches.md) | P1-01 受控写入与恢复验收 | 最新进展 |

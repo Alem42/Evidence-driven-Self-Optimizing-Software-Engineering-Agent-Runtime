@@ -1,9 +1,19 @@
 # MASA：代码理解、记忆、上下文与多 Agent 协作详细设计
 
 > 版本：v0.3 / 2026-09-26。前序规划方向已获用户认可，按本轮优化取舍修订。
-> 状态：领域详细设计。底层 P0 图、工具、状态和快照已实现，见 STATUS_PROJECT；本文的 CIE、完整上下文/记忆和多角色机制仍未实现，指标未测量。
+> 状态：领域详细设计。P0 与 P1-01～P1-03 最小实现已完成，见下方实施落点和 STATUS_PROJECT；完整多角色机制及效果指标仍待后续实现和评估。
 > 总体边界见 [架构总纲](DESIGN_RUNTIME_ARCHITECTURE.md)；环境历史见 [环境说明](ENV_LOCAL_SETUP.md)。动态规划、经验与路由见 [优化设计](DESIGN_ADAPTIVE_OPTIMIZATION.md)。
 > 当前执行顺序以 [优先级路线](PLAN_PRIORITY_ROADMAP.md) 为准；本文件第 13 节旧任务仅作追溯。文中 MVP 对应 P1：完整有界交接与确定性裁剪必做，delta、模型摘要、增量索引移至 P2。原始 Project Plan 仅为归档愿景。
+
+## 2026-09-27 实施落点：P1-02/P1-03
+
+当前最小实现见 [使用说明](USER_CODE_INTELLIGENCE_GUIDE.md)：`runner/internal/indexer` 提取 AST；`intelligence.py` 发布 versioned generation 与确定性检索；`memory.py` 保存 run 内来源与失效；`context.py` 按角色和预算组装；开启 intelligence 后 AgentLoop 每次实际调用都经过 Builder。后文更完整的 schema 和实验仍属于设计目标。
+
+本轮明确取舍：全量索引以不可变 JSON artifact 保存，SQLite 仅存 generation 指针，不提前拆节点/边表；词法扫描替代原先首选的 FTS5，返回 backend 名称，不声称启用全文数据库；结构展开限一跳。记忆按整个 snapshot/profile 保守失效并传播依赖，下次读取时更新 stale；无跨 run 复用。上下文使用 UTF-8 字节硬上限和保守 token 估计，真实 usage 尚未接入。四角色输出、交接、完整 diff 材料和角色写权限随 P1-04/P1-05 接入；本轮的 role 是材料视图，不代表角色 Agent 已运行。
+
+generation 只在完整解析输出通过路径/哈希校验后事务发布；partial 表示存在语法诊断，不等于截断输出。索引读操作中断可重新构建，每次调用仍扣 run 工具预算；它不进入可能产生写副作用的未知工具重放路径。
+
+技术依据：[Go parser](https://pkg.go.dev/go/parser)、[Go AST](https://pkg.go.dev/go/ast)。类型绑定、构建标签精确选择、完整调用图均未实现。
 
 建议审核顺序：先读第 1、2 节确认主线和规模，再读第 4～8 节审查关键机制，最后读第 10、12～14 节确认演示、评估与工作量。第 3、9 节是后续实现必须遵守的数据与恢复契约。
 
