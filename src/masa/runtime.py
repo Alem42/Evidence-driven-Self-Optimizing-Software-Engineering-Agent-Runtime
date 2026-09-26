@@ -42,7 +42,7 @@ class Runtime:
             profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None) -> str:
+    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False) -> str:
         """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
@@ -62,6 +62,8 @@ class Runtime:
                     "snapshot_id": snapshot_id, "manifest_ref": self.store.put(files),
                     "graph": graph.to_dict(), "budget": asdict(budget), "created_at": now,
                     "deadline_at": now + budget.deadline_seconds, "profile": self._profile()}
+            if intelligence:
+                data['intelligence'] = True
             if parent_run_id:
                 data["parent_run_id"] = parent_run_id
             self.store.create(run_id, data)
@@ -90,6 +92,13 @@ class Runtime:
                 verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
                 if not self.store.recover(run_id):
                     return self.store.run(run_id)
+                builder, index = None, None
+                if data.get('intelligence'):
+                    from masa.intelligence import Intelligence
+                    from masa.context import ContextBuilder
+                    engine = Intelligence(self.store, self.executor)
+                    index = engine.ensure(run_id)
+                    builder = ContextBuilder(self.store, engine)
                 if run["status"] == "paused":
                     self.store.clear_pause(run_id)
                 self.store.set_status(run_id, "running")
@@ -127,7 +136,7 @@ class Runtime:
                     try:
                         verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
                         if node.type == "agent":
-                            result = execute_agent(self.store, self.tools, self.provider, run_id, node, attempt_id)
+                            result = execute_agent(self.store, self.tools, self.provider, run_id, node, attempt_id, builder, index)
                             passed = all(r["status"] == "completed" and r["exit_code"] == 0 for r in result["tool_results"])
                         elif node.type == "tool":
                             known = self.tools.existing(run_id, node)

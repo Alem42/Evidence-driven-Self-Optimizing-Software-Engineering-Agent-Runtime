@@ -37,6 +37,12 @@ def parser():
     run.add_argument("--tool-timeout-ms", type=int, default=120000)
     run.add_argument("--pause-after", type=int, default=0)
     run.add_argument("--patch", type=Path, help="apply a controlled JSON patch before verification")
+    run.add_argument("--intelligence", action="store_true", help="include versioned Go evidence in each model context")
+    inspect = sub.add_parser("inspect", help="inspect Go syntax evidence and role context")
+    inspect.add_argument("run_id")
+    inspect.add_argument("--query", default="")
+    inspect.add_argument("--role", choices=['planner','developer','tester','reviewer','verifier'], default='developer')
+    inspect.add_argument("--budget-bytes", type=int, default=32000)
     for name in ("resume", "status", "events", "cancel", "report"):
         cmd = sub.add_parser(name)
         cmd.add_argument("run_id")
@@ -55,6 +61,17 @@ def main(argv=None) -> int:
             serve(args.state_dir, args.runner, args.go, PROJECT, args.port, args.open)
             return 0
         store = Store(args.state_dir)
+        if args.command == 'inspect':
+            from masa.context import ContextBuilder
+            from masa.intelligence import Intelligence
+            from masa.locking import owner_lock
+            engine = Intelligence(store, Runner(args.runner, args.go))
+            with owner_lock(store.root / 'runtime.lock'):
+                index = engine.ensure(args.run_id)
+                search = engine.search(args.run_id, index, args.query)
+                context, manifest = ContextBuilder(store, engine).build(args.run_id, index, args.role, args.query, budget_bytes=args.budget_bytes)
+            print(json.dumps({'index':index, 'search':search, 'context':context, 'manifest':manifest}, ensure_ascii=False, indent=2))
+            return 0
         if args.command in {"run", "resume"}:
             if args.pause_after < 0:
                 raise MasaError("pause-after must not be negative")
@@ -62,7 +79,7 @@ def main(argv=None) -> int:
             if args.command == "run":
                 budget = Budget(model_calls=args.model_calls, tool_calls=args.tool_calls,
                                 deadline_seconds=args.deadline_seconds, tool_timeout_ms=args.tool_timeout_ms)
-                run_id = runtime.create(args.repo, args.goal, budget, args.operation)
+                run_id = runtime.create(args.repo, args.goal, budget, args.operation, intelligence=args.intelligence)
                 print(f"run_id={run_id}", file=sys.stderr, flush=True)
                 if args.patch:
                     # 补丁先发布新快照，再让验证图执行；用户源仓库不参与写入。

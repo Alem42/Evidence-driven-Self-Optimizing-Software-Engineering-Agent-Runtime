@@ -54,6 +54,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS patches (
               run_id TEXT PRIMARY KEY REFERENCES runs(id), status TEXT NOT NULL,
               request_ref TEXT NOT NULL, result_ref TEXT);
+            CREATE TABLE IF NOT EXISTS code_indexes (
+              run_id TEXT REFERENCES runs(id), generation TEXT, artifact_ref TEXT NOT NULL,
+              PRIMARY KEY(run_id,generation));
+            CREATE TABLE IF NOT EXISTS memories (
+              id TEXT PRIMARY KEY, run_id TEXT REFERENCES runs(id), snapshot_id TEXT NOT NULL,
+              profile_id TEXT NOT NULL, status TEXT NOT NULL, artifact_ref TEXT NOT NULL);
             PRAGMA user_version=1;
         """)
 
