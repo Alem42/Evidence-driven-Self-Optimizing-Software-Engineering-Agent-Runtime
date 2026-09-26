@@ -31,6 +31,17 @@ def render(store, run_id: str) -> str:
             lines += [f"Snapshot: `{change['before_snapshot']}` → `{change['snapshot_id']}`",
                       f"Result artifact: `{patch['result_ref']}`",
                       "Files: " + ", ".join(f"`{f['path']}`" for f in change['files'])]
+    # 上下文报告引用实际输入清单，不从模型摘要推断覆盖率。
+    # Report actual input manifests instead of inferring coverage from model summaries.
+    context_events = [e for e in store.events(run_id) if e['type'] == 'context_built']
+    if context_events:
+        lines += ['', '## Evidence context', '']
+        for event in context_events:
+            ref = event['payload']['manifest_ref']
+            context = store.read(ref)
+            lines.append(f"- {context['role']}: {context['input_bytes']}/{context['budget_bytes']} UTF-8 bytes; "
+                         f"included={len(context['included'])}, omitted={len(context['omitted'])}; manifest `{ref}`")
+        lines += ['Syntax candidates only; byte estimates are not measured model tokens.']
     lines += ["", "## Scope", "", "This run verifies only its selected Go operation in a copied workspace. "
               "It does not generate patches, run multiple agents, or prove hidden acceptance tests passed.", ""]
     return "\n".join(lines)

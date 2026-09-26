@@ -26,11 +26,12 @@ class Console:
         Store(self.root).close()
 
     def bootstrap(self):
+        """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
         return {"default_repo": str(self.project / "tests/fixtures/go-pass"),
                 "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
                 "active_run": self.active, "provider": "scripted-v1", "capabilities": {
                     "execute": True, "graph": True, "node_pause": True, "revise_as_new_run": True,
-                    "code_edit": False, "live_llm": False, "multi_agent": False}}
+                    "code_edit": False, "live_llm": False, "multi_agent": False, "code_intelligence": True}}
 
     def list_runs(self):
         store = Store(self.root)
@@ -96,6 +97,7 @@ class Console:
         return budget
 
     def create(self, body, parent=None):
+        """创建隔离任务并选择是否使用证据上下文。 Create an isolated run with optional evidence context."""
         with self.lock:
             self._available()
             store = Store(self.root)
@@ -109,7 +111,8 @@ class Console:
                     raise MasaError("unsupported operation")
                 budget = self._budget(body)
                 runtime = Runtime(store, Runner(self.runner_path, self.go_path))
-                rid = runtime.create(Path(source), goal, budget, operation, parent_run_id=parent)
+                rid = runtime.create(Path(source), goal, budget, operation, parent_run_id=parent,
+                                     intelligence=body.get('intelligence') is True)
             finally:
                 store.close()
             self._launch(rid, 1 if body.get("pause_after") is True else 0)

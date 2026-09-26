@@ -1,6 +1,5 @@
 """真实索引、检索与上下文有效性验收。 Real indexing, retrieval, and context-validity acceptance."""
 
-import json
 import os
 from pathlib import Path
 import shutil
@@ -11,12 +10,11 @@ from unittest.mock import patch
 from masa.adapters.runner import Runner
 from masa.adapters.sqlite import Store
 from masa.context import ContextBuilder
-from masa.domain import Budget, MasaError, digest
+from masa.domain import Budget, MasaError
 from masa.intelligence import Intelligence
 from masa.memory import Memory
 from masa.patching import Patches
 from masa.runtime import Runtime
-from masa.workspace import manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 
