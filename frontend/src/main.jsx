@@ -3,21 +3,13 @@ import {createRoot} from 'react-dom/client';
 import {api} from './api';
 import {SettingsDialog} from './SettingsDialog';
 import './style.css';
+import {WorkflowGraph} from './WorkflowGraph';
 
 const labels = {created:'已创建',running:'执行中',pending:'待执行',succeeded:'已通过',failed:'失败',paused:'已暂停',cancelled:'已取消',needs_attention:'需人工检查',skipped:'已跳过',recorded:'已记录',intent:'等待结果'};
 const terminal = ['succeeded','failed','cancelled','needs_attention'];
 const pretty = value => JSON.stringify(value,null,2);
 function Badge({value}) {return <span className={'badge '+value}>{labels[value] || value}</span>;}
 function Json({value}) {return <pre>{typeof value === 'string' ? value : pretty(value)}</pre>;}
-
-function Graph({detail, selected, onSelect}) {
-  const nodes = detail.run.data.graph.nodes;
-  const positions = Object.fromEntries(nodes.map((n,i)=>[n.id,{x:40+i*260,y:70}]));
-  return <div className="graph-scroll"><div className="graph" style={{width:Math.max(600,nodes.length*260+40)}}>
-    <svg width="100%" height="220" aria-label="节点依赖连线"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8ba59f"/></marker></defs>{nodes.flatMap(n=>n.dependencies.map(dep=><path key={dep+n.id} d={'M '+(positions[dep].x+210)+' 112 L '+positions[n.id].x+' 112'} stroke="#8ba59f" strokeWidth="2" markerEnd="url(#arrow)"/>))}</svg>
-    {nodes.map((n,i)=>{const step=detail.steps.find(s=>s.id===n.id); return <button key={n.id} className={'node '+(selected===n.id?'selected ':'')+(step?.status || '')} style={{left:positions[n.id].x,top:70}} onClick={()=>onSelect(selected===n.id?'':n.id)}><span className="node-top">{String(i+1).padStart(2,'0')} / {n.type.toUpperCase()} <Badge value={step?.status}/></span><strong>{n.id}</strong><small>{n.type==='gate'?'独立证据验收':n.operation}</small></button>;})}
-  </div></div>;
-}
 
 // App 管理任务与证据上下文开关。 App manages tasks and the evidence-context option.
 function App() {
@@ -44,7 +36,7 @@ function App() {
     {!run?<section className="empty panel"><div className="eyebrow">YOUR FIRST RUN</div><h2>{id?'正在读取运行记录…':'让每一步执行都有迹可循。'}</h2><p>输入目标，运行 Go 工具链，在这里查看图、决策记录与验证证据。</p><button className="primary" disabled={!boot||!!active||busy} onClick={()=>act(()=>start({...form,repo:boot.default_repo}))}>运行 Go 示例 →</button></section>:<>
     <section className="run-heading"><div><div className="eyebrow">RUN / {id.slice(0,12)}</div><h2>{data.goal}</h2><p className="path">{data.source}</p></div><Badge value={run.status}/></section>
     <div className="metrics"><div><small>节点进度</small><strong>{detail.steps.filter(s=>['succeeded','failed','skipped'].includes(s.status)).length}<em> / {detail.steps.length}</em></strong></div><div><small>模型调用</small><strong>{run.model_calls}<em> / {data.budget.model_calls}</em></strong></div><div><small>工具调用</small><strong>{run.tool_calls}<em> / {data.budget.tool_calls}</em></strong></div><div><small>事件记录</small><strong>{detail.event_count}<em> 条</em></strong></div></div>
-    <section className="panel"><div className="panel-head"><div><h3>Workflow Graph</h3><small>v{data.graph.version} · {data.graph.policy_version} · 点击节点筛选记录</small></div><div className="actions"><label className="check"><input type="checkbox" checked={autoAdvance} disabled={!!active} onChange={e=>setAutoAdvance(e.target.checked)}/> 继续时自动推进</label><button disabled={busy||!detail.active||detail.pause_requested||run.status!=='running'} onClick={()=>act(()=>api('/runs/'+id+'/pause',{}))}>{detail.pause_requested?'等待节点结束…':'暂停'}</button><button disabled={busy||!!active||!['paused','created','running'].includes(run.status)} onClick={()=>act(()=>api('/runs/'+id+'/resume',{pause_after:!autoAdvance}))}>继续</button><button disabled={busy||terminal.includes(run.status)} onClick={()=>act(()=>api('/runs/'+id+'/cancel',{}))}>取消</button><button disabled={busy||!!active||!['paused',...terminal].includes(run.status)} onClick={revise}>修改需求</button></div></div><Graph detail={detail} selected={node} onSelect={setNode}/><div className="graph-foot"><span><i className="dot online"/> 已通过 <i className="dot working"/> 执行中 <i className="dot"/> 待执行</span><span>暂停在节点边界生效 · 工具输出完成后入库</span></div></section>
+    <section className="panel"><div className="panel-head"><div><h3>Workflow Graph</h3><small>v{data.graph.version} · {data.graph.policy_version} · 点击节点筛选记录</small></div><div className="actions"><label className="check"><input type="checkbox" checked={autoAdvance} disabled={!!active} onChange={e=>setAutoAdvance(e.target.checked)}/> 继续时自动推进</label><button disabled={busy||!detail.active||detail.pause_requested||run.status!=='running'} onClick={()=>act(()=>api('/runs/'+id+'/pause',{}))}>{detail.pause_requested?'等待节点结束…':'暂停'}</button><button disabled={busy||!!active||!['paused','created','running'].includes(run.status)} onClick={()=>act(()=>api('/runs/'+id+'/resume',{pause_after:!autoAdvance}))}>继续</button><button disabled={busy||terminal.includes(run.status)} onClick={()=>act(()=>api('/runs/'+id+'/cancel',{}))}>取消</button><button disabled={busy||!!active||!['paused',...terminal].includes(run.status)} onClick={revise}>修改需求</button></div></div><WorkflowGraph detail={detail} selected={node} onSelect={setNode}/><div className="graph-foot"><span><i className="dot online"/> 已通过 <i className="dot working"/> 执行中 <i className="dot"/> 待执行</span><span>连线表示依赖，当前串行执行 · 暂停在节点边界生效</span></div></section>
     {(run.reason||detail.worker_error)&&<div className="notice">{detail.worker_error||run.reason}</div>}
     <section className="panel evidence"><div className="tabs">{[['events','执行时间线'],['decisions','Agent 决策'],['tools','工具证据'],['state','运行详情']].map(([key,label])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{label}</button>)}<button className="report" onClick={()=>act(async()=>setInspection({title:'运行报告',value:(await api('/runs/'+id+'/report')).markdown}))}>查看报告 ↗</button></div>
       {node&&<div className="filter">筛选节点：{node}<button onClick={()=>setNode('')}>显示全部 ×</button>{chosen?.result_ref&&<button onClick={()=>act(()=>inspect(chosen.result_ref))}>查看节点结果</button>}</div>}
