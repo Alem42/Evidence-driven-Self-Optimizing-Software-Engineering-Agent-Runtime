@@ -20,7 +20,8 @@
 | P0-04 | done | Go stdio runner，真实 test/vet/fmt check，Windows 进程树清理 |
 | P0-05 | done | 工具账本、scripted loop、预算、取消、单模型路由记录 |
 | P0-06 | done | 节点边界恢复、已落盘结果复用、未知结果禁止重放、CLI 报告；回归通过 |
-| P1-01～P1-08 | todo | 核心 demo 尚未实现 |
+| P1-01 | in_progress | 本轮：Go 样例、任务契约、受控补丁与恢复；基线提交 fcc8d6e |
+| P1-02～P1-08 | todo | 后续核心 demo |
 | UI-01 | in_progress | React 控制台实现、构建、HTTP 验收通过；浏览器视觉与点击验收待完成 |
 | P2-01～P2-05 | deferred | 先交付 P1，按数据与预算选择优化 |
 | P3 扩展 | deferred | 无默认实现任务 |
