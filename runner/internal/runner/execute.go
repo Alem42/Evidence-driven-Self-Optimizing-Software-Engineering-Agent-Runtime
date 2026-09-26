@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"masa.local/runner/internal/indexer"
 )
 
 type Config struct{ Workspace, GoExecutable string }
@@ -63,6 +66,24 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 	}
 	if _, err := os.Stat(filepath.Join(cfg.Workspace, "go.mod")); err != nil {
 		return Failure(req, "rejected", fmt.Errorf("go.mod is required"))
+	}
+	// 索引复用进程隔离与时限，但不启动 Go 编译器。 Indexing reuses containment and deadlines without compilation.
+	if req.Operation == "go_index" {
+		index, err := indexer.Scan(ctx, cfg.Workspace)
+		if err != nil {
+			return Failure(req, "internal_error", err)
+		}
+		raw, err := json.Marshal(index)
+		if err != nil {
+			return Failure(req, "internal_error", err)
+		}
+		// 不发布截断 JSON，调用方必须知道没有完整 generation。
+		// Never publish truncated JSON as an index generation.
+		if len(raw) > req.MaxOutputBytes {
+			return Failure(req, "rejected", fmt.Errorf("index output limit exceeded"))
+		}
+		code := 0
+		return Result{ProtocolVersion: 1, RequestID: req.RequestID, SnapshotID: req.SnapshotID, Status: "completed", ExitCode: &code, Stdout: string(raw), DurationMS: time.Since(start).Milliseconds()}
 	}
 	exe := cfg.GoExecutable
 	var args []string

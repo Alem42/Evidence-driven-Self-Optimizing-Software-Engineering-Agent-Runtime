@@ -53,7 +53,7 @@ func (r Request) Validate() error {
 	if r.ProtocolVersion != 1 || r.RequestID == "" || len(r.RequestID) > 128 || r.SnapshotID == "" {
 		return fmt.Errorf("invalid protocol, request ID, or snapshot")
 	}
-	if r.Operation != "go_test" && r.Operation != "go_vet" && r.Operation != "go_fmt_check" {
+	if r.Operation != "go_test" && r.Operation != "go_vet" && r.Operation != "go_fmt_check" && r.Operation != "go_index" {
 		return fmt.Errorf("operation is not allowed")
 	}
 	if r.TimeoutMS < 1 || r.TimeoutMS > 120000 || r.MaxOutputBytes < 1 || r.MaxOutputBytes > 1048576 {
