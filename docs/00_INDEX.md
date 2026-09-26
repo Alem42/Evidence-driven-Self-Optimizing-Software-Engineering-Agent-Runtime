@@ -47,6 +47,8 @@
 
 ## 给下一轮 LLM 的启动语句
 
+下一次核心更新切片见 [PLAN_NEXT_MAJOR_UPDATE](PLAN_NEXT_MAJOR_UPDATE.md)；最新小型整理见 [PROGRESS_2026-09-27_003_small-cleanup](progress/PROGRESS_2026-09-27_003_small-cleanup.md)。
+
 > 请先阅读 docs/LLM_IMPLEMENTATION_GUIDE.md、docs/STATUS_PROJECT.md 和 docs/PLAN_PRIORITY_ROADMAP.md，检查实际文件状态，再从当前最早未完成且依赖满足的任务开始。按阶段实现，不自动引入 P2/P3。每轮结束更新状态并生成 docs/progress 下的用户进展报告。若本轮只要求设计或审查，不启动代码实现。
 
 集中放在 docs 的入口不会自动约束一个完全没有读取它的工具。后续会话应显式引用上述入口；本轮没有为了自动发现而在根目录另放 AGENTS.md，以保持所有项目 Markdown 集中存放。

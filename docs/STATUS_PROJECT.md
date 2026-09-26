@@ -34,6 +34,8 @@
 
 ## 下一项工作
 
+2026-09-27 小型整理已完成：图依赖分层、workflow 模板归位、请求参数严格校验、跨任务取消回归。最新 Python 全套 61 项测试、前端布局 2 项测试和构建通过；本轮无付费调用，未重启现有服务。下一次大更新按 [PLAN_NEXT_MAJOR_UPDATE](PLAN_NEXT_MAJOR_UPDATE.md) 分段实施。
+
 下一核心任务 P1-04：复用 AgentLoop，接入四角色输出及有界定向交接、receipt 去重；随后 P1-05 增加受约束图修复。先读 DESIGN_INTELLIGENCE_CONTEXT 第 8 节和 DESIGN_ADAPTIVE_OPTIMIZATION。role 视图不是已经实现四角色协作；不得把当前 Developer 上下文直接当作已开放写权限。
 
 本轮使用说明：[USER_LIVE_LLM_GUIDE](USER_LIVE_LLM_GUIDE.md)，协议边界：[DESIGN_MODEL_PROVIDER](DESIGN_MODEL_PROVIDER.md)。继续中英文注释和按增量 commit。下一轮可连续推进 P1-04 与其后依赖任务；不要重复花费额度证明本轮已验收的接线。
@@ -46,7 +48,7 @@
 
 ## 最新报告与接续日志
 
-最新报告：[PROGRESS_2026-09-27_002_live-llm-console](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
+最新报告：[PROGRESS_2026-09-27_003_small-cleanup](progress/PROGRESS_2026-09-27_003_small-cleanup.md)。真实模型验收见上一份 [DeepSeek 进展](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
 
 本轮真实模型 run：`72e84c19c6f34386ae9b422c7a3f2198`（复杂 Go 样例，完整验证 succeeded，6 model / 4 tool）；`c04e167a7a0641738aea9979b5639224`（Todo 原始缺陷，预期 failed，2 model / 2 tool）。含探测合计 17,246 tokens，按峰时未命中缓存价格估算 ¥0.163098，实扣未知。本轮服务地址 `http://127.0.0.1:8766`；默认 API 配置已就绪，重启前连接测试记录不会持久化。仅验证真实推理接线，未评价代码修复能力。
 

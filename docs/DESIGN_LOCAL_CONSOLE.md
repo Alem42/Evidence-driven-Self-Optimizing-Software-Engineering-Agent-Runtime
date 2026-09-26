@@ -10,7 +10,7 @@
 - Vite 构建到 `src/masa/web/static`。构建产物作为 Python package data 分发。普通用户只启动 Python；前端开发者需要 Node/npm。当前无独立开发服务器流程，修改后构建并刷新。
 - `web/server.py` 负责 HTTP 与访问约束，`web/service.py` 负责用例和后台执行，`web/settings.py` 隔离配置。HTTP 不直接操作 runner 或执行任意命令。
 - 每个 HTTP 请求及工作线程独立建立 SQLite 连接。详情读取使用读事务；单服务只允许一个 worker，全局 runtime owner lock 继续约束其他 CLI/服务进程。
-- Graph 展示直接读取 GraphSpec 的节点与依赖。目前为按声明顺序的横向布局，适合小图；后续节点数量增长时单独替换布局组件，不修改后端合同。
+- Graph 展示直接读取 GraphSpec 的节点与依赖。WorkflowGraph 组件使用独立 graphLayout 按依赖分层，适合小图；同层不表示并行执行。后续可单独替换布局，不修改后端合同。完整验证模板位于 Python workflow 层，由 Web 选择。
 
 ## HTTP 合同
 
