@@ -10,6 +10,9 @@
 
 | 文件 | 用途 | 读者 |
 |---|---|---|
+| [USER_P1_PATCH_QUICKSTART.md](USER_P1_PATCH_QUICKSTART.md) | 受控补丁示例、JSON 格式与恢复边界 | 当前代码使用 |
+| [USER_GO_TODO_CONTRACT.md](USER_GO_TODO_CONTRACT.md) | Go Todo 修复契约与代码阅读顺序 | 用户与 LLM |
+| [progress/PROGRESS_2026-09-26_004_controlled-patches.md](progress/PROGRESS_2026-09-26_004_controlled-patches.md) | P1-01 受控写入与恢复验收 | 最新进展 |
 | [USER_CONSOLE_GUIDE.md](USER_CONSOLE_GUIDE.md) | React 控制台启动、任务监控、人工修改与 API 设置 | 浏览器使用入口 |
 | [DESIGN_LOCAL_CONSOLE.md](DESIGN_LOCAL_CONSOLE.md) | 本地 HTTP、React、凭据与运行边界 | 控制台开发 |
 | [progress/PROGRESS_2026-09-26_003_react-console.md](progress/PROGRESS_2026-09-26_003_react-console.md) | React 控制台实现与验收边界 | 最新进展 |
