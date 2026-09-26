@@ -1,0 +1,55 @@
+"""The scheduler consumes graph data, not a hard-coded role sequence."""
+
+from masa.domain import Graph, MasaError, Node, OPERATIONS, TERMINAL
+
+
+def default_policy(operation: str = "go_test") -> Graph:
+    graph = Graph((Node("verify", "agent", operation=operation),
+                   Node("gate", "gate", ("verify",), "all_terminal")))
+    validate(graph)
+    return graph
+
+
+def validate(graph: Graph) -> None:
+    if not 1 <= len(graph.nodes) <= 24 or graph.version < 1:
+        raise MasaError("invalid graph size/version")
+    nodes = {n.id: n for n in graph.nodes}
+    if len(nodes) != len(graph.nodes) or any(not n.id for n in graph.nodes):
+        raise MasaError("node IDs must be nonempty and unique")
+    gates = [n for n in graph.nodes if n.type == "gate"]
+    if len(gates) != 1:
+        raise MasaError("exactly one final gate is required")
+    for n in graph.nodes:
+        if n.type not in {"agent", "tool", "gate"} or n.operation not in OPERATIONS:
+            raise MasaError("unknown node type or operation")
+        if n.trigger not in {"all_succeeded", "all_terminal"}:
+            raise MasaError("unknown dependency trigger")
+        if len(set(n.dependencies)) != len(n.dependencies):
+            raise MasaError("duplicate dependency")
+        if any(d not in nodes or d == n.id for d in n.dependencies):
+            raise MasaError("unknown or self dependency")
+        if n.type != "gate" and n.trigger != "all_succeeded":
+            raise MasaError("only gate nodes can consume failed dependencies")
+    ordered: set[str] = set()
+    while len(ordered) < len(nodes):
+        ready = [n.id for n in graph.nodes if n.id not in ordered
+                 and set(n.dependencies) <= ordered]
+        if not ready:
+            raise MasaError("workflow contains a cycle")
+        ordered.update(ready)
+    gate = gates[0]
+    ancestors: set[str] = set()
+    frontier = list(gate.dependencies)
+    while frontier:
+        item = frontier.pop()
+        if item not in ancestors:
+            ancestors.add(item)
+            frontier.extend(nodes[item].dependencies)
+    if gate.trigger != "all_terminal" or ancestors != set(nodes) - {gate.id}:
+        raise MasaError("final gate must cover all other nodes")
+
+
+def ready_nodes(graph: Graph, states: dict[str, str]) -> list[Node]:
+    return [n for n in graph.nodes if states[n.id] == "pending"
+            and all(states[d] in (TERMINAL if n.trigger == "all_terminal"
+                                  else {"succeeded"}) for d in n.dependencies)]

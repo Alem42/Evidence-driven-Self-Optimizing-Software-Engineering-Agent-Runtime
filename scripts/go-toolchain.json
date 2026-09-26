@@ -1,0 +1,9 @@
+﻿{
+    "filename":  "go1.27.1.windows-amd64.zip",
+    "os":  "windows",
+    "arch":  "amd64",
+    "version":  "go1.27.1",
+    "sha256":  "a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d",
+    "size":  78931360,
+    "kind":  "archive"
+}
