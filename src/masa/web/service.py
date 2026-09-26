@@ -6,10 +6,11 @@ import threading
 
 from masa.adapters.runner import Runner
 from masa.adapters.sqlite import Store
-from masa.domain import Budget, Graph, Node, MasaError, OPERATIONS
+from masa.domain import Budget, MasaError, OPERATIONS
 from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
+from masa.workflow import full_verification_policy
 
 
 class Console:
@@ -153,6 +154,13 @@ class Console:
         """创建隔离任务并选择是否使用证据上下文。 Create an isolated run with optional evidence context."""
         with self.lock:
             self._available()
+            # 先校验传输层选项，禁止拼写错误静默变成离线运行。
+            # Validate transport options before side effects; never silently downgrade a mistyped provider.
+            if body.get("provider", "scripted") not in {"scripted", "live"}:
+                raise MasaError("unsupported provider; choose scripted or live")
+            for flag in ("full_checks", "pause_after", "intelligence"):
+                if flag in body and type(body[flag]) is not bool:
+                    raise MasaError(flag + " must be boolean")
             store = Store(self.root)
             try:
                 source = body.get("repo", "")
@@ -175,22 +183,7 @@ class Console:
                 runtime = Runtime(
                     store, Runner(self.runner_path, self.go_path), provider
                 )
-                graph = None
-                if body.get("full_checks"):
-                    graph = Graph(
-                        (
-                            Node("test", "agent", operation="go_test"),
-                            Node("vet", "agent", operation="go_vet"),
-                            Node("format", "agent", operation="go_fmt_check"),
-                            Node(
-                                "gate",
-                                "gate",
-                                ("test", "vet", "format"),
-                                "all_terminal",
-                            ),
-                        ),
-                        policy_version="full-verification-v1",
-                    )
+                graph = full_verification_policy() if body.get("full_checks") else None
                 rid = runtime.create(
                     Path(source),
                     goal,
@@ -268,8 +261,9 @@ class Console:
                     store.request_pause(rid)
                 else:
                     store.cancel(rid)
-                    # A paused or detached run has no worker to observe cancellation.
-                    if self.active is None:
+                    # 另一个任务的 worker 不会处理本任务的取消。
+                    # A different run's worker cannot observe this run's cancellation.
+                    if self.active != rid:
                         store.set_status(rid, "cancelled", "cancellation_requested")
             finally:
                 store.close()

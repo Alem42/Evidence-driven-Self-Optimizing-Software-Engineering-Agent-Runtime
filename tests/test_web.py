@@ -153,3 +153,35 @@ class WebTests(unittest.TestCase):
             self.request('/api/runs/'+rid+'/resume', {})
             self.assertEqual(self.wait_run(rid)['run']['status'], 'succeeded')
             self.assertEqual(executor.calls, 3)
+
+    def test_invalid_run_options_have_no_side_effects(self):
+        """错误配置不得创建运行或降级 provider。 Invalid options must not create runs or downgrade providers."""
+        for extra in ({'provider': 'lve'}, {'full_checks': 'false'}, {'intelligence': 1}, {'pause_after': None}):
+            status, _ = self.request('/api/runs', {'repo': str(self.source), 'goal': 'invalid', **extra})
+            self.assertEqual(status, 400)
+        self.assertEqual(self.console.list_runs(), [])
+        self.assertIsNone(self.console.active)
+
+    def test_cancel_paused_run_while_another_worker_is_active(self):
+        """取消旧任务不依赖另一个 worker，也不取消新任务。 Cancelling a paused run must not affect another worker."""
+        entered, release = threading.Event(), threading.Event()
+        class BlockingExecutor(FakeExecutor):
+            def execute(self, *args):
+                """阻塞第二次调用以观察并发控制。 Block the second call to inspect concurrent control."""
+                if self.calls == 1:
+                    entered.set()
+                    release.wait(5)
+                return super().execute(*args)
+        with patch('masa.web.service.Runner', return_value=BlockingExecutor()):
+            body = {'repo': str(self.source), 'goal': 'verify', 'pause_after': True}
+            first = self.request('/api/runs', body)[1]['id']
+            self.assertEqual(self.wait_run(first)['run']['status'], 'paused')
+            second = self.request('/api/runs', {**body, 'pause_after': False})[1]['id']
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertEqual(self.request('/api/runs/'+first+'/cancel', {})[0], 200)
+                self.assertEqual(self.request('/api/runs/'+first)[1]['run']['status'], 'cancelled')
+                self.assertFalse(self.request('/api/runs/'+second)[1]['run']['cancel_requested'])
+            finally:
+                release.set()
+            self.assertEqual(self.wait_run(second)['run']['status'], 'succeeded')

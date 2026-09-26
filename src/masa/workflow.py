@@ -4,8 +4,20 @@ from masa.domain import Graph, MasaError, Node, OPERATIONS, TERMINAL
 
 
 def default_policy(operation: str = "go_test") -> Graph:
+    """构建并校验单检查图。 Build and validate a single-check graph."""
     graph = Graph((Node("verify", "agent", operation=operation),
                    Node("gate", "gate", ("verify",), "all_terminal")))
+    validate(graph)
+    return graph
+
+
+def full_verification_policy() -> Graph:
+    """集中定义完整验证模板，供任意入口复用。 Centralize the full-check template for all entry points."""
+    graph = Graph((Node('test', 'agent', operation='go_test'),
+                   Node('vet', 'agent', operation='go_vet'),
+                   Node('format', 'agent', operation='go_fmt_check'),
+                   Node('gate', 'gate', ('test', 'vet', 'format'), 'all_terminal')),
+                  policy_version='full-verification-v1')
     validate(graph)
     return graph
 
