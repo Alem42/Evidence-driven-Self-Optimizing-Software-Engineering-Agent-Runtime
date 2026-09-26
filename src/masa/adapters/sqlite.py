@@ -50,6 +50,9 @@ class Store:
             CREATE INDEX IF NOT EXISTS events_run ON events(run_id,seq);
             CREATE TABLE IF NOT EXISTS run_controls (
               run_id TEXT PRIMARY KEY REFERENCES runs(id), pause_requested INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS patches (
+              run_id TEXT PRIMARY KEY REFERENCES runs(id), status TEXT NOT NULL,
+              request_ref TEXT NOT NULL, result_ref TEXT);
             PRAGMA user_version=1;
         """)
 

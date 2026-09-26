@@ -17,6 +17,7 @@ PROJECT = Path(__file__).resolve().parents[2]
 
 
 def parser():
+    """定义命令和显式权限参数。 Define commands and explicit operation parameters."""
     p = argparse.ArgumentParser(prog="masa", description="MASA P0: offline, evidence-backed Go verification")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--state-dir", type=Path, default=PROJECT / ".masa")
@@ -35,6 +36,7 @@ def parser():
     run.add_argument("--deadline-seconds", type=int, default=300)
     run.add_argument("--tool-timeout-ms", type=int, default=120000)
     run.add_argument("--pause-after", type=int, default=0)
+    run.add_argument("--patch", type=Path, help="apply a controlled JSON patch before verification")
     for name in ("resume", "status", "events", "cancel", "report"):
         cmd = sub.add_parser(name)
         cmd.add_argument("run_id")
@@ -44,6 +46,7 @@ def parser():
 
 
 def main(argv=None) -> int:
+    """装配应用并输出可诊断结果。 Compose the application and return diagnostic results."""
     args = parser().parse_args(argv)
     store = None
     try:
@@ -61,6 +64,11 @@ def main(argv=None) -> int:
                                 deadline_seconds=args.deadline_seconds, tool_timeout_ms=args.tool_timeout_ms)
                 run_id = runtime.create(args.repo, args.goal, budget, args.operation)
                 print(f"run_id={run_id}", file=sys.stderr, flush=True)
+                if args.patch:
+                    # 补丁先发布新快照，再让验证图执行；用户源仓库不参与写入。
+                    # Publish the patched snapshot before verification; never write to the source repo.
+                    from masa.patching import Patches
+                    Patches(store).apply(run_id, json.loads(args.patch.read_text(encoding="utf-8")))
             else:
                 run_id = args.run_id
             result = runtime.execute(run_id, args.pause_after)
@@ -77,7 +85,7 @@ def main(argv=None) -> int:
         else:
             print(json.dumps({"run": store.run(args.run_id), "steps": store.steps(args.run_id)}, ensure_ascii=False, indent=2))
         return 0
-    except (MasaError, OSError) as exc:
+    except (MasaError, OSError, ValueError) as exc:
         print(f"masa: {exc}", file=sys.stderr)
         return 2
     finally:

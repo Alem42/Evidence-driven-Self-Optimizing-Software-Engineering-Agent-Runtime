@@ -10,6 +10,7 @@ from masa.adapters.model import ScriptedProvider
 from masa.agent import execute_agent
 from masa.domain import Budget, Graph, MasaError, TERMINAL
 from masa.locking import owner_lock
+from masa.patching import Patches
 from masa.tools import Tools
 from masa.workflow import default_policy, ready_nodes, validate
 from masa.workspace import copy_snapshot, verify_snapshot
@@ -17,12 +18,14 @@ from masa.workspace import copy_snapshot, verify_snapshot
 
 class Runtime:
     def __init__(self, store, executor, provider=None):
+        """装配运行时依赖。 Assemble runtime dependencies."""
         self.store = store
         self.executor = executor
         self.provider = provider or ScriptedProvider()
         self.tools = Tools(store, executor)
 
     def _profile(self) -> dict:
+        """绑定工具链与策略身份。 Bind evidence to toolchain and policy identity."""
         # Bind evidence to the exact tool binaries and our fixed execution policy.
         import os
         profile = {"platform": os.name, "runner_protocol": 1,
@@ -40,6 +43,7 @@ class Runtime:
         return profile
 
     def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None) -> str:
+        """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
             raise MasaError("goal must be nonempty and at most 16000 characters")
@@ -67,11 +71,16 @@ class Runtime:
         return run_id
 
     def execute(self, run_id: str, pause_after: int = 0) -> dict:
+        """持锁恢复并调度图，依据证据结束。 Recover and schedule under lock, then finalize from evidence."""
         with owner_lock(self.store.root / "runtime.lock"):
             run = self.store.run(run_id)
             if run["status"] in {"succeeded", "failed", "cancelled", "needs_attention"}:
                 return run
             try:
+                # 必须先核对未完成补丁，再按已发布快照校验工具证据。
+                # Reconcile pending writes before validating evidence against the published snapshot.
+                Patches(self.store).recover(run_id)
+                run = self.store.run(run_id)
                 data = run["data"]
                 graph = Graph.from_dict(data["graph"])
                 validate(graph)
@@ -112,6 +121,8 @@ class Runtime:
                     if not ready:
                         raise MasaError("graph_stalled: no ready node and no final Gate")
                     node = ready[0]
+                    # 先写 attempt 再执行，确保中断后可以识别未完成节点。
+                    # Persist the attempt before execution so recovery can identify unfinished nodes.
                     attempt_id = self.store.start(run_id, node.id)
                     try:
                         verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
@@ -150,6 +161,7 @@ class Runtime:
             return self.store.run(run_id)
 
     def _gate(self, run_id: str, graph: Graph, snapshot: str) -> tuple[bool, dict]:
+        """独立核对当前快照和工具账本。 Independently verify the current snapshot and tool ledger."""
         steps = {s["id"]: s for s in self.store.steps(run_id)}
         checks = [n for n in graph.nodes if n.type != "gate"]
         passed = True

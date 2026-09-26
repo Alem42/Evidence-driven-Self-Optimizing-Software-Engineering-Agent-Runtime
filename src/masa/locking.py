@@ -9,6 +9,7 @@ from masa.domain import MasaError
 
 @contextmanager
 def owner_lock(path: Path):
+    """获取非阻塞进程锁，异常退出由 OS 释放。 Acquire a nonblocking lock released by the OS on death."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         handle.seek(0, 2)
@@ -17,6 +18,8 @@ def owner_lock(path: Path):
             handle.flush()
         handle.seek(0)
         try:
+            # 锁住文件的首字节；文件存在本身不代表锁仍被持有。
+            # Lock the first byte; the lock file's existence does not imply ownership.
             if os.name == "nt":
                 import msvcrt
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
