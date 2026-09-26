@@ -1,6 +1,5 @@
 """补丁行为与崩溃恢复验收。 Patch behavior and crash-recovery acceptance tests."""
 
-import hashlib
 from pathlib import Path
 import tempfile
 import unittest

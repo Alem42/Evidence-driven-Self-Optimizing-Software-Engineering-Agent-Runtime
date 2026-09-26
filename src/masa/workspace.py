@@ -14,6 +14,7 @@ MAX_FILES = 4000
 
 
 def manifest(root: Path) -> dict[str, str]:
+    """生成有界文件哈希清单并拒绝链接。 Build a bounded hash manifest and reject links."""
     if root.is_symlink() or root.is_junction() or not root.is_dir():
         raise MasaError("workspace must be a real directory")
     entries: dict[str, str] = {}
@@ -38,6 +39,7 @@ def manifest(root: Path) -> dict[str, str]:
 
 
 def copy_snapshot(source: Path, destination: Path) -> tuple[str, dict[str, str]]:
+    """复制并核对源及副本一致性。 Copy sources and verify both source and copy identities."""
     source = source.absolute()
     if source.is_symlink() or source.is_junction():
         raise MasaError("source may not be a link")
@@ -59,5 +61,6 @@ def copy_snapshot(source: Path, destination: Path) -> tuple[str, dict[str, str]]
 
 
 def verify_snapshot(root: Path, expected: str) -> None:
+    """拒绝与证据版本不符的工作区。 Reject a workspace that differs from the evidence version."""
     if digest(manifest(root)) != expected:
         raise MasaError("snapshot_mismatch: workspace changed; refusing to reuse evidence")

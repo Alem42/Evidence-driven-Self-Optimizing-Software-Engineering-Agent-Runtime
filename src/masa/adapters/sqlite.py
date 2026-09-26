@@ -15,6 +15,7 @@ from masa.domain import MasaError, canonical
 
 class Store:
     def __init__(self, root: Path):
+        """打开独立连接并补齐兼容表。 Open an independent connection and add compatible tables."""
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.artifacts = self.root / "artifacts"

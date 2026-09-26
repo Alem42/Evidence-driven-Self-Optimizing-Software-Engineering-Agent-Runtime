@@ -2,6 +2,7 @@
 
 
 def render(store, run_id: str) -> str:
+    """展示真实运行证据及已提交补丁。 Render actual run evidence and committed patches."""
     run = store.run(run_id)
     data = run["data"]
     lines = [f"# MASA P0 run {run_id}", "", f"Status: **{run['status']}**", "",
@@ -22,6 +23,14 @@ def render(store, run_id: str) -> str:
                          f"artifact `{call['result_ref']}`")
         else:
             lines.append(f"- `{request['operation']}`: UNCERTAIN; no durable result; do not replay automatically.")
+    patch = store.db.execute("SELECT * FROM patches WHERE run_id=?", (run_id,)).fetchone()
+    if patch:
+        lines += ["", "## Controlled patch", "", f"Status: {patch['status']}; request artifact: `{patch['request_ref']}`"]
+        if patch['result_ref']:
+            change = store.read(patch['result_ref'])
+            lines += [f"Snapshot: `{change['before_snapshot']}` → `{change['snapshot_id']}`",
+                      f"Result artifact: `{patch['result_ref']}`",
+                      "Files: " + ", ".join(f"`{f['path']}`" for f in change['files'])]
     lines += ["", "## Scope", "", "This run verifies only its selected Go operation in a copied workspace. "
               "It does not generate patches, run multiple agents, or prove hidden acceptance tests passed.", ""]
     return "\n".join(lines)
