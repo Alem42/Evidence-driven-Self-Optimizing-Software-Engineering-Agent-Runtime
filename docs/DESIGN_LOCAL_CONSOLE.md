@@ -26,8 +26,11 @@
 | `/api/runs/{id}/artifacts/{hash}` | GET | 经 run 引用归属与哈希校验的证据 |
 | `/api/runs/{id}/report` | GET | Markdown 运行报告 |
 | `/api/settings` | GET / POST | 非秘密配置、密钥存在状态 / 更新配置与内存密钥 |
+| `/api/settings/test` | POST | 一次真实 JSON 提案协议连接测试 |
 
 创建参数为 `repo, goal, operation, pause_after`，可选 `budget` 与既有 Budget 字段相同。默认 deadline 1800 秒，受服务端额度上限限制。所有 API 要求 `X-MASA-Token`，页面初次加载注入会话值；不放入 URL。
+
+P1-06a 新增创建参数 `provider: scripted|live`、`api_profile_id`、`intelligence`、`full_checks`。完整图 test/vet/format → Gate，仍由固定模板和串行 scheduler 执行。resume 可传 `pause_after:true` 在下一个完成节点暂停；省略则自动推进。配置管理与调用边界见 [DESIGN_MODEL_PROVIDER](DESIGN_MODEL_PROVIDER.md)。
 
 ## 不变量与扩展
 

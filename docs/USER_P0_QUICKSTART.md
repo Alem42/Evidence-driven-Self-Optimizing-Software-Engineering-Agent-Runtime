@@ -1,5 +1,7 @@
 # P0 使用说明：运行、暂停、恢复与检查证据
 
+本文保留离线 P0 用法。当前新增的真实 DeepSeek、API 管理和自动验证图见 [USER_LIVE_LLM_GUIDE](USER_LIVE_LLM_GUIDE.md)。
+
 适用版本：MASA 0.1.0，Windows x64。P0 已实现离线验证框架，不会修改用户代码，不调用真实 LLM。scripted provider 只按确定规则提出工具调用；Go 检查实际执行，结果不是模拟数据。
 
 ## 1. 构建与测试

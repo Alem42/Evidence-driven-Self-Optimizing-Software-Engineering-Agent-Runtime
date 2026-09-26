@@ -34,7 +34,7 @@ Python 3.12 系列负责控制面，Go 负责 runner 和 AST。单进程 Python�
 
 P0 的 WorkflowPolicy 和 ModelRouter 是普通函数与数据配置：前者返回一个 GraphSpec，后者返回默认 ModelProfile。后续增加实现不会改变 Runtime 调用边界。不要先引入插件容器、工作流 DSL 解释器或独立策略服务。
 
-全局配置显式列出 budget、deadline、并发、工具权限与模型 alias；密钥通过环境注入且不入库。模型不可用时 scripted provider 保持机制测试可运行，真实推理能力仍标未验证。
+全局配置显式列出 budget、deadline、并发、工具权限与模型 alias；密钥通过环境或本地控制台会话内存注入且不入库。模型不可用时 scripted provider 保持机制测试可运行，但不能静默替代真实模型运行。当前真实验证接线与仍未完成的修复能力以 STATUS_PROJECT 为准。
 
 ## 5. 强制不变量
 

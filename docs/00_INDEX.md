@@ -33,6 +33,8 @@
 
 ## 文档职责与冲突处理
 
+本轮新增：[真实模型使用指南](USER_LIVE_LLM_GUIDE.md)、[模型适配器设计](DESIGN_MODEL_PROVIDER.md)、[DeepSeek 与控制台进展](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
+
 最新用户要求优先。LLM_IMPLEMENTATION_GUIDE 管执行规程，PLAN_PRIORITY_ROADMAP 管范围和阶段，STATUS_PROJECT 管完成事实；DESIGN_RUNTIME_ARCHITECTURE 管核心不变量，两份专项 DESIGN 管领域细节。旧任务号只用于追溯，不能作为越过新优先级的理由。
 
 架构冲突必须明确记录并协调修订，不能靠“读到的最后一篇”覆盖安全或正确性条件。常规实现选择不需要重复询问已授权事项；扩大功能范围或遇到真正缺失的信息才澄清。
