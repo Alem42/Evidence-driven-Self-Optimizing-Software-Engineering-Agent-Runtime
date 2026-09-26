@@ -64,6 +64,8 @@ class Runtime:
                     "deadline_at": now + budget.deadline_seconds, "profile": self._profile()}
             if intelligence:
                 data['intelligence'] = True
+            if hasattr(self.provider, 'profile'):
+                data['model_profile'] = self.provider.profile
             if parent_run_id:
                 data["parent_run_id"] = parent_run_id
             self.store.create(run_id, data)
@@ -84,6 +86,8 @@ class Runtime:
                 Patches(self.store).recover(run_id)
                 run = self.store.run(run_id)
                 data = run["data"]
+                if data.get('model_profile') != getattr(self.provider,'profile',None):
+                    raise MasaError('model_profile_mismatch: resume requires the original provider configuration')
                 graph = Graph.from_dict(data["graph"])
                 validate(graph)
                 if self._profile() != data["profile"]:

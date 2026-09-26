@@ -6,7 +6,7 @@ import threading
 
 from masa.adapters.runner import Runner
 from masa.adapters.sqlite import Store
-from masa.domain import Budget, MasaError, OPERATIONS
+from masa.domain import Budget, Graph, Node, MasaError, OPERATIONS
 from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
@@ -16,7 +16,11 @@ class Console:
     def __init__(self, state_dir, runner, go, project):
         self.root = Path(state_dir).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        self.runner_path, self.go_path, self.project = Path(runner), Path(go), Path(project)
+        self.runner_path, self.go_path, self.project = (
+            Path(runner),
+            Path(go),
+            Path(project),
+        )
         self.settings = Settings(self.root)
         self.lock = threading.RLock()
         self.active = None
@@ -27,22 +31,45 @@ class Console:
 
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
-        return {"default_repo": str(self.project / "tests/fixtures/go-pass"),
-                "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
-                "active_run": self.active, "provider": "scripted-v1", "capabilities": {
-                    "execute": True, "graph": True, "node_pause": True, "revise_as_new_run": True,
-                    "code_edit": False, "live_llm": False, "multi_agent": False, "code_intelligence": True}}
+        return {
+            "default_repo": str(self.project / "tests/fixtures/go-pass"),
+            "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
+            "active_run": self.active,
+            "provider": "scripted-v1",
+            "capabilities": {
+                "execute": True,
+                "graph": True,
+                "node_pause": True,
+                "revise_as_new_run": True,
+                "code_edit": False,
+                "live_llm": True,
+                "multi_agent": False,
+                "code_intelligence": True,
+            },
+        }
 
     def list_runs(self):
         store = Store(self.root)
         try:
-            ids = [r[0] for r in store.db.execute("SELECT id FROM runs ORDER BY rowid DESC LIMIT 100")]
+            ids = [
+                r[0]
+                for r in store.db.execute(
+                    "SELECT id FROM runs ORDER BY rowid DESC LIMIT 100"
+                )
+            ]
             result = []
             for rid in ids:
                 run = store.run(rid)
-                result.append({"id": rid, "status": run["status"], "goal": run["data"]["goal"],
-                               "created_at": run["data"]["created_at"], "reason": run["reason"],
-                               "active": rid == self.active})
+                result.append(
+                    {
+                        "id": rid,
+                        "status": run["status"],
+                        "goal": run["data"]["goal"],
+                        "created_at": run["data"]["created_at"],
+                        "reason": run["reason"],
+                        "active": rid == self.active,
+                    }
+                )
             return result
         finally:
             store.close()
@@ -54,11 +81,22 @@ class Console:
             store.db.execute("BEGIN")
             run = store.run(rid)
             events = store.events(rid)
-            return {"run": run, "steps": store.steps(rid), "events": events[-500:],
-                    "event_count": len(events), "tools": store.tools(rid),
-                    "attempts": [dict(r) for r in store.db.execute("SELECT * FROM attempts WHERE run_id=? ORDER BY started", (rid,))],
-                    "active": rid == self.active, "worker_error": self.errors.get(rid),
-                    "pause_requested": store.pause_requested(rid)}
+            return {
+                "run": run,
+                "steps": store.steps(rid),
+                "events": events[-500:],
+                "event_count": len(events),
+                "tools": store.tools(rid),
+                "attempts": [
+                    dict(r)
+                    for r in store.db.execute(
+                        "SELECT * FROM attempts WHERE run_id=? ORDER BY started", (rid,)
+                    )
+                ],
+                "active": rid == self.active,
+                "worker_error": self.errors.get(rid),
+                "pause_requested": store.pause_requested(rid),
+            }
         finally:
             store.close()
 
@@ -70,7 +108,11 @@ class Console:
             for row in store.steps(rid) + store.tools(rid):
                 refs.update(v for k, v in row.items() if k.endswith("_ref") and v)
             for event in store.events(rid):
-                refs.update(v for k, v in event["payload"].items() if k.endswith("_ref") and isinstance(v, str))
+                refs.update(
+                    v
+                    for k, v in event["payload"].items()
+                    if k.endswith("_ref") and isinstance(v, str)
+                )
             if ref not in refs:
                 raise MasaError("artifact is not referenced by this run")
             return store.read(ref)
@@ -86,13 +128,24 @@ class Console:
 
     @staticmethod
     def _budget(body):
-        defaults = asdict(Budget(deadline_seconds=1800))
+        """完整图共享总预算，节点不能自行扩充额度。 Full graphs share a budget that nodes cannot expand."""
+        defaults = asdict(
+            Budget(
+                deadline_seconds=1800,
+                model_calls=8 if body.get("full_checks") else 4,
+                tool_calls=6 if body.get("full_checks") else 3,
+            )
+        )
         supplied = body.get("budget", {})
         if not isinstance(supplied, dict) or set(supplied) - set(defaults):
             raise MasaError("unknown budget fields")
         budget = Budget(**{**defaults, **supplied})
         budget.validate()
-        if budget.deadline_seconds > 86400 or budget.model_calls > 100 or budget.tool_calls > 100:
+        if (
+            budget.deadline_seconds > 86400
+            or budget.model_calls > 100
+            or budget.tool_calls > 100
+        ):
             raise MasaError("console budget exceeds local limits")
         return budget
 
@@ -105,17 +158,51 @@ class Console:
                 source = body.get("repo", "")
                 goal = body.get("goal", "")
                 operation = body.get("operation", "go_test")
-                if not isinstance(source, str) or not source.strip() or not isinstance(goal, str):
+                if (
+                    not isinstance(source, str)
+                    or not source.strip()
+                    or not isinstance(goal, str)
+                ):
                     raise MasaError("repository and goal are required")
                 if operation not in OPERATIONS:
                     raise MasaError("unsupported operation")
                 budget = self._budget(body)
-                runtime = Runtime(store, Runner(self.runner_path, self.go_path))
-                rid = runtime.create(Path(source), goal, budget, operation, parent_run_id=parent,
-                                     intelligence=body.get('intelligence') is True)
+                provider = (
+                    self.settings.provider(body.get("api_profile_id"))
+                    if body.get("provider") == "live"
+                    else None
+                )
+                runtime = Runtime(
+                    store, Runner(self.runner_path, self.go_path), provider
+                )
+                graph = None
+                if body.get("full_checks"):
+                    graph = Graph(
+                        (
+                            Node("test", "agent", operation="go_test"),
+                            Node("vet", "agent", operation="go_vet"),
+                            Node("format", "agent", operation="go_fmt_check"),
+                            Node(
+                                "gate",
+                                "gate",
+                                ("test", "vet", "format"),
+                                "all_terminal",
+                            ),
+                        ),
+                        policy_version="full-verification-v1",
+                    )
+                rid = runtime.create(
+                    Path(source),
+                    goal,
+                    budget,
+                    operation,
+                    parent_run_id=parent,
+                    intelligence=body.get("intelligence") is True,
+                    graph=graph,
+                )
             finally:
                 store.close()
-            self._launch(rid, 1 if body.get("pause_after") is True else 0)
+            self._launch(rid, 1 if body.get("pause_after") is True else 0, provider)
             return {"id": rid}
 
     def _available(self):
@@ -124,38 +211,56 @@ class Console:
         if self.active:
             raise MasaError("another run is executing; pause or cancel it first")
 
-    def resume(self, rid):
+    def resume(self, rid, pause_after=False):
+        """恢复运行，支持单节点或自动推进。 Resume one node or automatically advance the graph."""
         with self.lock:
             self._available()
             store = Store(self.root)
             try:
                 if store.run(rid)["status"] not in {"created", "paused", "running"}:
-                    raise MasaError("this run cannot be resumed; create a new run instead")
+                    raise MasaError(
+                        "this run cannot be resumed; create a new run instead"
+                    )
             finally:
                 store.close()
-            self._launch(rid, 0)
+            self._launch(rid, 1 if pause_after is True else 0, self._provider_for(rid))
             return {"id": rid}
 
-    def _launch(self, rid, pause_after):
+    def _provider_for(self, rid):
+        """按运行身份解析配置，避免默认切换影响恢复。 Resolve the frozen identity independently of the selected default."""
+        store = Store(self.root)
+        try:
+            expected = store.run(rid)["data"].get("model_profile")
+            return self.settings.provider(expected=expected) if expected else None
+        finally:
+            store.close()
+
+    def _launch(self, rid, pause_after, provider=None):
+        """后台执行绑定了 provider 的任务。 Run with a bound provider in the background."""
         self.active = rid
         self.errors.pop(rid, None)
+
         def work():
             store = None
             try:
                 store = Store(self.root)
-                Runtime(store, Runner(self.runner_path, self.go_path)).execute(rid, pause_after)
+                Runtime(
+                    store, Runner(self.runner_path, self.go_path), provider
+                ).execute(rid, pause_after)
             except Exception as exc:
-                # No settings/credentials are ever passed into this worker.
+                # Provider failures are sanitized; never expose credentials in worker diagnostics.
                 self.errors[rid] = str(exc)
             finally:
                 if store is not None:
                     store.close()
                 with self.lock:
                     self.active = None
+
         self.worker = threading.Thread(target=work, name=f"masa-{rid[:8]}", daemon=True)
         self.worker.start()
 
     def control(self, rid, action):
+        """持久化人工控制，无 worker 时直接完成取消。 Persist human control and finalize detached cancellation."""
         with self.lock:
             store = Store(self.root)
             try:
@@ -165,7 +270,7 @@ class Console:
                     store.cancel(rid)
                     # A paused or detached run has no worker to observe cancellation.
                     if self.active is None:
-                        self._launch(rid, 0)
+                        store.set_status(rid, "cancelled", "cancellation_requested")
             finally:
                 store.close()
         return {"id": rid, "requested": action}

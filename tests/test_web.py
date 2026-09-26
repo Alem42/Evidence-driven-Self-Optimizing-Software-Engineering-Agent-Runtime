@@ -123,3 +123,33 @@ class WebTests(unittest.TestCase):
             self.assertEqual(detail['steps'][1]['status'], 'pending')
             self.request('/api/runs/'+rid+'/resume', {})
             self.assertEqual(self.wait_run(rid)['run']['status'], 'succeeded')
+
+    def test_complete_graph_auto_continues_and_gate_requires_all_checks(self):
+        """任一检查失败时其他节点仍取证，Gate 不放行。 Collect all checks but reject any failed evidence."""
+        class MixedExecutor(FakeExecutor):
+            def execute(self, request, *args):
+                result = super().execute(request, *args)
+                result['exit_code'] = int(request['operation'] == 'go_vet')
+                return result
+        with patch('masa.web.service.Runner', return_value=MixedExecutor()):
+            status, result = self.request('/api/runs', {'repo': str(self.source), 'goal': 'complete', 'full_checks': True})
+            self.assertEqual(status, 200)
+            detail = self.wait_run(result['id'])
+            self.assertEqual(detail['run']['status'], 'failed')
+            self.assertEqual(detail['run']['tool_calls'], 3)
+            self.assertEqual(detail['run']['model_calls'], 6)
+            self.assertEqual(len(detail['steps']), 4)
+
+    def test_complete_graph_supports_step_then_automatic_resume(self):
+        """单步恢复不会重跑完成节点，可再次切换自动推进。 Step-resume preserves completed nodes before auto continuation."""
+        executor = FakeExecutor()
+        with patch('masa.web.service.Runner', return_value=executor):
+            rid = self.request('/api/runs', {'repo': str(self.source), 'goal': 'step', 'full_checks': True, 'pause_after': True})[1]['id']
+            self.assertEqual(self.wait_run(rid)['run']['status'], 'paused')
+            self.request('/api/runs/'+rid+'/resume', {'pause_after': True})
+            detail = self.wait_run(rid)
+            self.assertEqual(detail['run']['status'], 'paused')
+            self.assertEqual(executor.calls, 2)
+            self.request('/api/runs/'+rid+'/resume', {})
+            self.assertEqual(self.wait_run(rid)['run']['status'], 'succeeded')
+            self.assertEqual(executor.calls, 3)
