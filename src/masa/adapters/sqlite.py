@@ -48,6 +48,8 @@ class Store:
               seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT REFERENCES runs(id),
               type TEXT, payload TEXT, created REAL);
             CREATE INDEX IF NOT EXISTS events_run ON events(run_id,seq);
+            CREATE TABLE IF NOT EXISTS run_controls (
+              run_id TEXT PRIMARY KEY REFERENCES runs(id), pause_requested INTEGER NOT NULL DEFAULT 0);
             PRAGMA user_version=1;
         """)
 
@@ -134,6 +136,21 @@ class Store:
                 raise MasaError("run is already terminal")
             self.db.execute("UPDATE runs SET cancel_requested=1 WHERE id=?", (run_id,))
             self._event(run_id, "cancellation_requested", {})
+
+    def request_pause(self, run_id: str):
+        with self.transaction():
+            if self.run(run_id)["status"] not in {"created", "running"}:
+                raise MasaError("only an executing run can be paused")
+            self.db.execute("INSERT INTO run_controls VALUES(?,1) ON CONFLICT(run_id) DO UPDATE SET pause_requested=1", (run_id,))
+            self._event(run_id, "pause_requested", {"boundary": "after current node"})
+
+    def pause_requested(self, run_id: str) -> bool:
+        row = self.db.execute("SELECT pause_requested FROM run_controls WHERE run_id=?", (run_id,)).fetchone()
+        return bool(row and row[0])
+
+    def clear_pause(self, run_id: str):
+        with self.transaction():
+            self.db.execute("UPDATE run_controls SET pause_requested=0 WHERE run_id=?", (run_id,))
 
     def start(self, run_id: str, step_id: str) -> str:
         attempt_id = uuid.uuid4().hex

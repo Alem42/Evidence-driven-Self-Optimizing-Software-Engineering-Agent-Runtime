@@ -14,3 +14,6 @@ masa = "masa.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"masa.web" = ["static/*.html", "static/*.css", "static/*.js"]

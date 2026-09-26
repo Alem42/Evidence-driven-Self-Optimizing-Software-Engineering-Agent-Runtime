@@ -39,13 +39,17 @@ class Runtime:
             profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None) -> str:
+    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None) -> str:
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
             raise MasaError("goal must be nonempty and at most 16000 characters")
         graph = graph or default_policy(operation)
         validate(graph)
         with owner_lock(self.store.root / "runtime.lock"):
+            if parent_run_id:
+                parent = self.store.run(parent_run_id)
+                if parent["status"] not in {"paused", "succeeded", "failed", "cancelled", "needs_attention"}:
+                    raise MasaError("pause the original run before revising its request")
             run_id = uuid.uuid4().hex
             workspace = self.store.root / "workspaces" / run_id
             snapshot_id, files = copy_snapshot(source, workspace)
@@ -54,7 +58,12 @@ class Runtime:
                     "snapshot_id": snapshot_id, "manifest_ref": self.store.put(files),
                     "graph": graph.to_dict(), "budget": asdict(budget), "created_at": now,
                     "deadline_at": now + budget.deadline_seconds, "profile": self._profile()}
+            if parent_run_id:
+                data["parent_run_id"] = parent_run_id
             self.store.create(run_id, data)
+            if parent_run_id:
+                self.store.event(run_id, "human_request_revised", {"parent_run_id": parent_run_id,
+                                                                   "policy": "new run; old evidence not reused"})
         return run_id
 
     def execute(self, run_id: str, pause_after: int = 0) -> dict:
@@ -72,6 +81,8 @@ class Runtime:
                 verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
                 if not self.store.recover(run_id):
                     return self.store.run(run_id)
+                if run["status"] == "paused":
+                    self.store.clear_pause(run_id)
                 self.store.set_status(run_id, "running")
                 completed = 0
                 while True:
@@ -81,6 +92,9 @@ class Runtime:
                         break
                     if time.time() >= data["deadline_at"]:
                         self.store.set_status(run_id, "failed", "run_deadline_exhausted")
+                        break
+                    if self.store.pause_requested(run_id):
+                        self.store.set_status(run_id, "paused", "human requested node-boundary pause")
                         break
                     states = {s["id"]: s["status"] for s in self.store.steps(run_id)}
                     gate = next(n for n in graph.nodes if n.type == "gate")
@@ -123,7 +137,7 @@ class Runtime:
                         self.store.set_status(run_id, "succeeded" if passed else "failed", result["reason"])
                         break
                     completed += 1
-                    if pause_after and completed >= pause_after:
+                    if self.store.pause_requested(run_id) or (pause_after and completed >= pause_after):
                         self.store.set_status(run_id, "paused", "explicit node-boundary pause")
                         break
             except MasaError as exc:

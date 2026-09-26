@@ -88,3 +88,6 @@ P0 串行调度通用图；没有四角色并行、代码写工具、AST 索引�
 默认 runner/Go 路径适用于当前工作区的 editable 安装，可通过 `--runner` 和 `--go` 显式指定。发布成独立 wheel 的资源定位与跨平台分发后置。
 
 下一项为 P1-01：小型 Go 业务示例、受控补丁和写入恢复。不要把当前 fixture 或 scripted provider 描述成已实现自动修复。
+## 浏览器入口
+
+现在可运行 `.venv\Scripts\python.exe -m masa ui --open` 使用 React 控制台。详见 [控制台使用指南](USER_CONSOLE_GUIDE.md)。上面的 CLI 操作继续保留用于脚本和诊断。

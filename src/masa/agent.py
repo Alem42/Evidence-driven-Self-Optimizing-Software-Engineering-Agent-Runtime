@@ -20,7 +20,7 @@ def execute_agent(store, tools, provider, run_id: str, node: Node, attempt_id: s
                    "allowed_tools": [node.operation], "phase": "P0"}
         context_ref = store.put(context)
         store.charge_model(run_id, node.id, data["budget"]["model_calls"], route_model(), context_ref)
-        response = provider.respond(context)
+        response = provider.respond(context)    # get llm model response
         ref = store.put(response)
         store.event(run_id, "model_completed", {"step_id": node.id, "response_ref": ref,
                                                 "provider": "scripted", "tokens": 0})

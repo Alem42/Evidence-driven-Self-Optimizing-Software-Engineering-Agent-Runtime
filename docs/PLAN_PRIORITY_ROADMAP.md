@@ -88,6 +88,15 @@ P2-03 是项目自优化目标的核心；P2-02/04/05 是可独立选做的优�
 
 ## 7. P3：明确可有可无
 
+2026-09-26 用户明确要求前端，并允许 React，因此提前安排独立增量 UI-01，不阻塞或重排 P1 核心任务。
+
+| 增量 | 范围 | 状态与验收 |
+|---|---|---|
+| UI-01 本地控制台 | CLI 启动 React；任务创建、图、事件、决策与工具证据；暂停/恢复/取消；需求变更关联；内存 API Key | 代码、构建、HTTP 自动验收完成；浏览器视觉/点击验收待执行，详见 STATUS_PROJECT |
+| UI-02 后续增强 | 真实 provider 配置接线、graph revision HITL、流式日志、分页、大图布局 | 分别随 P1-06/P1 图能力及实际需要推进，不由 UI 伪造能力 |
+
+架构与接口见 [DESIGN_LOCAL_CONSOLE](DESIGN_LOCAL_CONSOLE.md)，使用见 [USER_CONSOLE_GUIDE](USER_CONSOLE_GUIDE.md)。
+
 类型增强按真实定位失败引入；embedding 按同义检索漏检引入；UI/IDE 按演示需求引入；容器按不可信代码执行需求引入。多机器调度需要租约、fencing 与网络权限，不能被当作一个小开关。
 
 不默认安排在线 RL、模型训练、任意代码生成工作流、自动修改 runtime 自身、Agent Marketplace、Kafka/Redis、登录系统。这些项目名词不会自动增加简历价值。

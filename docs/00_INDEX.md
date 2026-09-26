@@ -10,6 +10,9 @@
 
 | 文件 | 用途 | 读者 |
 |---|---|---|
+| [USER_CONSOLE_GUIDE.md](USER_CONSOLE_GUIDE.md) | React 控制台启动、任务监控、人工修改与 API 设置 | 浏览器使用入口 |
+| [DESIGN_LOCAL_CONSOLE.md](DESIGN_LOCAL_CONSOLE.md) | 本地 HTTP、React、凭据与运行边界 | 控制台开发 |
+| [progress/PROGRESS_2026-09-26_003_react-console.md](progress/PROGRESS_2026-09-26_003_react-console.md) | React 控制台实现与验收边界 | 最新进展 |
 | [USER_PROJECT_GUIDE.md](USER_PROJECT_GUIDE.md) | 用通俗方式理解项目、亮点、取舍和最终演示 | 用户优先读 |
 | [USER_P0_QUICKSTART.md](USER_P0_QUICKSTART.md) | 当前 P0 构建、运行、暂停、恢复和限制 | 使用当前代码 |
 | [LLM_IMPLEMENTATION_GUIDE.md](LLM_IMPLEMENTATION_GUIDE.md) | 后续实现的唯一操作入口，分轮执行与完成规则 | 每次编码 LLM 必读 |
