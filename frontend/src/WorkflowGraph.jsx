@@ -22,8 +22,8 @@ export function WorkflowGraph({detail, selected, onSelect}) {
         style={{left:positions[node.id].x, top:positions[node.id].y}}
         aria-pressed={selected===node.id} aria-label={`${node.id} ${names[status] || status}`}
         onClick={()=>onSelect(selected===node.id?'':node.id)}>
-        <span className="node-top">{node.type.toUpperCase()} <span className={'badge '+status}>{names[status] || status}</span></span>
-        <strong>{node.id}</strong><small>{node.type==='gate'?'独立证据验收':node.operation}</small>
+        <span className="node-top">{(node.type==='agent' ? node.role || node.type : node.type).toUpperCase()} <span className={'badge '+status}>{names[status] || status}</span></span>
+        <strong>{node.id}</strong><small>{node.type==='gate'?'独立证据验收':['planner','developer','reviewer'].includes(node.role)?'只读角色协议':node.operation}</small>
       </button>;
     })}
   </div></div>;
