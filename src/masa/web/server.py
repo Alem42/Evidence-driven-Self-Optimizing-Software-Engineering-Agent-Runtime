@@ -100,10 +100,14 @@ def make_server(console, port=8765):
                         result = {"artifact": console.artifact(rid, parts[4])}
                     elif len(parts) == 4 and parts[3] == "report" and not write:
                         result = {"markdown": console.report(rid)}
+                    elif len(parts) == 4 and parts[3] == 'results' and not write:
+                        result = console.results(rid)
                     elif len(parts) == 4 and write:
                         action = parts[3]
                         if action == "resume":
                             result = console.resume(rid, body.get('pause_after'))
+                        elif action == 'rerun':
+                            result = console.rerun(rid)
                         elif action == 'review-code':
                             result = console.review_code(rid, body)
                         elif action in {"pause", "cancel"}:

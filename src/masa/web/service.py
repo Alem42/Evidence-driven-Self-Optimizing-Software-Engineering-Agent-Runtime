@@ -12,6 +12,7 @@ from masa.runtime import Runtime
 from masa.web.settings import Settings
 from masa.workflow import full_verification_policy, collaboration_policy
 from masa.codegen import CodeGeneration
+from masa.workspace import verify_snapshot
 
 
 class Console:
@@ -34,13 +35,14 @@ class Console:
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
         return {
-            "console_version": "codegen-hitl-v1",
+            "console_version": "workspace-console-v2",
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
             "provider": "scripted-v1",
             "capabilities": {
                 "execute": True,
+                "rerun": True,
                 "graph": True,
                 "node_pause": True,
                 "revise_as_new_run": True,
@@ -205,6 +207,46 @@ class Console:
                 store.close()
             self._launch(rid, 1 if body.get("pause_after") is True else 0, provider)
             return {"id": rid}
+
+    def results(self, rid):
+        """读取工具账本中的实际输出。 Read actual outputs from the tool ledger."""
+        store = Store(self.root)
+        try:
+            store.run(rid)
+            return {'checks': [
+                {'id': row['id'], 'step_id': row['step_id'],
+                 'operation': store.read(row['request_ref'])['operation'],
+                 'result': store.read(row['result_ref']) if row['result_ref'] else None}
+                for row in store.tools(rid)]}
+        finally:
+            store.close()
+
+    def rerun(self, rid):
+        """复制已完成的代码快照重新验证，不调用付费模型。 Verify a completed snapshot in a new run without paid models."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                original = store.run(rid)
+                data = original['data']
+                if original['status'] not in {'succeeded', 'failed', 'needs_attention'}:
+                    raise MasaError('finish or approve the current run before rerunning')
+                if data.get('codegen') and data['codegen'].get('status') != 'approved':
+                    raise MasaError('human review required before rerunning generated code')
+                source = Path(data['workspace'])
+                verify_snapshot(source, data['snapshot_id'])
+                runtime = Runtime(store, Runner(self.runner_path, self.go_path))
+                new_id = runtime.create(source, data['goal'], self._budget({'full_checks': True}),
+                                        graph=full_verification_policy(), parent_run_id=rid)
+                # 复制前后都绑定同一版本，避免外部改动绕过审核。
+                # Bind both sides of the copy to the reviewed version.
+                if store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:
+                    store.set_status(new_id, 'needs_attention', 'snapshot_mismatch')
+                    raise MasaError('snapshot changed while preparing rerun')
+            finally:
+                store.close()
+            self._launch(new_id, 0)
+            return {'id': new_id}
 
     def _available(self):
         if self.closing:
