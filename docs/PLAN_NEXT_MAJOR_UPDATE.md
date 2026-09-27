@@ -1,5 +1,7 @@
 # 下一次大更新：从真实验证走向受控修复
 
+最新优先级：用户要求快速形成可用框架，已交付真实单文件生成与 HITL。后续按 [PLAN_USABLE_MVP_NEXT](PLAN_USABLE_MVP_NEXT.md) 推进；本文较完整的四角色路线后置。
+
 本文件是 P1-04 / P1-05 的实施切片，配合 LLM_IMPLEMENTATION_GUIDE、STATUS_PROJECT 使用。下面均为待实现内容，不代表本轮已完成。
 
 2026-09-27 更新：第 1 步的只读协议切片已经实现并验证，详情见 [角色交接协议](DESIGN_ROLE_HANDOFF_PROTOCOL.md)。下一步的具体预计更新见 [P1-04b 受控修复](PLAN_P1_04B_CONTROLLED_REPAIR.md)；下面保留大更新整体路线，不重复实现已完成机制。

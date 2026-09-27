@@ -1,8 +1,10 @@
 # MASA 当前项目状态
 
-最后更新：2026-09-27。P0、P1-01～03、P1-06a 与 P1-04a 只读角色协议已完成。下一核心任务 P1-04b 一次受控修复；P1-04 整体仍 in_progress。UI-01 浏览器验收仍待完成。
+最后更新：2026-09-27。按用户要求调整为可用 MVP 优先：真实 LLM 单文件 Go 生成 → 人工审核/编辑 → 受控写入 → 真实 Go 验证已完成。四角色完整语义修复暂后置；下一步完善失败反馈和审核体验。UI 浏览器视觉验收仍待完成。
 
 ## 已确认与已完成
+
+- 本轮 MVP-CODEGEN-01 done：真实 DeepSeek 生成、JSON API 导入修复、HITL、源码下载、80 项 Python 回归和 4 项前端测试；当前服务统一 http://127.0.0.1:8765。指南：[USER_GENERATE_CODE](USER_GENERATE_CODE.md)。
 
 - 用户认可先前的证据驱动规划，本轮进一步给出动态图、经验、路由和自优化方向。
 - 已完成 P1-01 受控写入、P1-02 AST/检索与 P1-03 记忆/上下文最小链路。本轮用同一 Runtime 接入真实模型，不扩展 P2。
@@ -14,6 +16,7 @@
 | 任务 | 状态 | 说明 |
 |---|---|---|
 | DOC-03 文档与优化取舍 | done | 当前文档批次，不属于业务 P0 |
+| MVP-CODEGEN-01 | done | 单文件真实生成与人审；Go 验证实际通过，不等同于四角色自主修复 |
 | P0-01 | done | Python CLI、Go module、固定构建依赖和 uv.lock |
 | P0-02 | done | 声明式 DAG、依赖/环/节点/最终 Gate 校验、可替换默认 policy |
 | P0-03 | done | SQLite 状态事件事务、artifact 哈希、工作副本与快照 |
@@ -35,6 +38,8 @@
 
 ## 下一项工作
 
+**最新优先级覆盖下面历史接续说明：** 按 [PLAN_USABLE_MVP_NEXT](PLAN_USABLE_MVP_NEXT.md) 做失败日志反馈、审核 diff 与小型评测集；P1-04b 四角色语义契约不再是可用版本的前置条件。当前生成独立于只读角色图，批准后复用已有受控补丁与完整验证图。
+
 本轮 P1-04a 已完成：72 项 Python 测试、2 项前端测试和构建通过，真实 Go 只读角色 run `2aa5a8c6afbf45de82dc3bffceb68733` 成功（5 scripted / 2 tool / 3 receipt），无新增 API 费用。后续按 [PLAN_P1_04B_CONTROLLED_REPAIR](PLAN_P1_04B_CONTROLLED_REPAIR.md) 实现角色语义契约和一次补丁；旧规划证据与新快照验收必须区分，不能简单解除 Patches 守卫。
 
 2026-09-27 小型整理已完成：图依赖分层、workflow 模板归位、请求参数严格校验、跨任务取消回归。最新 Python 全套 61 项测试、前端布局 2 项测试和构建通过；本轮无付费调用，未重启现有服务。下一次大更新按 [PLAN_NEXT_MAJOR_UPDATE](PLAN_NEXT_MAJOR_UPDATE.md) 分段实施。
@@ -51,7 +56,7 @@
 
 ## 最新报告与接续日志
 
-最新报告：[PROGRESS_2026-09-27_004_role-protocol](progress/PROGRESS_2026-09-27_004_role-protocol.md)。真实模型验收见 [DeepSeek 进展](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
+最新报告：[PROGRESS_2026-09-27_005_codegen-hitl](progress/PROGRESS_2026-09-27_005_codegen-hitl.md)。真实成功生成 `6c6aaf0b469d4d379f338b24236ec80e`；留给用户审核的反馈草稿 `cd8ecc9698454c2aa59c5b9712116e6f`。本轮 4 次真实生成、3,414 tokens。旧 8765/8766 后端已替换，当前入口为 8765；密钥已重新注入新服务内存，未落盘。
 
 本轮真实模型 run：`72e84c19c6f34386ae9b422c7a3f2198`（复杂 Go 样例，完整验证 succeeded，6 model / 4 tool）；`c04e167a7a0641738aea9979b5639224`（Todo 原始缺陷，预期 failed，2 model / 2 tool）。含探测合计 17,246 tokens，按峰时未命中缓存价格估算 ¥0.163098，实扣未知。本轮服务地址 `http://127.0.0.1:8766`；默认 API 配置已就绪，重启前连接测试记录不会持久化。仅验证真实推理接线，未评价代码修复能力。
 

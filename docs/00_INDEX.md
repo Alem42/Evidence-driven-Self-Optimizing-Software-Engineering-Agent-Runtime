@@ -47,6 +47,8 @@
 
 ## 给下一轮 LLM 的启动语句
 
+**当前使用入口：[自然语言生成 Go 代码](USER_GENERATE_CODE.md)。最新进展：[真实生成与 HITL](progress/PROGRESS_2026-09-27_005_codegen-hitl.md)。下一轮按 [可用 MVP 预计更新](PLAN_USABLE_MVP_NEXT.md) 推进，覆盖下面历史四角色接续顺序。**
+
 当前最新：[角色协议实现](DESIGN_ROLE_HANDOFF_PROTOCOL.md)、[本轮进展](progress/PROGRESS_2026-09-27_004_role-protocol.md)、[下一阶段预计更新 P1-04b](PLAN_P1_04B_CONTROLLED_REPAIR.md)。
 
 下一次核心更新切片见 [PLAN_NEXT_MAJOR_UPDATE](PLAN_NEXT_MAJOR_UPDATE.md)；最新小型整理见 [PROGRESS_2026-09-27_003_small-cleanup](progress/PROGRESS_2026-09-27_003_small-cleanup.md)。
