@@ -43,7 +43,7 @@ class Runtime:
             profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False) -> str:
+    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None) -> str:
         """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
@@ -67,6 +67,8 @@ class Runtime:
                     "deadline_at": now + budget.deadline_seconds, "profile": self._profile()}
             if intelligence:
                 data['intelligence'] = True
+            if codegen is not None:
+                data['codegen'] = codegen
             if hasattr(self.provider, 'profile'):
                 data['model_profile'] = self.provider.profile
             if parent_run_id:
@@ -83,6 +85,15 @@ class Runtime:
             run = self.store.run(run_id)
             if run["status"] in {"succeeded", "failed", "cancelled", "needs_attention"}:
                 return run
+            generation = run['data'].get('codegen')
+            if generation:
+                # 人工批准与对应补丁缺一不可，CLI 恢复也不能绕过审核。
+                # Both human approval and its exact patch are mandatory, including CLI resumes.
+                patch = self.store.db.execute('SELECT request_ref FROM patches WHERE run_id=?', (run_id,)).fetchone()
+                if generation.get('status') != 'approved' or not patch:
+                    raise MasaError('human_review_required: approve the code proposal before execution')
+                if self.store.read(patch[0])['patch'] != self.store.read(generation['approval_ref']):
+                    raise MasaError('approved patch does not match the applied patch')
             try:
                 # 必须先核对未完成补丁，再按已发布快照校验工具证据。
                 # Reconcile pending writes before validating evidence against the published snapshot.

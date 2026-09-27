@@ -11,6 +11,7 @@ from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
 from masa.workflow import full_verification_policy, collaboration_policy
+from masa.codegen import CodeGeneration
 
 
 class Console:
@@ -33,6 +34,7 @@ class Console:
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
         return {
+            "console_version": "codegen-hitl-v1",
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
@@ -42,7 +44,8 @@ class Console:
                 "graph": True,
                 "node_pause": True,
                 "revise_as_new_run": True,
-                "code_edit": False,
+                "code_edit": True,
+                "code_generation": True,
                 "live_llm": True,
                 "multi_agent": False,
                 "code_intelligence": True,
@@ -215,6 +218,9 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
+                generation = store.run(rid)['data'].get('codegen')
+                if generation and generation.get('status') != 'approved':
+                    raise MasaError('请先审核代码提案并点击批准执行 / human review required')
                 if store.run(rid)["status"] not in {"created", "paused", "running"}:
                     raise MasaError(
                         "this run cannot be resumed; create a new run instead"
@@ -223,6 +229,38 @@ class Console:
                 store.close()
             self._launch(rid, 1 if pause_after is True else 0, self._provider_for(rid))
             return {"id": rid}
+
+    def generate(self, body):
+        """为需求生成待审核草稿；单服务串行保护生成与执行。 Generate a pending draft while serializing generation/execution."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                rid = CodeGeneration(store, Runner(self.runner_path, self.go_path)).generate(
+                    provider, body.get('goal',''), body.get('repo',''), body.get('target','solution.go'),
+                    body.get('tests',''), body.get('parent_run_id'))
+                return {'id':rid}
+            finally:
+                store.close()
+
+    def review_code(self, rid, body):
+        """人工拒绝或批准后启动确定性真实工具验证。 Reject or approve before deterministic real-tool verification."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                service = CodeGeneration(store, Runner(self.runner_path, self.go_path))
+                if body.get('action') == 'reject':
+                    service.reject(rid)
+                    return {'id':rid}
+                if body.get('action') != 'approve':
+                    raise MasaError('choose approve or reject')
+                service.approve(rid, body.get('proposal_ref'), body.get('content'))
+            finally:
+                store.close()
+            self._launch(rid, 0)
+            return {'id':rid}
 
     def _provider_for(self, rid):
         """按运行身份解析配置，避免默认切换影响恢复。 Resolve the frozen identity independently of the selected default."""

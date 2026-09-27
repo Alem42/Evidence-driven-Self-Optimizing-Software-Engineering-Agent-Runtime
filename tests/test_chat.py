@@ -91,6 +91,28 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(self.requests[0]["thinking"], {"type": "disabled"})
         self.assertNotIn("synthetic-private-key", json.dumps(self.provider.profile))
 
+    def test_generation_schema_is_separate_from_tool_actions(self):
+        """生成模式只接受完整文件草稿，不能执行工具提案。 Generation accepts complete drafts, never tool actions."""
+        context = {'purpose':'code_generation','goal':'Add','target':'solution.go','files':{}}
+        with self.assertRaises(MasaError):
+            self.provider.respond(context)
+        self.action = {'type':'code_proposal','summary':'Add','content':'package solution\n'}
+        self.assertEqual(self.provider.respond(context)['content'], 'package solution\n')
+        self.action['extra'] = 'unexpected'
+        with self.assertRaises(MasaError):
+            self.provider.respond(context)
+
+    def test_pasted_endpoint_and_key_whitespace_are_normalized(self):
+        """支持完整端点与首尾空白密钥，仍拒绝内部换行。 Normalize pasted endpoint/key boundaries, rejecting embedded newlines."""
+        with tempfile.TemporaryDirectory() as temp:
+            settings = Settings(Path(temp))
+            settings.save({**self.config, 'base_url':self.config['base_url']+'/chat/completions/', 'api_key':' \nsynthetic-private-key\n '})
+            provider = settings.provider()
+            self.assertEqual(provider.config['base_url'], self.config['base_url'])
+            self.assertEqual(provider.key, 'synthetic-private-key')
+            with self.assertRaises(MasaError):
+                settings.save({'api_key':'invalid\nkey'})
+
     def test_untrusted_actions_and_envelopes_are_rejected(self):
         """拒绝越权提案和异常响应结构。 Reject unauthorized actions and malformed envelopes."""
         for action in (

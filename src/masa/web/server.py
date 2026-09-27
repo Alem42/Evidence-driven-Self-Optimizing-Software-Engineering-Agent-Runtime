@@ -88,6 +88,8 @@ def make_server(console, port=8765):
                     result = console.settings.save(body) if write else console.settings.public()
                 elif path == '/api/settings/test' and write:
                     result = console.settings.test(body.get('id') or console.settings.active_id)
+                elif path == '/api/generate' and write:
+                    result = console.generate(body)
                 elif path == "/api/runs":
                     result = console.create(body) if write else {"runs": console.list_runs(), "active_run": console.active}
                 elif len(parts) >= 3 and parts[:2] == ["api", "runs"]:
@@ -102,6 +104,8 @@ def make_server(console, port=8765):
                         action = parts[3]
                         if action == "resume":
                             result = console.resume(rid, body.get('pause_after'))
+                        elif action == 'review-code':
+                            result = console.review_code(rid, body)
                         elif action in {"pause", "cancel"}:
                             result = console.control(rid, action)
                         elif action == "revise":

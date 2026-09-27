@@ -178,6 +178,22 @@ class WebTests(unittest.TestCase):
             self.assertEqual(len(refs), 3)
             self.assertEqual(self.request('/api/runs/'+result['id']+'/artifacts/'+refs[0])[0], 200)
 
+    def test_generation_http_requires_review_before_execution(self):
+        """HTTP 从生成到审核再到验证，恢复按钮不能跳过人工确认。 HTTP generation/review/verification cannot bypass human approval."""
+        from test_codegen import ProposalProvider
+        with patch.object(self.console.settings, 'provider', return_value=ProposalProvider()), patch('masa.web.service.Runner', return_value=FakeExecutor()):
+            status, generated = self.request('/api/generate', {'goal':'Implement Add'})
+            self.assertEqual(status, 200)
+            rid = generated['id']
+            detail = self.request('/api/runs/'+rid)[1]
+            self.assertEqual(detail['run']['status'], 'paused')
+            self.assertEqual(self.request('/api/runs/'+rid+'/resume', {})[0], 400)
+            ref = detail['run']['data']['codegen']['proposal_ref']
+            draft = self.request('/api/runs/'+rid+'/artifacts/'+ref)[1]['artifact']
+            status, _ = self.request('/api/runs/'+rid+'/review-code', {'action':'approve','proposal_ref':ref,'content':draft['content']})
+            self.assertEqual(status, 200)
+            self.assertEqual(self.wait_run(rid)['run']['status'], 'succeeded')
+
     def test_cancel_paused_run_while_another_worker_is_active(self):
         """取消旧任务不依赖另一个 worker，也不取消新任务。 Cancelling a paused run must not affect another worker."""
         entered, release = threading.Event(), threading.Event()

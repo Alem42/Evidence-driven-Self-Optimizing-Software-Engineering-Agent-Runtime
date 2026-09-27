@@ -96,6 +96,8 @@ class Settings:
                     raise MasaError("at most 20 profiles")
                 config = validate_config({**profiles.get(ident, {}), **body})
                 key = body.get("api_key", "")
+                if isinstance(key, str):
+                    key = key.strip()
                 if (
                     not isinstance(key, str)
                     or len(key) > 8192

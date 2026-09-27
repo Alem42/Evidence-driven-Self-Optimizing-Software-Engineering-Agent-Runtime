@@ -5,7 +5,7 @@ def render(store, run_id: str) -> str:
     """展示真实运行证据及已提交补丁。 Render actual run evidence and committed patches."""
     run = store.run(run_id)
     data = run["data"]
-    profile = data.get("model_profile")
+    profile = data.get("model_profile") or data.get('codegen', {}).get('provider')
     provider = (
         f"Provider: {profile['provider']} / {profile['model']}; cost unknown (see provider billing)."
         if profile
@@ -33,6 +33,13 @@ def render(store, run_id: str) -> str:
         lines.append(
             f"| {step['id']} | {step['status']} | {step['result_ref'] or '-'} |"
         )
+    if data.get('codegen'):
+        generation = data['codegen']
+        lines += ['', '## Human-reviewed code generation', '',
+                  f"Generation: {generation['status']}; target: `{generation['target']}`.",
+                  'Generation uses the live model; verification uses scripted decisions and real Go tools.',
+                  f"Has Go test files: {generation.get('has_tests', False)}; compilation alone does not prove requirements.",
+                  f"Proposal: `{generation.get('proposal_ref', '-')}`; approval: `{generation.get('approval_ref', '-')}`."]
     if any(n.get('role', 'verifier') != 'verifier' for n in data['graph']['nodes']):
         # 报告引用实际 receipt；不把 scripted 摘要当作语义审查。
         # Reference actual receipts without claiming scripted semantic review.
@@ -109,7 +116,7 @@ def render(store, run_id: str) -> str:
         "## Scope",
         "",
         "This run verifies only its selected Go operation in a copied workspace. "
-        "It does not generate patches or prove hidden acceptance tests passed. "
+        "Only explicitly human-approved code-generation proposals may change the copied workspace; hidden acceptance is not proven. "
         "Scripted role outputs validate protocol only, not independent semantic review.",
         "",
     ]
