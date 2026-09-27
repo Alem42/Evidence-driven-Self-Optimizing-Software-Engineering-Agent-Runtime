@@ -1,4 +1,4 @@
-"""多 API 配置与会话密钥。 Multiple API profiles and session-only credentials."""
+"""多 API 配置与可选本地密钥。 Multiple API profiles and opt-in local credentials."""
 
 import json
 import os
@@ -12,8 +12,9 @@ from masa.domain import MasaError
 
 class Settings:
     def __init__(self, root):
-        """加载非秘密配置，兼容旧单配置文件。 Load metadata and migrate legacy profiles."""
+        """加载配置与用户选择保存的本地密钥。 Load profiles and credentials explicitly persisted by the user."""
         self.path = root / "provider.json"
+        self.secret_path = root / 'provider-keys.local.json'
         self.lock = threading.RLock()
         self.profiles = {}
         self.keys = {}
@@ -38,6 +39,14 @@ class Settings:
             except (ValueError, TypeError, AttributeError, OSError, MasaError):
                 self.profiles = {}
                 self.active_id = None
+        if self.secret_path.exists():
+            try:
+                saved = json.loads(self.secret_path.read_text(encoding='utf-8'))
+                self.keys = {i:v['key'] for i,v in saved.items() if i in self.profiles
+                             and isinstance(v,dict) and v.get('base_url') == self.profiles[i]['base_url']
+                             and isinstance(v.get('key'),str)}
+            except (ValueError, TypeError, AttributeError, OSError):
+                self.keys = {}
 
     def public(self):
         """仅公开元数据和密钥存在状态。 Expose metadata and credential presence only."""
@@ -59,7 +68,7 @@ class Settings:
                 "key_configured": bool(self.keys.get(self.active_id)),
                 "profiles": profiles,
                 "active_id": self.active_id,
-                "key_storage": "session_memory",
+                "key_storage": "local_file" if self.secret_path.exists() else "session_memory",
                 "execution_connected": bool(
                     self.tests.get(self.active_id, {}).get("ok")
                 ),
@@ -67,7 +76,7 @@ class Settings:
             }
 
     def save(self, body):
-        """原子保存元数据，秘密始终留在内存。 Atomically persist metadata, never credentials."""
+        """保存配置，仅在用户启用时持久化密钥。 Save profiles and persist keys only after user opt-in."""
         with self.lock:
             action = body.get("action", "save")
             ident = body.get("id") or self.active_id
@@ -132,6 +141,13 @@ class Settings:
                 json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             os.replace(temp, self.path)
+            # 用户显式启用本地保存后，删除/清除密钥也同步持久化。
+            # After opt-in, persist credential deletions and updates as well.
+            if body.get('persist_key') is True or self.secret_path.exists():
+                secret_temp = self.secret_path.with_suffix('.tmp')
+                secret_temp.write_text(json.dumps({i:{'base_url':profiles[i]['base_url'],'key':key}
+                                                   for i,key in keys.items() if i in profiles}),encoding='utf-8')
+                os.replace(secret_temp,self.secret_path)
             self.profiles, self.keys, self.tests, self.active_id = (
                 profiles,
                 keys,

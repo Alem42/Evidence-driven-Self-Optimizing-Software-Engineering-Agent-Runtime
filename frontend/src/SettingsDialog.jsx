@@ -15,7 +15,7 @@ export function SettingsDialog({initial,close,onUpdate}) {
     setBusy(true);setError('');setMessage('');
     try {const result=normalizeProfiles(await api('/settings',body));setCatalog(result);onUpdate(result);
       setValues(result.profiles.length?{...defaults,...result.profiles.find(p=>p.id===result.active_id),api_key:''}:{...defaults,new:true});
-      setMessage('已保存。密钥仅在当前服务内存，重启后需重新输入。');
+      setMessage(result.key_storage==='local_file'?'已保存到本地配置，重启后可继续使用。':'已保存。密钥在当前服务内存。');
     } catch(e){setError(e.message);} finally{setBusy(false);}
   }
   // 测试保存后的参数，一次点击只调用一次模型。 Probe saved parameters with one billed request per click.
@@ -31,7 +31,8 @@ export function SettingsDialog({initial,close,onUpdate}) {
       <form onSubmit={e=>{e.preventDefault();save(values);}}>
         <details><summary>从 JSON 导入一组 API</summary><textarea rows={4} value={importText} onChange={e=>setImportText(e.target.value)} placeholder={'{"base_url":"https://api.deepseek.com","model":"deepseek-v4-pro","api_key":"…"}'}/><button type="button" disabled={busy||!importText.trim()} onClick={importProfile}>解析并填入表单</button></details>
         <button type="button" disabled={busy} onClick={()=>setValues({...values,...defaults,api_key:values.api_key})}>使用 DeepSeek 推荐参数</button>
-        <div className="notice">名称和模型参数会保存；密钥不回显、不写磁盘。新服务启动后需重新输入。修改后先保存，再测试连接。</div>
+        <div className="notice">密钥不回显。可选择保存到本地忽略文件，重启后继续使用；清除密钥会同步清除本地保存。修改后先保存，再测试连接。</div>
+        <label className="check"><input type="checkbox" checked={catalog.key_storage==='local_file'||Boolean(values.persist_key)} disabled={catalog.key_storage==='local_file'} onChange={e=>setValues({...values,persist_key:e.target.checked})}/> 在本地持久保存密钥（不提交 Git）</label>
         {['name','base_url','model','api_key'].map((key,i)=><label key={key}>{['配置名称','Base URL（可粘贴完整 Chat Completions 地址）','模型 ID','API Key'][i]}<input required={key!=='api_key'} type={key==='api_key'?'password':'text'} autoComplete="off" value={values[key]||''} placeholder={key==='api_key'?'留空保留当前会话已有密钥':''} onChange={e=>setValues({...values,[key]:e.target.value})}/></label>)}
         <div className="field-pair"><label>请求超时（秒）<input type="number" min="1" max="60" value={values.timeout_seconds} onChange={e=>setValues({...values,timeout_seconds:Number(e.target.value)})}/></label><label>输出 token 上限<input type="number" min="64" max="8192" value={values.max_output_tokens} onChange={e=>setValues({...values,max_output_tokens:Number(e.target.value)})}/></label></div>
         <div className="field-pair"><label>输出参数<select value={values.token_parameter} onChange={e=>setValues({...values,token_parameter:e.target.value})}><option value="max_tokens">max_tokens · DeepSeek</option><option value="max_completion_tokens">max_completion_tokens</option></select></label><label>思考模式<select value={values.thinking} onChange={e=>setValues({...values,thinking:e.target.value})}><option value="disabled">关闭</option><option value="enabled">开启</option><option value="auto">提供商默认</option></select></label></div>

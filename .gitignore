@@ -2,6 +2,8 @@
 .tools/
 .cache/
 .masa/
+provider-keys.local.json
+provider-keys.local.tmp
 __pycache__/
 .pytest_cache/
 .ruff_cache/

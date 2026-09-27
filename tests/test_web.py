@@ -129,6 +129,15 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.request('/api/settings', {'base_url':'https://user:secret@example.com'})[0], 400)
         self.assertFalse(self.request('/api/settings', {'clear_key':True})[1]['key_configured'])
 
+    def test_explicit_local_credentials_survive_restart_and_clear(self):
+        settings=self.console.settings
+        settings.save({'base_url':'https://example.com','model':'test','api_key':'local-test-secret','persist_key':True})
+        restored=Settings(self.root/'state')
+        self.assertTrue(restored.public()['key_configured'])
+        self.assertNotIn('local-test-secret',json.dumps(restored.public()))
+        restored.save({'clear_key':True})
+        self.assertFalse(Settings(self.root/'state').public()['key_configured'])
+
     def test_run_pause_resume_revision_and_evidence(self):
         executor = FakeExecutor()
         with patch('masa.web.service.Runner', return_value=executor):
