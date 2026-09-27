@@ -84,3 +84,28 @@ class ProjectPlanTests(unittest.TestCase):
                 self.assertEqual(store.run(run_id)['status'],'failed')
                 self.assertEqual(store.run(run_id)['tool_calls'],0)
             finally: store.close()
+
+    def test_coverage_may_be_shared_across_checks(self):
+        checks=copy.deepcopy(CHECKS)
+        checks[0]['acceptance_indices']=[0]
+        checks[1]['acceptance_indices']=[1]
+        self.assertEqual(validate_checks(checks,SPEC),checks)
+
+    def test_missing_coverage_is_explicit_review_warning_not_success(self):
+        provider=PlannerProvider()
+        original=provider.respond
+        def respond(context):
+            result=original(context)
+            if context['purpose']=='project_tester':result[0]['acceptance_indices']=[]
+            return result
+        provider.respond=respond
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp))
+            try:
+                rid=ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI')
+                run=store.run(rid);plan=run['data']['project_plan']
+                self.assertEqual(run['status'],'paused')
+                self.assertIn('coverage_warning',plan)
+                self.assertEqual(store.read(plan['checks_ref'])[0]['acceptance_indices'],[0,1])
+                self.assertEqual(run['tool_calls'],0)
+            finally:store.close()

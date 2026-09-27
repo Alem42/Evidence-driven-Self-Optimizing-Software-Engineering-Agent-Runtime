@@ -125,7 +125,9 @@ class ChatProvider:
             elif context['purpose'] == 'project_tester':
                 instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
                     'three objects: operation (go_test, go_vet, go_fmt_check, each once), purpose (concrete verification strategy), '
-                    'acceptance_indices (zero-based indices into spec.acceptance). go_test must cover ALL acceptance indices. '
+                    'acceptance_indices (zero-based indices into spec.acceptance). Together the three checks must reference ALL acceptance indices. '
+                    'Assign behavior to go_test; static and formatting criteria may belong to go_vet or go_fmt_check. '
+                    'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
                     'Explain meaningful edge cases in purpose. Do not change the spec or invent results.')
             else:
                 instruction = common + ('You are Developer. Return exactly {"files":{relative_path:complete_file_content}}. '
@@ -223,7 +225,7 @@ class ChatProvider:
                 return validate_files(action['files'], context['spec'])
             if set(action) != {'checks'}:
                 raise MasaError('invalid Tester proposal')
-            return validate_checks(action['checks'], context['spec'])
+            return validate_checks(action['checks'], context['spec'], require_coverage=False)
         if context.get('purpose') == 'code_generation':
             if (set(action) != {'type','summary','content'} or action.get('type') != 'code_proposal'
                     or not isinstance(action.get('summary'), str) or len(action['summary']) > 4000

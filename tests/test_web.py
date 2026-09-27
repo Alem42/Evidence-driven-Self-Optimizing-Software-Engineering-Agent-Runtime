@@ -108,6 +108,19 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(status,200,execution)
                 self.assertEqual(self.wait_run(execution['id'])['run']['status'],'succeeded')
 
+    def test_background_planning_progress_and_logs(self):
+        from test_project_plan import PlannerProvider
+        with patch.object(self.console.settings,'provider',return_value=PlannerProvider()), patch('masa.web.service.Runner',return_value=FakeExecutor()):
+            status,job=self.request('/api/projects/plan',{'goal':'A CLI','background':True})
+            self.assertEqual(status,200)
+            self.console.job_thread.join(10)
+            status,progress=self.request('/api/jobs/'+job['job_id'])
+            self.assertEqual(progress['status'],'completed',progress)
+            self.assertEqual(progress['stage'],'project_tester')
+            rid=progress['result']['id']
+            self.assertIn('project_planner',self.request('/api/runs/'+rid+'/logs')[1]['text'])
+            self.assertEqual(self.request('/api/runs/'+rid+'/open-workspace',{})[0],400)
+
     def test_local_session_and_static_access(self):
         for headers in ({'X-MASA-Token':''}, {'Origin':'https://evil.example'}, {'Host':'evil.example'}, {'Sec-Fetch-Site':'cross-site'}):
             self.assertEqual(self.request('/api/runs', headers=headers)[0], 403)

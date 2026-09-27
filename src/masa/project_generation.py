@@ -34,7 +34,7 @@ class ProjectGeneration:
         self.store, self.executor = store, executor
         self.planning = ProjectPlanning(store, executor)
 
-    def generate(self, parent, provider):
+    def generate(self, parent, provider, on_created=None):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         original = self.store.run(parent)
         plan = original['data'].get('project_plan', {})
@@ -46,6 +46,8 @@ class ProjectGeneration:
         rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
               Budget(model_calls=2, tool_calls=3, deadline_seconds=86400), graph=graph,
               parent_run_id=parent, project_plan=metadata)
+        if on_created:
+            on_created(rid)
         try:
             files = self.planning.call(rid, provider, 'project_developer', {'goal':original['data']['goal'], **approved})
             validate_files(files, approved['spec'])

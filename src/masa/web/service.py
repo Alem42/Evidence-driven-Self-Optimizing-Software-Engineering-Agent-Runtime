@@ -3,6 +3,9 @@
 from dataclasses import asdict
 from pathlib import Path
 import threading
+import uuid
+import time
+import os
 
 from masa.adapters.runner import Runner
 from masa.adapters.sqlite import Store
@@ -32,6 +35,8 @@ class Console:
         self.worker = None
         self.errors = {}
         self.closing = False
+        self.jobs = {}
+        self.job_thread = None
         Store(self.root).close()
 
     def bootstrap(self):
@@ -255,6 +260,8 @@ class Console:
             return {'id': new_id}
 
     def _available(self):
+        if self.job_thread and self.job_thread.is_alive() and threading.current_thread() is not self.job_thread:
+            raise MasaError('project generation is busy; wait for the current job')
         if self.closing:
             raise MasaError("console is shutting down")
         if self.active:
@@ -280,14 +287,79 @@ class Console:
             self._launch(rid, 1 if pause_after is True else 0, self._provider_for(rid))
             return {"id": rid}
 
-    def plan_project(self, body):
+    def start_project_job(self, body, rid=None):
+        """快速返回任务标识，让浏览器轮询真实阶段。 Return a job ID immediately for polling actual stages."""
+        with self.lock:
+            self._available()
+            ident=uuid.uuid4().hex
+            self.jobs[ident]={'status':'running','run_id':None,'started':time.time()}
+            def created(run_id):
+                self.jobs[ident]['run_id']=run_id
+            def work():
+                try:
+                    result=self.generate_project(rid,body,created) if rid else self.plan_project(body,created)
+                    self.jobs[ident].update(status='completed',result=result)
+                except Exception as exc:
+                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
+            self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
+            self.job_thread.start()
+            return {'job_id':ident}
+
+    def project_job(self, ident):
+        """返回服务端进度，不编造 token 百分比。 Return server progress without inventing token percentages."""
+        if ident not in self.jobs:
+            raise MasaError('job unavailable after restart; check saved run records')
+        job=dict(self.jobs[ident])
+        if job['run_id']:
+            detail=self.detail(job['run_id'])
+            requested=[e for e in detail['events'] if e['type']=='model_requested']
+            job['stage']=requested[-1]['payload']['step_id'] if requested else 'preparing'
+        return job
+
+    def open_workspace(self, rid):
+        """仅打开该运行绑定的目录，不接受任意路径或命令。 Open only the workspace bound to this run."""
+        run=self.detail(rid)['run']
+        if run['data'].get('project_plan'):
+            raise MasaError('approve generated code before opening the project folder')
+        path=Path(run['data']['workspace']).resolve()
+        if not path.is_relative_to(self.root/'workspaces') or not path.is_dir():
+            raise MasaError('workspace unavailable')
+        if os.name!='nt':
+            raise MasaError('folder opening currently supports Windows; copy the workspace path')
+        os.startfile(str(path))
+        return {'path':str(path)}
+
+    def project_logs(self, rid):
+        """汇总来源链的角色事件与工具输出，便于复制。 Collect lineage events and tool outputs for copying."""
+        lines=[];seen=set()
+        while rid and rid not in seen and len(seen)<30:
+            seen.add(rid);d=self.detail(rid)
+            lines.append(f"RUN {rid} | {d['run']['status']} | {d['run']['data']['goal']}")
+            for event in d['events']:
+                lines.append(f"{event['created']} {event['type']} {event['payload']}")
+            for check in self.results(rid)['checks']:
+                result=check['result']
+                lines.append(f"{check['operation']}: {result}")
+                if result:
+                    lines.extend(['STDOUT:',result.get('stdout',''),'STDERR:',result.get('stderr','')])
+            rid=d['run']['data'].get('parent_run_id')
+        return {'text':'\n'.join(lines)}
+
+    def plan_project(self, body, on_created=None):
         """串行规划与角色交接，保存为可恢复预览的运行记录。 Serialize role planning into a persistent preview run."""
         with self.lock:
             self._available()
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, body.get('goal'))
+                reuse=body.get('retry_run_id')
+                goal=body.get('goal')
+                if reuse:
+                    old=store.run(reuse)
+                    if old['status']!='failed' or not old['data'].get('project_plan',{}).get('spec_ref'):
+                        raise MasaError('only failed plans with saved Planner output can retry Tester')
+                    goal=old['data']['goal']
+                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, goal,on_created,reuse)
                 return {'id':rid}
             finally:
                 store.close()
@@ -303,14 +375,14 @@ class Console:
             finally:
                 store.close()
 
-    def generate_project(self, rid, body):
+    def generate_project(self, rid, body, on_created=None):
         """生成多文件草稿，密钥继续只在服务内存。 Generate a multi-file draft with session-only credentials."""
         with self.lock:
             self._available()
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider)}
+                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider,on_created)}
             finally:
                 store.close()
 

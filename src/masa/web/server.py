@@ -92,7 +92,9 @@ def make_server(console, port=8765):
                 elif path == '/api/generate' and write:
                     result = console.generate(body)
                 elif path == '/api/projects/plan' and write:
-                    result = console.plan_project(body)
+                    result = console.start_project_job(body) if body.get('background') else console.plan_project(body)
+                elif len(parts)==3 and parts[:2]==['api','jobs'] and not write:
+                    result = console.project_job(parts[2])
                 elif path == "/api/runs":
                     result = console.create(body) if write else {"runs": console.list_runs(), "active_run": console.active}
                 elif len(parts) >= 3 and parts[:2] == ["api", "runs"]:
@@ -105,6 +107,8 @@ def make_server(console, port=8765):
                         result = {"markdown": console.report(rid)}
                     elif len(parts) == 4 and parts[3] == 'results' and not write:
                         result = console.results(rid)
+                    elif len(parts) == 4 and parts[3] == 'logs' and not write:
+                        result = console.project_logs(rid)
                     elif len(parts) == 4 and write:
                         action = parts[3]
                         if action == "resume":
@@ -114,7 +118,9 @@ def make_server(console, port=8765):
                         elif action == 'approve-project':
                             result = console.approve_project(rid, body)
                         elif action == 'generate-project':
-                            result = console.generate_project(rid, body)
+                            result = console.start_project_job(body,rid) if body.get('background') else console.generate_project(rid, body)
+                        elif action == 'open-workspace':
+                            result = console.open_workspace(rid)
                         elif action == 'approve-project-code':
                             result = console.approve_project_code(rid, body)
                         elif action == 'review-code':

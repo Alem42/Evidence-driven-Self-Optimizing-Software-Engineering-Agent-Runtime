@@ -55,11 +55,12 @@ def validate_spec(spec):
     return spec
 
 
-def validate_checks(checks, spec):
+def validate_checks(checks, spec, require_coverage=True):
     """验证 Tester 覆盖验收项；只允许固定工具，不接受命令字符串。 Validate coverage and allowlisted checks, never shell commands."""
     if not isinstance(checks, list) or len(checks) != 3:
         raise MasaError('Tester must propose test, vet and format checks')
     operations = set()
+    covered = set()
     for check in checks:
         if not isinstance(check, dict) or set(check) != {'operation','purpose','acceptance_indices'}:
             raise MasaError('invalid check fields')
@@ -70,8 +71,10 @@ def validate_checks(checks, spec):
         indices = check['acceptance_indices']
         if not isinstance(indices, list) or any(type(i) is not int or not 0 <= i < len(spec['acceptance']) for i in indices):
             raise MasaError('invalid acceptance reference')
-        if check['operation'] == 'go_test' and set(indices) != set(range(len(spec['acceptance']))):
-            raise MasaError('test plan must cover every acceptance criterion')
+        covered.update(indices)
+    missing = sorted(set(range(len(spec['acceptance']))) - covered)
+    if missing and require_coverage:
+        raise MasaError('check plan is missing acceptance criteria: ' + ', '.join(str(i+1) for i in missing))
     if len(canonical(checks).encode('utf-8')) > 16000:
         raise MasaError('check plan exceeds 16 KB')
     return checks
@@ -91,7 +94,7 @@ class ProjectPlanning:
                                   (canonical(data), status, 'project planning only; code not generated', rid))
             self.store._event(rid, event, plan)
 
-    def generate(self, provider, goal):
+    def generate(self, provider, goal, on_created=None, reuse=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
@@ -99,13 +102,31 @@ class ProjectPlanning:
         (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
         plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
         rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
-                                                       graph=harness_policy(), project_plan=plan)
+                                                       graph=harness_policy(), project_plan=plan, parent_run_id=reuse)
+        if on_created:
+            on_created(rid)
         try:
-            spec = self.call(rid, provider, 'project_planner', {'goal':goal})
+            if reuse:
+                old=self.store.run(reuse)['data']['project_plan']
+                spec=self.store.read(old['spec_ref'])
+                self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
+            else:
+                spec = self.call(rid, provider, 'project_planner', {'goal':goal})
             validate_spec(spec)
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
             checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
+            validate_checks(checks,spec,require_coverage=False)
+            covered={i for c in checks for i in c['acceptance_indices']}
+            missing=sorted(set(range(len(spec['acceptance'])))-covered)
+            if missing:
+                # 补的是待审核计划而不是验证结果；明确暴露模型遗漏。
+                # Supplement a reviewable plan, never evidence; expose the model's omissions.
+                test=next(c for c in checks if c['operation']=='go_test')
+                test['acceptance_indices']=sorted(set(test['acceptance_indices'])|set(missing))
+                test['purpose']+='\nRuntime review required: add verification for criteria '+', '.join(str(i+1) for i in missing)+'. Coverage is not proof; manually review non-testable constraints.'
+                plan['coverage_warning']='Tester 遗漏验收项 '+', '.join(str(i+1) for i in missing)+'；Runtime 已补入待审核验证计划，请确认策略是否足够。'
+                self.store.event(rid,'check_plan_supplemented',{'missing_indices':missing,'policy':'human review required; not verification evidence'})
             Runtime.compile_project_checks(spec, checks)
             plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
             self.update(rid, plan, 'paused', 'project_review_requested')
