@@ -15,9 +15,11 @@ export function ProjectPlanningDialog({profiles,select,close}) {
 }
 
 // 从持久化引用恢复审核内容，确认提交的是当前可见版本。 Restore persisted artifacts and approve the visible revision.
-export function ProjectPlanReview({detail}) {
+export function ProjectPlanReview({detail,profiles,select}) {
   const plan=detail.run.data.project_plan;
   const [spec,setSpec]=useState(null),[checks,setChecks]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false);
+  const [profile,setProfile]=useState('');
+  async function generate(){setBusy(true);setError('');try{const r=await api('/runs/'+detail.run.id+'/generate-project',{api_profile_id:profile||profiles?.active_id});select(r.id);}catch(e){setError(e.message);}finally{setBusy(false);}}
   useEffect(()=>{let stop=false;setSpec(null);setSaved(false);setError('');
     async function load(){if(!plan.spec_ref)return;try{
       if(plan.approval_ref){const r=await api('/runs/'+detail.run.id+'/artifacts/'+plan.approval_ref);if(!stop){setSpec(r.artifact.spec);setChecks(r.artifact.checks);}}
@@ -27,7 +29,8 @@ export function ProjectPlanReview({detail}) {
   const editable=plan.status==='awaiting_review'&&detail.run.status==='paused'&&!detail.run.cancel_requested&&!saved;
   async function approve(){setBusy(true);setError('');try{await api('/runs/'+detail.run.id+'/approve-project',{spec,checks,spec_ref:plan.spec_ref,checks_ref:plan.checks_ref});setSaved(true);}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <section className="panel code-review"><h3>项目方案 · {plan.status==='approved'||saved?'已确认，等待代码生成阶段':plan.status==='awaiting_review'?'等待你确认':plan.status==='failed'?'规划失败':'角色规划中'}</h3>
-    <p className="notice">这是架构提案，尚未生成项目文件，也没有运行测试。确认后冻结当前规格，供下一阶段生成代码使用。</p>
+    <p className="notice">确认规格后可让 Developer 生成整套代码草稿。代码还需逐文件审核批准，才会写入项目并运行验证。</p>
+    {(plan.status==='approved'||saved)&&<div><label>生成代码使用的 API<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><button className="primary" disabled={busy||!profiles?.profiles?.some(p=>p.key_configured)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；失败不自动重试。服务重启后请重新输入密钥。</p></div>}
     {(error||plan.error)&&<p className="error">{error||plan.error}</p>}{spec&&<><fieldset disabled={!editable||busy}><legend>Planner · 架构与职责</legend>
     <label>设计说明<textarea rows={4} value={spec.summary} onChange={e=>setSpec({...spec,summary:e.target.value})}/></label>
     <label>Go 模块名<input value={spec.module} onChange={e=>setSpec({...spec,module:e.target.value})}/></label><p>固定入口：{spec.entrypoint}</p>

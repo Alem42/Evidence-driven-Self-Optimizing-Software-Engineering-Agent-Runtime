@@ -4,6 +4,7 @@ import {api} from './api';
 import {SettingsDialog} from './SettingsDialog';
 import './style.css';
 import {CodeGeneration, CodeReview} from './CodeGeneration';
+import {ProjectCodeReview} from './ProjectCodeReview';
 import {ProjectPlanningDialog, ProjectPlanReview} from './ProjectPlanning';
 import {ResultsPanel} from './ResultsPanel';
 import {WorkflowGraph} from './WorkflowGraph';
@@ -43,7 +44,7 @@ function App() {
     <section className="run-heading"><div><div className="eyebrow">RUN / {id.slice(0,12)}</div><h2>{data.goal}</h2><p className="path">{data.source}</p></div><Badge value={run.status}/></section>
     <div className="workspace-toolbar"><div className="tabs">{[['results','运行结果'],['code','代码与审核'],['activity','执行过程']].map(([key,label])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}>{label}{key==='code'&&data.codegen?.status==='awaiting_review'?' · 待批准':''}</button>)}</div><button className="primary" disabled={busy||!!active||!!data.project_plan||!boot?.capabilities.rerun||!['succeeded','failed','needs_attention'].includes(run.status)||(data.codegen&&data.codegen.status!=='approved')} onClick={()=>act(async()=>select((await api('/runs/'+id+'/rerun',{})).id))}>▶ 一键重新验证</button></div>
     {data.codegen?.status==='awaiting_review'&&<div className="notice"><strong>草稿等待你的审核</strong><button onClick={()=>setPage('code')}>查看代码并批准运行 →</button></div>}
-    {data.project_plan&&page!=='activity'&&<ProjectPlanReview key={id} detail={detail}/>}
+    {data.project_plan&&page!=='activity'&&(data.project_plan.kind==='code'?<ProjectCodeReview key={id} detail={detail} select={select}/>:<ProjectPlanReview key={id} detail={detail} profiles={apis} select={select}/>)}
     {page==='results'&&!data.project_plan&&<ResultsPanel detail={detail}/>}
     {page==='code'&&!data.project_plan&&(data.codegen?.proposal_ref?<CodeReview key={id} detail={detail} onRevision={setGenerationForm}/>:<section className="panel"><h3>代码工作区</h3><p className="path">{data.workspace}</p><p>此任务验证已有代码。当前仅生成任务提供在线代码预览；可在本地编辑器查看此文件夹。</p>{data.parent_run_id&&<button onClick={()=>select(data.parent_run_id)}>查看来源任务与代码审核</button>}</section>)}
     {page==='activity'&&<>
