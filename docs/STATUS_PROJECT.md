@@ -27,3 +27,6 @@
 最新报告：[Planner 项目结构](progress/PROGRESS_2026-09-28_002_project-planner.md)。下一步：Developer 消费已批准规格，生成多文件提案；人审后完整发布项目并验证。go run 应用执行再后续接入。
 
 C implemented: approved specification -> multi-file draft -> human approval -> isolated Go project verification. See progress/PROGRESS_2026-09-28_003_project-generation.md.
+
+## 最新真实验收（2026-09-28）
+完整多文件生成链路已通过真实 DeepSeek 小型 CLI 验收，3821 tokens；执行 aa386729de444b25afd8e8b0114984ce。支持用户选择本地持久密钥保存，重启加载，不提交 Git。下一步前端程序运行。详见 progress/PROGRESS_2026-09-28_004_live-project.md。

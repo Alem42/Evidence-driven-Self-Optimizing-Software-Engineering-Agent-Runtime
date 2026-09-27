@@ -39,3 +39,6 @@ npm --prefix frontend test
 npm --prefix frontend run build
 
 额度紧张时立即记录已提交/未验证内容、测试结果和明确下一步，并提交可验证增量。不得为了清空工作区把失败功能写成完成。
+
+## 最新覆盖记录（2026-09-28）
+真实 DeepSeek 规划/Tester/Developer 已通过，总计 3821 tokens；执行 run aa386729de444b25afd8e8b0114984ce，3 工具检查和独立 4 CLI 场景通过。代码提交 ca1e443。用户授权本地密钥保存已实现，.masa/provider-keys.local.json 被忽略；不再要求每次重新输入。接续以 PLAN_NEXT_STAGE 的 CLI 前端运行为准，上文未进行真实测试的描述属于之前阶段。
