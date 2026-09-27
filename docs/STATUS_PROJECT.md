@@ -1,5 +1,9 @@
 # 当前项目状态
 
+## 面试材料补充（2026-09-28）
+
+已整理 [技术 20 问](guides/USER_INTERVIEW_TECHNICAL_QA.md)，区分源码事实与目标设计；见 [本轮文档报告](progress/PROGRESS_2026-09-28_006_interview-technical-qa.md)。仅文档变更，不增加产品能力，下一步仍按 PLAN_NEXT_STAGE 接入前端程序运行。
+
 更新：2026-09-28。实施顺序以 [路线](PLAN_PRIORITY_ROADMAP.md) 和 [下一阶段](PLAN_NEXT_STAGE.md) 为准，历史报告不覆盖此页。
 
 ## 已实现

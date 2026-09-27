@@ -11,6 +11,7 @@
 | [规划项目](guides/USER_PROJECT_PLANNING.md) | Planner 架构、Tester 检查与人工确认 |
 | [LLM 实施入口](LLM_IMPLEMENTATION_GUIDE.md) | 每次会话操作协议 |
 | [长期记忆](MEMORY_PROJECT.md) | Git、注释、文档持续约定 |
+| [面试技术 20 问](guides/USER_INTERVIEW_TECHNICAL_QA.md) | 当前实现、建议方案与愿景边界 |
 | [最新报告](progress/PROGRESS_2026-09-28_002_project-planner.md) | 本轮变化 |
 
 文档分区：
