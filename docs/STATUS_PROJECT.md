@@ -4,6 +4,8 @@
 
 ## 已实现
 
+- B1/B2/B3 基础链路：Planner 项目结构提案 → Tester 验证方案 → Runtime 契约校验/检查图编译 → 前端编辑确认；复用 run/artifact 与两次调用预算，规划不执行占位项目。真实上游 Planner 质量尚未验收。[使用说明](guides/USER_PROJECT_PLANNING.md)。
+
 - Python Runtime：持久化图、节点状态、预算、暂停/继续/取消、隔离快照、工具证据与独立 Gate。
 - Go Runner：test/vet/格式检查、AST 索引、进程限制；受控补丁和恢复。
 - 代码上下文、版本化记忆、只读角色协议、真实模型与多 API 配置；密钥仅服务内存。
@@ -22,4 +24,4 @@
 
 [长期记忆](MEMORY_PROJECT.md) 已加入 LLM 必读，这是仓库持久记忆，不是账户记忆。文档已分 guides/design/progress/archive/plans；最新验收见 [报告](progress/PROGRESS_2026-09-28_001_workspace-console.md)。
 
-下一步：ProjectSpec + Tester CheckPlan + 目录预览 + Runtime 校验/人工确认；然后多文件项目生成与应用执行。
+最新报告：[Planner 项目结构](progress/PROGRESS_2026-09-28_002_project-planner.md)。下一步：Developer 消费已批准规格，生成多文件提案；人审后完整发布项目并验证。go run 应用执行再后续接入。

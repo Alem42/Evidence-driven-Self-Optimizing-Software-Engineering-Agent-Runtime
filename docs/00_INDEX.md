@@ -8,9 +8,10 @@
 | [长期路线](PLAN_PRIORITY_ROADMAP.md) | 分阶段交付 |
 | [下一阶段](PLAN_NEXT_STAGE.md) | 下一轮范围和验收 |
 | [生成代码](guides/USER_GENERATE_CODE.md) | 真实模型、人审与验证 |
+| [规划项目](guides/USER_PROJECT_PLANNING.md) | Planner 架构、Tester 检查与人工确认 |
 | [LLM 实施入口](LLM_IMPLEMENTATION_GUIDE.md) | 每次会话操作协议 |
 | [长期记忆](MEMORY_PROJECT.md) | Git、注释、文档持续约定 |
-| [最新报告](progress/PROGRESS_2026-09-28_001_workspace-console.md) | 本轮变化 |
+| [最新报告](progress/PROGRESS_2026-09-28_002_project-planner.md) | 本轮变化 |
 
 文档分区：
 
