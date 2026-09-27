@@ -40,7 +40,8 @@ def validate_spec(spec):
             or name.lower() in names or not (name == 'go.mod' or name.endswith('.go'))):
             raise MasaError('invalid or duplicate project path')
         names.add(name.lower())
-    if 'go.mod' not in names or spec['entrypoint'] not in names or not any(n.endswith('_test.go') for n in names):
+    exact_names = {f['path'] for f in files}
+    if 'go.mod' not in exact_names or spec['entrypoint'] not in exact_names or not any(n.endswith('_test.go') for n in exact_names):
         raise MasaError('plan requires go.mod, entrypoint and acceptance tests')
     if any(any(other.startswith(n + '/') for other in names) for n in names):
         raise MasaError('file/directory path conflict')
@@ -49,6 +50,8 @@ def validate_spec(spec):
         raise MasaError('provide 1..12 acceptance criteria')
     for criterion in acceptance:
         text(criterion)
+    if len(canonical(spec).encode('utf-8')) > 40000:
+        raise MasaError('project specification exceeds 40 KB')
     return spec
 
 
@@ -60,7 +63,7 @@ def validate_checks(checks, spec):
     for check in checks:
         if not isinstance(check, dict) or set(check) != {'operation','purpose','acceptance_indices'}:
             raise MasaError('invalid check fields')
-        if check['operation'] not in {'go_test','go_vet','go_fmt_check'} or check['operation'] in operations:
+        if not isinstance(check['operation'], str) or check['operation'] not in {'go_test','go_vet','go_fmt_check'} or check['operation'] in operations:
             raise MasaError('unauthorized or duplicate check')
         operations.add(check['operation'])
         text(check['purpose'])
@@ -69,6 +72,8 @@ def validate_checks(checks, spec):
             raise MasaError('invalid acceptance reference')
         if check['operation'] == 'go_test' and set(indices) != set(range(len(spec['acceptance']))):
             raise MasaError('test plan must cover every acceptance criterion')
+    if len(canonical(checks).encode('utf-8')) > 16000:
+        raise MasaError('check plan exceeds 16 KB')
     return checks
 
 
@@ -92,7 +97,7 @@ class ProjectPlanning:
         seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
         seed.mkdir(parents=True)
         (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
-        plan = {'status':'planning', 'provider':provider.profile}
+        plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
         rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
                                                        graph=harness_policy(), project_plan=plan)
         try:
@@ -101,12 +106,13 @@ class ProjectPlanning:
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
             checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
-            validate_checks(checks, spec)
+            Runtime.compile_project_checks(spec, checks)
             plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
             self.update(rid, plan, 'paused', 'project_review_requested')
             return rid
         except Exception as exc:
             plan['status'] = 'failed'
+            plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
             self.update(rid, plan, 'failed', 'project_planning_failed')
             raise MasaError(f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
 
@@ -129,13 +135,16 @@ class ProjectPlanning:
         with self.store.transaction():
             run = self.store.run(rid)
             plan = run['data'].get('project_plan', {})
+            if time.time() >= run['data']['deadline_at']:
+                raise MasaError('project review deadline expired; create a new plan')
             if run['status'] != 'paused' or run['cancel_requested'] or plan.get('status') != 'awaiting_review':
                 raise MasaError('project plan is not awaiting review')
             if body.get('spec_ref') != plan.get('spec_ref') or body.get('checks_ref') != plan.get('checks_ref'):
                 raise MasaError('stale project proposal')
             spec = validate_spec(body.get('spec'))
-            checks = validate_checks(body.get('checks'), spec)
-            approval = {'spec':spec, 'checks':checks, 'graph':harness_policy().to_dict()}
+            checks = body.get('checks')
+            graph = Runtime.compile_project_checks(spec, checks)
+            approval = {'spec':spec, 'checks':checks, 'graph':graph.to_dict()}
             plan.update(status='approved', approval_ref=self.store.put(approval))
             # 状态和审批事件一起提交，不能形成部分批准。
             # Commit status and approval evidence together.

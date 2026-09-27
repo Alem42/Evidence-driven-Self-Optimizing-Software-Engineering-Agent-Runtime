@@ -83,6 +83,22 @@ class WebTests(unittest.TestCase):
             self.wait_run(created['id'])
             self.assertEqual(self.request('/api/runs/' + created['id'] + '/rerun', {})[0], 400)
 
+    def test_project_plan_http_review_and_execution_guards(self):
+        from test_project_plan import PlannerProvider, SPEC, CHECKS
+        with patch.object(self.console.settings, 'provider', return_value=PlannerProvider()), patch('masa.web.service.Runner', return_value=FakeExecutor()):
+            status, result = self.request('/api/projects/plan', {'goal':'Build a CSV CLI'})
+            self.assertEqual(status,200,result)
+            rid=result['id']
+            detail=self.request('/api/runs/'+rid)[1]
+            plan=detail['run']['data']['project_plan']
+            self.assertEqual(self.request('/api/runs/'+rid+'/artifacts/'+plan['spec_ref'])[1]['artifact'],SPEC)
+            self.assertEqual(self.request('/api/runs/'+rid+'/resume',{})[0],400)
+            body={'spec_ref':plan['spec_ref'],'checks_ref':plan['checks_ref'],'spec':SPEC,'checks':CHECKS}
+            self.assertEqual(self.request('/api/runs/'+rid+'/approve-project',body)[0],200)
+            self.assertEqual(self.request('/api/runs/'+rid+'/resume',{})[0],400)
+            self.assertEqual(self.request('/api/runs/'+rid+'/rerun',{})[0],400)
+            self.assertEqual(self.request('/api/runs/'+rid)[1]['tools'],[])
+
     def test_local_session_and_static_access(self):
         for headers in ({'X-MASA-Token':''}, {'Origin':'https://evil.example'}, {'Host':'evil.example'}, {'Sec-Fetch-Site':'cross-site'}):
             self.assertEqual(self.request('/api/runs', headers=headers)[0], 403)

@@ -83,6 +83,20 @@ class ChatTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
 
+    def test_planner_and_tester_use_distinct_prompts_and_validated_contracts(self):
+        from test_project_plan import SPEC, CHECKS
+        self.action = SPEC
+        spec = self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
+        self.assertEqual(spec, SPEC)
+        self.assertIn('You are Planner', self.requests[-1]['messages'][0]['content'])
+        self.action = {'checks':CHECKS}
+        checks = self.provider.respond({'purpose':'project_tester','spec':spec,'goal':'CSV CLI'})
+        self.assertEqual(checks,CHECKS)
+        self.assertIn('You are Tester', self.requests[-1]['messages'][0]['content'])
+        self.action = {'type':'tool_call','operation':'go_test','arguments':{}}
+        with self.assertRaises(MasaError):
+            self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
+
     def test_usage_and_deepseek_parameters(self):
         """核对兼容参数与真实返回的用量。 Verify compatible parameters and returned usage."""
         self.assertEqual(self.provider.respond(self.context), self.action)
