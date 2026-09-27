@@ -43,7 +43,7 @@ class Runtime:
             profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None, project_plan=None) -> str:
+    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None, project_plan=None, project_bundle=None) -> str:
         """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
@@ -71,6 +71,9 @@ class Runtime:
                 data['codegen'] = codegen
             if project_plan is not None:
                 data['project_plan'] = project_plan
+            if project_bundle is not None:
+                data['project_bundle'] = project_bundle
+                data['source'] = str(workspace)
             if hasattr(self.provider, 'profile'):
                 data['model_profile'] = self.provider.profile
             if parent_run_id:
@@ -99,6 +102,14 @@ class Runtime:
             if run["status"] in {"succeeded", "failed", "cancelled", "needs_attention"}:
                 return run
             generation = run['data'].get('codegen')
+            if run['data'].get('project_bundle'):
+                # 多文件快照必须与用户批准的完整内容一致。
+                # The complete snapshot must match the human-approved file bundle.
+                approved = self.store.read(run['data']['project_bundle']['approval_ref'])
+                expected = {name: hashlib.sha256(content.encode('utf-8')).hexdigest()
+                            for name, content in approved['files'].items()}
+                if self.store.read(run['data']['manifest_ref']) != expected:
+                    raise MasaError('project snapshot does not match approved files')
             if run['data'].get('project_plan'):
                 # 规划通过不等于代码存在，CLI 也不能执行占位项目。
                 # Approved planning is not generated code; block placeholder execution through CLI too.

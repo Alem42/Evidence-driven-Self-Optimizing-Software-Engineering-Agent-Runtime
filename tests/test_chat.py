@@ -97,6 +97,16 @@ class ChatTests(unittest.TestCase):
         with self.assertRaises(MasaError):
             self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
 
+    def test_developer_only_returns_approved_file_set(self):
+        from test_project_plan import SPEC
+        from test_project_generation import FILES
+        self.action={'files':FILES}
+        self.assertEqual(self.provider.respond({'purpose':'project_developer','spec':SPEC}),FILES)
+        self.assertIn('You are Developer',self.requests[-1]['messages'][0]['content'])
+        self.action={'files':{**FILES,'surprise.go':'package surprise'}}
+        with self.assertRaises(MasaError):
+            self.provider.respond({'purpose':'project_developer','spec':SPEC})
+
     def test_usage_and_deepseek_parameters(self):
         """核对兼容参数与真实返回的用量。 Verify compatible parameters and returned usage."""
         self.assertEqual(self.provider.respond(self.context), self.action)

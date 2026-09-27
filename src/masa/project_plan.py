@@ -35,7 +35,7 @@ def validate_spec(spec):
         text(item['purpose'])
         parts = name.split('/')
         if (not re.fullmatch(r'[A-Za-z0-9_./-]+', name) or any(
-            p in {'', '.', '..'} or p.endswith('.') or
+            p in {'', '.', '..'} or p.startswith('.') or p.endswith('.') or
             re.fullmatch(r'(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])', p.split('.')[0]) for p in parts)
             or name.lower() in names or not (name == 'go.mod' or name.endswith('.go'))):
             raise MasaError('invalid or duplicate project path')

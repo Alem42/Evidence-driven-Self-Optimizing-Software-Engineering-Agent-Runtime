@@ -98,6 +98,15 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.request('/api/runs/'+rid+'/resume',{})[0],400)
             self.assertEqual(self.request('/api/runs/'+rid+'/rerun',{})[0],400)
             self.assertEqual(self.request('/api/runs/'+rid)[1]['tools'],[])
+            from test_project_generation import DeveloperProvider, FILES
+            with patch.object(self.console.settings,'provider',return_value=DeveloperProvider()):
+                status,draft=self.request('/api/runs/'+rid+'/generate-project',{})
+                self.assertEqual(status,200,draft)
+                draft_id=draft['id']
+                data=self.request('/api/runs/'+draft_id)[1]['run']['data']['project_plan']
+                status,execution=self.request('/api/runs/'+draft_id+'/approve-project-code',{'files_ref':data['files_ref'],'files':FILES})
+                self.assertEqual(status,200,execution)
+                self.assertEqual(self.wait_run(execution['id'])['run']['status'],'succeeded')
 
     def test_local_session_and_static_access(self):
         for headers in ({'X-MASA-Token':''}, {'Origin':'https://evil.example'}, {'Host':'evil.example'}, {'Sec-Fetch-Site':'cross-site'}):

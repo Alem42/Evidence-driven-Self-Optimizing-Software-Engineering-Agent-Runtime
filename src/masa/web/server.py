@@ -76,7 +76,8 @@ def make_server(console, port=8765):
                     if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                         raise MasaError("JSON request required")
                     size = int(self.headers.get("Content-Length", "0"))
-                    if not 0 < size <= 65536:
+                    limit = 2000000 if path.endswith('/approve-project-code') else 65536
+                    if not 0 < size <= limit:
                         raise MasaError("invalid request body size")
                     body = json.loads(self.rfile.read(size))
                     if not isinstance(body, dict):
@@ -112,6 +113,10 @@ def make_server(console, port=8765):
                             result = console.rerun(rid)
                         elif action == 'approve-project':
                             result = console.approve_project(rid, body)
+                        elif action == 'generate-project':
+                            result = console.generate_project(rid, body)
+                        elif action == 'approve-project-code':
+                            result = console.approve_project_code(rid, body)
                         elif action == 'review-code':
                             result = console.review_code(rid, body)
                         elif action in {"pause", "cancel"}:

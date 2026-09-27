@@ -14,6 +14,7 @@ from masa.workflow import full_verification_policy, collaboration_policy, harnes
 from masa.codegen import CodeGeneration
 from masa.workspace import verify_snapshot
 from masa.project_plan import ProjectPlanning
+from masa.project_generation import ProjectGeneration
 
 
 class Console:
@@ -45,6 +46,7 @@ class Console:
                 "execute": True,
                 "rerun": True,
                 "project_planning": True,
+                "project_generation": True,
                 "graph": True,
                 "node_pause": True,
                 "revise_as_new_run": True,
@@ -300,6 +302,31 @@ class Console:
                 return {'id':rid}
             finally:
                 store.close()
+
+    def generate_project(self, rid, body):
+        """生成多文件草稿，密钥继续只在服务内存。 Generate a multi-file draft with session-only credentials."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider)}
+            finally:
+                store.close()
+
+    def approve_project_code(self, rid, body):
+        """批准整套文件后启动独立检查，重复请求不重复运行。 Approve the bundle and launch checks without duplicate runs."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                child = ProjectGeneration(store, Runner(self.runner_path,self.go_path)).approve(rid,body)
+                status = store.run(child)['status']
+            finally:
+                store.close()
+            if status == 'created':
+                self._launch(child,0)
+            return {'id':child}
 
     def generate(self, body):
         """为需求生成待审核草稿；单服务串行保护生成与执行。 Generate a pending draft while serializing generation/execution."""
