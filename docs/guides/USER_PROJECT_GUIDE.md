@@ -98,4 +98,4 @@ Go 是一块可独立解释和测试的工具模块：执行命令、处理超�
 
 每份报告会告诉你：这轮完成了什么、怎么验证、还缺什么、下一步做什么。即使任务中断或没全部完成，也要如实留下接续信息。只要入口和状态文件被读取，就不需要依赖某一个聊天窗口一直保存上下文。
 
-所有项目 Markdown 已集中在 docs，原始愿景在 archive。先看 [优先级表](PLAN_PRIORITY_ROADMAP.md) 和 [当前状态](STATUS_PROJECT.md)，需要深入时再看两份专项设计。
+所有项目 Markdown 已集中在 docs，原始愿景在 archive。先看 [优先级表](../PLAN_PRIORITY_ROADMAP.md) 和 [当前状态](../STATUS_PROJECT.md)，需要深入时再看两份专项设计。

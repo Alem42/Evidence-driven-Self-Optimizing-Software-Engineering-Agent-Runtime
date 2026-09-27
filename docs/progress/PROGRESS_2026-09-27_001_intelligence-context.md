@@ -28,4 +28,4 @@ Go runner 现在能提取 AST 声明、方法接收者、imports、源码范围�
 
 采用小仓库词法扫描，没有 FTS/embedding；记忆按整个快照保守失效，没有跨 run 复用。预算是 UTF-8 字节硬限制，非实测 token；角色目前只是材料视图。四角色协作、动态图和真实 provider 尚未完成。前端视觉/点击验收仍待可用浏览器，不与构建通过混淆。
 
-下一项 P1-04 四角色与有界定向交接，再推进 P1-05；接续读 [当前状态](../STATUS_PROJECT.md)。运行方式和限制见 [使用指南](../USER_CODE_INTELLIGENCE_GUIDE.md)。
+下一项 P1-04 四角色与有界定向交接，再推进 P1-05；接续读 [当前状态](../STATUS_PROJECT.md)。运行方式和限制见 [使用指南](../guides/USER_CODE_INTELLIGENCE_GUIDE.md)。

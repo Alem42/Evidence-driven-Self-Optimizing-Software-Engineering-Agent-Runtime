@@ -1,6 +1,6 @@
 # MASA Runtime 架构总纲
 
-v0.3 / 更新于 2026-09-27。本文定义整体设计；P0 与 P1-01～P1-03 最小实现已完成，其余 P1/P2 待实现。实际范围见 STATUS_PROJECT 与 USER_CODE_INTELLIGENCE_GUIDE；实施入口为 [LLM_IMPLEMENTATION_GUIDE](LLM_IMPLEMENTATION_GUIDE.md)，优先级为 [PLAN_PRIORITY_ROADMAP](PLAN_PRIORITY_ROADMAP.md)。
+v0.3 / 更新于 2026-09-27。本文定义整体设计；P0 与 P1-01～P1-03 最小实现已完成，其余 P1/P2 待实现。实际范围见 STATUS_PROJECT 与 USER_CODE_INTELLIGENCE_GUIDE；实施入口为 [LLM_IMPLEMENTATION_GUIDE](../LLM_IMPLEMENTATION_GUIDE.md)，优先级为 [PLAN_PRIORITY_ROADMAP](../PLAN_PRIORITY_ROADMAP.md)。
 
 ## 1. 最小工程形态
 
@@ -151,6 +151,6 @@ SQLite 短事务提交状态、事件和版本比较更新；模型调用和工�
 
 - [代码、记忆和上下文机制](DESIGN_INTELLIGENCE_CONTEXT.md)
 - [图、经验、路由和自优化机制](DESIGN_ADAPTIVE_OPTIMIZATION.md)
-- [优先级与各阶段完成标准](PLAN_PRIORITY_ROADMAP.md)
+- [优先级与各阶段完成标准](../PLAN_PRIORITY_ROADMAP.md)
 
 本总纲与专项文档定义未来实现契约；状态文件和实际检查结果才定义当前已完成能力。

@@ -35,4 +35,4 @@ API 导入问题已定位并修复：旧 8765 后端没有 profiles 数组，与
 
 支持标准库场景、单个 Go 实现文件；现有仓库不允许模型新建/删除文件或改测试。新项目可由用户提供验收测试，没有测试时不把编译成功当作需求完全满足。API 密钥仍仅服务内存。
 
-使用见 [USER_GENERATE_CODE](../USER_GENERATE_CODE.md)。下一阶段预计更新已写入 [PLAN_USABLE_MVP_NEXT](../PLAN_USABLE_MVP_NEXT.md)：优先失败反馈与审核体验，四角色语义协作和自动重规划后置。
+使用见 [USER_GENERATE_CODE](../guides/USER_GENERATE_CODE.md)。下一阶段预计更新已写入 [PLAN_USABLE_MVP_NEXT](../archive/plans/PLAN_USABLE_MVP_NEXT.md)：优先失败反馈与审核体验，四角色语义协作和自动重规划后置。

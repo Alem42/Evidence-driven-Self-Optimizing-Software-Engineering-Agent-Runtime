@@ -17,7 +17,7 @@
 | `c72b7e9` | 补丁账本、快照提交、部分写入恢复、CLI 入口及机制测试 |
 | `01a6536` | 真实 Go 修复和进程退出恢复测试、示例脚本、报告与核心注释 |
 
-主要入口：[补丁实现](../../src/masa/patching.py)、[运行时](../../src/masa/runtime.py)、[演示脚本](../../scripts/demo_patch.py)、[使用说明](../USER_P1_PATCH_QUICKSTART.md)。本报告及状态更新另作文档提交，完整记录可用 `git log --oneline` 查看。
+主要入口：[补丁实现](../../src/masa/patching.py)、[运行时](../../src/masa/runtime.py)、[演示脚本](../../scripts/demo_patch.py)、[使用说明](../guides/USER_P1_PATCH_QUICKSTART.md)。本报告及状态更新另作文档提交，完整记录可用 `git log --oneline` 查看。
 
 ## 验证
 

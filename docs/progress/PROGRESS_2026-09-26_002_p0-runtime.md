@@ -21,7 +21,7 @@
 
 在项目根目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1`：28 项 Python 测试通过，Go 测试及 go vet 通过，整体退出码 0。覆盖非零退出、大输出、取消/超时/强制结束后的父子进程清理、依赖失败、过期快照、预算耗尽和恢复。
 
-保留的实际演示 run 为 `b252c572cb84425ca5465676ceb74bb3`：paused→succeeded，2 次 scripted 响应、1 次真实 go_test，恢复未重复调用工具。实际使用方式见 [P0 快速开始](../USER_P0_QUICKSTART.md)。
+保留的实际演示 run 为 `b252c572cb84425ca5465676ceb74bb3`：paused→succeeded，2 次 scripted 响应、1 次真实 go_test，恢复未重复调用工具。实际使用方式见 [P0 快速开始](../guides/USER_P0_QUICKSTART.md)。
 
 ## 未完成与限制
 

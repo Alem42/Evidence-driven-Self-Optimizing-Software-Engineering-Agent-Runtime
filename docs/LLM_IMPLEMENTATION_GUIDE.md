@@ -1,5 +1,7 @@
 # MASA：面向后续 LLM 的实施入口与会话协议
 
+> 2026-09-28 接续规则：先读 [长期记忆](MEMORY_PROJECT.md)、[当前状态](STATUS_PROJECT.md)、[当前路线](PLAN_PRIORITY_ROADMAP.md)、[下一阶段](PLAN_NEXT_STAGE.md)。旧 P0/P1 顺序与新路线冲突时，以这些当前文件和用户最新要求为准。角色提出决策，检查节点执行动作，Runtime 校验权限/计划，Gate 独立核对真实结果。每个验证过的增量及时提交。模块设计在 design/，使用指南在 guides/，旧计划在 archive/plans/。
+
 版本 v0.3 / 2026-09-26。本文是后续实现整个项目的操作入口，不要求一次会话完成所有内容。必须结合当前用户消息判断本轮是设计、审查还是代码实现。
 
 ## 1. 首要目标
@@ -13,7 +15,7 @@
 依次读：[项目长期约定](MEMORY_PROJECT.md) → 本文件 → [STATUS_PROJECT](STATUS_PROJECT.md) → [PLAN_PRIORITY_ROADMAP](PLAN_PRIORITY_ROADMAP.md) → 最近一份 progress 报告 → 本轮相关 DESIGN。
 
 - 查实际文件和 Git 状态（如果已初始化），识别用户已有改动；文档写完成但文件不存在时先核对，不虚构恢复。
-- 使用 [ENV_LOCAL_SETUP](ENV_LOCAL_SETUP.md) 了解环境；只在需要时检查版本，不每轮重新安装工具链或运行所有测试。
+- 使用 [ENV_LOCAL_SETUP](guides/ENV_LOCAL_SETUP.md) 了解环境；只在需要时检查版本，不每轮重新安装工具链或运行所有测试。
 - 读取适用的上层/目录指令；不因为本项目设计涉及 multi-agent 就自动启动协作子代理。
 - 选择最早未完成且依赖已满足的任务；如果用户明确指定另一个已可执行任务，以用户为准。
 - 在状态中将当前任务标为 in_progress，记录基线、准备修改的模块和本轮验收。
