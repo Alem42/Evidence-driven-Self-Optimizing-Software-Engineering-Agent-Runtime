@@ -9,7 +9,7 @@ import os
 
 from masa.adapters.runner import Runner
 from masa.adapters.sqlite import Store
-from masa.domain import Budget, MasaError, OPERATIONS
+from masa.domain import Budget, Graph, MasaError, OPERATIONS
 from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
@@ -247,8 +247,11 @@ class Console:
                 source = Path(data['workspace'])
                 verify_snapshot(source, data['snapshot_id'])
                 runtime = Runtime(store, Runner(self.runner_path, self.go_path))
+                # 项目重验保留已批准 Agent 图，旧演示继续使用完整固定检查。
+                # Preserve approved agent graphs on reruns; legacy demos retain full checks.
+                graph=Graph.from_dict(data['graph']) if data['graph'].get('policy_version')=='agent-check-plan-v1' else harness_policy()
                 new_id = runtime.create(source, data['goal'], self._budget({'full_checks': True}),
-                                        graph=harness_policy(), parent_run_id=rid)
+                                        graph=graph, parent_run_id=rid)
                 # 复制前后都绑定同一版本，避免外部改动绕过审核。
                 # Bind both sides of the copy to the reviewed version.
                 if store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:

@@ -139,6 +139,8 @@ class ChatProvider:
                     'go.mod must be exactly "module " + spec.module + "\\n\\ngo 1.27.0\\n". '
                     'Implement the supplied Tester cases with explicit independently calculated expectations. '
                     'Test observable behavior, not implementation details. Include entrypoint-level tests where paths permit; use t.TempDir, '
+                    'For CLI testing prefer run(args []string, stdout, stderr io.Writer) int with main calling os.Exit(run(...)); '
+                    'test run directly with buffers and temp input files. NEVER exec os.Args[0] in tests: it recursively launches the test binary. '
                     'avoid network/time-dependent tests, never skip failing cases or change requirements to make tests pass. '
                     'Use bilingual Chinese/English function comments. No placeholders. The human reviews before any write.')
             payload['messages'][0]['content'] = instruction
