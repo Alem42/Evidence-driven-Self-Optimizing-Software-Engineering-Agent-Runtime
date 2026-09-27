@@ -88,12 +88,17 @@ class Runtime:
     def compile_project_checks(spec, checks):
         """校验角色计划并生成受限动作图；提案不能提供任意执行图。 Validate role plans and compile an allowlisted action graph."""
         from masa.project_plan import validate_spec, validate_checks
-        from masa.workflow import harness_policy
+        from masa.workflow import validate
+        from masa.domain import Node
         validate_spec(spec)
         validate_checks(checks, spec)
-        # 本阶段三个检查全部必需；Gate 覆盖每个检查，不采信模型的通过声明。
-        # All three checks are required; Gate covers them independently of model claims.
-        return harness_policy()
+        # 采用已批准的 Agent 检查选择，最终 Gate 始终由 Runtime 添加。
+        # Compile approved agent choices; Runtime always adds the independent Gate.
+        names={'go_test':'test','go_vet':'vet','go_fmt_check':'format'}
+        nodes=tuple(Node(names[c['operation']],'tool',operation=c['operation']) for c in checks)
+        graph=Graph(nodes+(Node('gate','gate',tuple(n.id for n in nodes),'all_terminal'),),policy_version='agent-check-plan-v1')
+        validate(graph)
+        return graph
 
     def execute(self, run_id: str, pause_after: int = 0) -> dict:
         """持锁恢复并调度图，依据证据结束。 Recover and schedule under lock, then finalize from evidence."""

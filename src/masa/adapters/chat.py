@@ -119,21 +119,27 @@ class ChatProvider:
                 instruction = common + ('You are Planner. Explain a small practical architecture matching the goal. '
                     'Return exactly summary (brief design rationale and tradeoffs), module (e.g. example.com/task), '
                     'entrypoint (exactly cmd/app/main.go), files (3..20 objects with path and purpose), '
-                    'acceptance (1..12 concrete testable requirement strings). Include go.mod, cmd/app/main.go, '
+                    'acceptance (1..24 concrete testable requirement strings). Include go.mod, cmd/app/main.go, '
                     'implementation and _test.go files. Paths are relative and portable. Only .go files and go.mod. '
                     'Avoid unnecessary layers; explain each file responsibility. Use the user language for descriptions.')
             elif context['purpose'] == 'project_tester':
                 instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
-                    'three objects: operation (go_test, go_vet, go_fmt_check, each once), purpose (concrete verification strategy), '
+                    'one to three objects chosen for this project: operation (go_test required; go_vet and go_fmt_check recommended, each at most once), purpose (concrete verification strategy), '
                     'acceptance_indices (zero-based indices into spec.acceptance). Together the three checks must reference ALL acceptance indices. '
                     'Assign behavior to go_test; static and formatting criteria may belong to go_vet or go_fmt_check. '
                     'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
+                    'For go_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
+                    'level (unit, integration or cli). Include happy path, malformed input, empty input, boundary cases and CLI behavior. '
+                    'Compute expected values independently, not by calling the implementation. Keep fixtures tiny and deterministic. '
                     'Explain meaningful edge cases in purpose. Do not change the spec or invent results.')
             else:
                 instruction = common + ('You are Developer. Return exactly {"files":{relative_path:complete_file_content}}. '
                     'Implement EVERY file in spec.files, no extra files. Write working implementation and meaningful Go tests '
                     'for every acceptance criterion, including edge cases. Use only the standard library and gofmt style. '
                     'go.mod must be exactly "module " + spec.module + "\\n\\ngo 1.27.0\\n". '
+                    'Implement the supplied Tester cases with explicit independently calculated expectations. '
+                    'Test observable behavior, not implementation details. Include entrypoint-level tests where paths permit; use t.TempDir, '
+                    'avoid network/time-dependent tests, never skip failing cases or change requirements to make tests pass. '
                     'Use bilingual Chinese/English function comments. No placeholders. The human reviews before any write.')
             payload['messages'][0]['content'] = instruction
         if self.config["thinking"] != "auto":

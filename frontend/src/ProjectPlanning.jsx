@@ -42,7 +42,7 @@ export function ProjectPlanReview({detail,profiles,select}) {
     <label>Go 模块名<input value={spec.module} onChange={e=>setSpec({...spec,module:e.target.value})}/></label><p>固定入口：{spec.entrypoint}</p>
     <h4>目录与文件职责</h4>{spec.files.map((f,i)=><div className="field-pair" key={i}><label>文件路径<input value={f.path} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,path:e.target.value}:v)})}/></label><label>负责什么<input value={f.purpose} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,purpose:e.target.value}:v)})}/></label></div>)}
     <h4>验收标准</h4>{spec.acceptance.map((v,i)=><label key={i}>#{i+1}<textarea rows={2} value={v} onChange={e=>setSpec({...spec,acceptance:spec.acceptance.map((a,n)=>n===i?e.target.value:a)})}/></label>)}
-    <h4>Tester · 验证方案</h4>{checks.map((c,i)=><label key={c.operation}>{c.operation} · 覆盖验收项 {c.acceptance_indices.map(n=>n+1).join(', ')||'通用检查'}<textarea rows={3} value={c.purpose} onChange={e=>setChecks(checks.map((v,n)=>n===i?{...v,purpose:e.target.value}:v))}/></label>)}
+    <h4>Tester · 验证方案</h4>{checks.map((c,i)=><div key={c.operation}><label>{c.operation} · 覆盖验收项 {c.acceptance_indices.map(n=>n+1).join(', ')||'通用检查'}<textarea rows={3} value={c.purpose} onChange={e=>setChecks(checks.map((v,n)=>n===i?{...v,purpose:e.target.value}:v))}/></label>{c.cases?.map((t,n)=><details key={n}><summary>{t.level} · {t.name}</summary><p>输入：{t.input}</p><p>预期：{t.expected}</p></details>)}</div>)}
     </fieldset>{editable&&<button className="primary" disabled={busy} onClick={()=>approve(true)}>{busy?'正在确认…':'确认方案并生成代码与测试'}</button>}</>}
   </section>;
 }

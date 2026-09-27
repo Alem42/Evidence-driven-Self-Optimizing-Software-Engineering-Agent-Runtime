@@ -46,8 +46,8 @@ def validate_spec(spec):
     if any(any(other.startswith(n + '/') for other in names) for n in names):
         raise MasaError('file/directory path conflict')
     acceptance = spec['acceptance']
-    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= 12:
-        raise MasaError('provide 1..12 acceptance criteria')
+    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= 24:
+        raise MasaError('provide 1..24 acceptance criteria')
     for criterion in acceptance:
         text(criterion)
     if len(canonical(spec).encode('utf-8')) > 40000:
@@ -57,12 +57,12 @@ def validate_spec(spec):
 
 def validate_checks(checks, spec, require_coverage=True):
     """验证 Tester 覆盖验收项；只允许固定工具，不接受命令字符串。 Validate coverage and allowlisted checks, never shell commands."""
-    if not isinstance(checks, list) or len(checks) != 3:
-        raise MasaError('Tester must propose test, vet and format checks')
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 3:
+        raise MasaError('Tester must propose 1..3 distinct allowed checks')
     operations = set()
     covered = set()
     for check in checks:
-        if not isinstance(check, dict) or set(check) != {'operation','purpose','acceptance_indices'}:
+        if not isinstance(check, dict) or not {'operation','purpose','acceptance_indices'} <= set(check) or set(check)-{'operation','purpose','acceptance_indices','cases'}:
             raise MasaError('invalid check fields')
         if not isinstance(check['operation'], str) or check['operation'] not in {'go_test','go_vet','go_fmt_check'} or check['operation'] in operations:
             raise MasaError('unauthorized or duplicate check')
@@ -72,6 +72,18 @@ def validate_checks(checks, spec, require_coverage=True):
         if not isinstance(indices, list) or any(type(i) is not int or not 0 <= i < len(spec['acceptance']) for i in indices):
             raise MasaError('invalid acceptance reference')
         covered.update(indices)
+        if 'cases' in check:
+            cases=check['cases']
+            if not isinstance(cases,list) or not 1<=len(cases)<=16:
+                raise MasaError('provide 1..16 concrete test cases')
+            for case in cases:
+                if not isinstance(case,dict) or set(case)!={'name','input','expected','level'}:
+                    raise MasaError('invalid test case contract')
+                for field in ('name','input','expected'):text(case[field],1000)
+                if case['level'] not in ('unit','integration','cli'):
+                    raise MasaError('invalid test level')
+    if 'go_test' not in operations:
+        raise MasaError('at least one real go_test check is required')
     missing = sorted(set(range(len(spec['acceptance']))) - covered)
     if missing and require_coverage:
         raise MasaError('check plan is missing acceptance criteria: ' + ', '.join(str(i+1) for i in missing))

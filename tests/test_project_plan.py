@@ -91,6 +91,16 @@ class ProjectPlanTests(unittest.TestCase):
         checks[1]['acceptance_indices']=[1]
         self.assertEqual(validate_checks(checks,SPEC),checks)
 
+    def test_agent_selects_graph_and_concrete_case_contract(self):
+        checks=[copy.deepcopy(CHECKS[0])]
+        checks[0]['cases']=[{'name':'empty','input':'no args','expected':'exit 0, stdout 0','level':'cli'}]
+        graph=Runtime.compile_project_checks(SPEC,checks)
+        self.assertEqual([n.id for n in graph.nodes],['test','gate'])
+        self.assertEqual(graph.nodes[-1].dependencies,('test',))
+        with self.assertRaises(MasaError):Runtime.compile_project_checks(SPEC,[CHECKS[1]])
+        checks[0]['cases'][0]['expected']=''
+        with self.assertRaises(MasaError):validate_checks(checks,SPEC)
+
     def test_missing_coverage_is_explicit_review_warning_not_success(self):
         provider=PlannerProvider()
         original=provider.respond

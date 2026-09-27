@@ -14,6 +14,7 @@ def main():
     """分阶段保存引用，支持生成后人工审查再执行。 Persist stage references so code can be inspected before execution."""
     parser=argparse.ArgumentParser()
     parser.add_argument('--draft',help='approve and execute an inspected draft without another model call')
+    parser.add_argument('--goal-file',type=Path,help='UTF-8 realistic project requirements; calls the real API')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1]
     store=Store(root/'.masa')
@@ -26,6 +27,8 @@ def main():
                   'No arguments prints 0. Negative integers work. Invalid integers return exit code 2 and an error on stderr. '
                   'Use exactly 4 files: go.mod, cmd/app/main.go, internal/app/sum.go, internal/app/sum_test.go. '
                   'Avoid overflow requirements; test empty, negative and invalid inputs. Keep code small and gofmt formatted.')
+            if args.goal_file:
+                goal=args.goal_file.read_text(encoding='utf-8')
             parent=planning.generate(provider,goal)
             print('PLAN',parent,flush=True)
             plan=store.run(parent)['data']['project_plan']
