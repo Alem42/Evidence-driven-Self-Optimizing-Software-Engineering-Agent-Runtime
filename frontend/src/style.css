@@ -5,3 +5,8 @@
 .node.failed,.node.needs_attention{border-color:#bd6b58;background:#fff5f0}.node.skipped,.node.cancelled{background:#f1f3ef;color:#778477}.node:focus-visible{outline:3px solid #317e63;outline-offset:4px}.actions .check{margin:0 8px 0 0}
 
 .code-review{padding:24px}.code-editor{font-family:Consolas,monospace;tab-size:4;white-space:pre;overflow:auto;line-height:1.6}.code-review summary{cursor:pointer}header{gap:12px;flex-wrap:wrap}
+
+/* 工作台分区降低首屏信息密度。 Workspace sections keep the primary flow readable. */
+.workspace-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:20px 0;flex-wrap:wrap}
+.workspace-toolbar .tabs{border:0;padding:0}.results-panel{padding:24px}.check-result{padding:16px 0;border-top:1px solid #dbe5df}.check-result h3{margin:0}.result-pass{color:#167348}.result-fail{color:#a44727}.check-result pre{max-height:320px;overflow:auto;white-space:pre-wrap}.run-heading h2{font-size:24px;line-height:1.5}.code-review{padding:24px}.path{overflow-wrap:anywhere}header{flex-wrap:wrap;gap:12px}header>div{flex:1;min-width:220px}.notice{flex-wrap:wrap}button:disabled{cursor:not-allowed;opacity:.5}
+@media(max-width:850px){.shell{display:block}aside{position:relative;width:100%;height:auto}aside nav{max-height:180px;overflow:auto}.side-foot{display:none}main{margin-left:0;padding:20px}.metrics{grid-template-columns:repeat(2,1fr)}.panel-head{flex-wrap:wrap}.actions{flex-wrap:wrap}}
