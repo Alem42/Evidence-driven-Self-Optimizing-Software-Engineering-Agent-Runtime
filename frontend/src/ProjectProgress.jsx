@@ -23,5 +23,5 @@ export function ProjectFlow({detail}) {
   const stage=p?(p.kind==='code'?2:0):3;
   const labels=['方案与验收','确认方案','代码与测试','审核并验证','查看结果'];
   const current=p?(p.status==='approved'?stage+1:stage):(detail.active?3:4);
-  return <section className="panel"><div className="tabs">{labels.map((label,i)=><span key={label} className={'badge '+(i===current?'running':i<current?'succeeded':'pending')}>{i+1}. {label}</span>)}</div><p className="hint">模型提出方案和代码；人工批准后 Runtime 执行检查，Gate 独立判定。已完成项目可一键重新验证。</p></section>;
+  return <section className="panel"><div className="tabs">{labels.map((label,i)=><span key={label} className={'badge '+(i===current?(detail.run.status==='failed'?'failed':'running'):i<current?'succeeded':'pending')}>{i+1}. {label}</span>)}</div><p className="hint">当前运行状态：{detail.run.status}。模型提出方案和代码；人工批准后 Runtime 执行检查，Gate 独立判定。已完成项目可一键重新验证。</p></section>;
 }
