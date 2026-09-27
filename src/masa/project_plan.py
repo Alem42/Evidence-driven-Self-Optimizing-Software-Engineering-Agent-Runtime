@@ -1,0 +1,145 @@
+"""项目规划契约与角色编排。 Project planning contracts and role orchestration."""
+
+import re
+import time
+import uuid
+from masa.domain import Budget, MasaError, canonical
+from masa.runtime import Runtime
+from masa.workflow import harness_policy
+
+
+def text(value, limit=2000):
+    """校验有界非空文本。 Validate bounded nonempty text."""
+    if not isinstance(value, str) or not value.strip() or len(value) > limit or '\x00' in value:
+        raise MasaError('invalid project text')
+    return value
+
+
+def validate_spec(spec):
+    """校验可移植目录与标准库 CLI 规格，不相信模型输出。 Validate portable standard-library CLI specifications."""
+    if not isinstance(spec, dict) or set(spec) != {'summary','module','entrypoint','files','acceptance'}:
+        raise MasaError('invalid ProjectSpec fields')
+    text(spec['summary'])
+    if not re.fullmatch(r'[a-z][a-z0-9.-]*(/[a-z][a-z0-9_-]*)+', text(spec['module'], 160)):
+        raise MasaError('invalid Go module name')
+    if spec['entrypoint'] != 'cmd/app/main.go':
+        raise MasaError('entrypoint must be cmd/app/main.go')
+    files = spec['files']
+    if not isinstance(files, list) or not 3 <= len(files) <= 20:
+        raise MasaError('project requires 3..20 files')
+    names = set()
+    for item in files:
+        if not isinstance(item, dict) or set(item) != {'path','purpose'}:
+            raise MasaError('invalid planned file')
+        name = text(item['path'], 180)
+        text(item['purpose'])
+        parts = name.split('/')
+        if (not re.fullmatch(r'[A-Za-z0-9_./-]+', name) or any(
+            p in {'', '.', '..'} or p.endswith('.') or
+            re.fullmatch(r'(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])', p.split('.')[0]) for p in parts)
+            or name.lower() in names or not (name == 'go.mod' or name.endswith('.go'))):
+            raise MasaError('invalid or duplicate project path')
+        names.add(name.lower())
+    if 'go.mod' not in names or spec['entrypoint'] not in names or not any(n.endswith('_test.go') for n in names):
+        raise MasaError('plan requires go.mod, entrypoint and acceptance tests')
+    if any(any(other.startswith(n + '/') for other in names) for n in names):
+        raise MasaError('file/directory path conflict')
+    acceptance = spec['acceptance']
+    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= 12:
+        raise MasaError('provide 1..12 acceptance criteria')
+    for criterion in acceptance:
+        text(criterion)
+    return spec
+
+
+def validate_checks(checks, spec):
+    """验证 Tester 覆盖验收项；只允许固定工具，不接受命令字符串。 Validate coverage and allowlisted checks, never shell commands."""
+    if not isinstance(checks, list) or len(checks) != 3:
+        raise MasaError('Tester must propose test, vet and format checks')
+    operations = set()
+    for check in checks:
+        if not isinstance(check, dict) or set(check) != {'operation','purpose','acceptance_indices'}:
+            raise MasaError('invalid check fields')
+        if check['operation'] not in {'go_test','go_vet','go_fmt_check'} or check['operation'] in operations:
+            raise MasaError('unauthorized or duplicate check')
+        operations.add(check['operation'])
+        text(check['purpose'])
+        indices = check['acceptance_indices']
+        if not isinstance(indices, list) or any(type(i) is not int or not 0 <= i < len(spec['acceptance']) for i in indices):
+            raise MasaError('invalid acceptance reference')
+        if check['operation'] == 'go_test' and set(indices) != set(range(len(spec['acceptance']))):
+            raise MasaError('test plan must cover every acceptance criterion')
+    return checks
+
+
+class ProjectPlanning:
+    def __init__(self, store, executor):
+        """复用运行记录和 artifact，不引入新调度器。 Reuse runs and artifacts without a new scheduler."""
+        self.store, self.executor = store, executor
+
+    def update(self, rid, plan, status, event):
+        """原子发布规划状态和引用。 Publish plan state and references atomically."""
+        with self.store.transaction():
+            data = self.store.run(rid)['data']
+            data['project_plan'] = plan
+            self.store.db.execute('UPDATE runs SET data=?,status=?,reason=? WHERE id=?',
+                                  (canonical(data), status, 'project planning only; code not generated', rid))
+            self.store._event(rid, event, plan)
+
+    def generate(self, provider, goal):
+        """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
+        text(goal, 16000)
+        seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
+        seed.mkdir(parents=True)
+        (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
+        plan = {'status':'planning', 'provider':provider.profile}
+        rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
+                                                       graph=harness_policy(), project_plan=plan)
+        try:
+            spec = self.call(rid, provider, 'project_planner', {'goal':goal})
+            validate_spec(spec)
+            plan['spec_ref'] = self.store.put(spec)
+            self.update(rid, plan, 'created', 'planner_proposed')
+            checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
+            validate_checks(checks, spec)
+            plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
+            self.update(rid, plan, 'paused', 'project_review_requested')
+            return rid
+        except Exception as exc:
+            plan['status'] = 'failed'
+            self.update(rid, plan, 'failed', 'project_planning_failed')
+            raise MasaError(f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+
+    def call(self, rid, provider, purpose, values):
+        """先记调用预算，再保存响应与用量，不自动重试。 Charge before calling; persist output and usage without retries."""
+        context = {'purpose':purpose, **values}
+        self.store.charge_model(rid, purpose, 2, provider.profile, self.store.put(context))
+        started = time.monotonic()
+        try:
+            output = provider.respond(context)
+        except Exception:
+            self.store.event(rid, 'model_failed', {'step_id':purpose, 'usage':getattr(provider,'usage',None)})
+            raise
+        self.store.event(rid, 'model_completed', {'step_id':purpose, 'response_ref':self.store.put(output),
+                         'usage':getattr(provider,'usage',None), 'duration_ms':round((time.monotonic()-started)*1000)})
+        return output
+
+    def approve(self, rid, body):
+        """确认最终可见规格，绑定原提案；批准规划不授权执行空项目。 Approve visible specifications without authorizing execution."""
+        with self.store.transaction():
+            run = self.store.run(rid)
+            plan = run['data'].get('project_plan', {})
+            if run['status'] != 'paused' or run['cancel_requested'] or plan.get('status') != 'awaiting_review':
+                raise MasaError('project plan is not awaiting review')
+            if body.get('spec_ref') != plan.get('spec_ref') or body.get('checks_ref') != plan.get('checks_ref'):
+                raise MasaError('stale project proposal')
+            spec = validate_spec(body.get('spec'))
+            checks = validate_checks(body.get('checks'), spec)
+            approval = {'spec':spec, 'checks':checks, 'graph':harness_policy().to_dict()}
+            plan.update(status='approved', approval_ref=self.store.put(approval))
+            # 状态和审批事件一起提交，不能形成部分批准。
+            # Commit status and approval evidence together.
+            data = run['data']; data['project_plan'] = plan
+            self.store.db.execute('UPDATE runs SET data=? WHERE id=?', (canonical(data), rid))
+            self.store._event(rid, 'project_plan_approved', plan)
+        return rid

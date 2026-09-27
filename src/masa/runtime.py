@@ -43,7 +43,7 @@ class Runtime:
             profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None) -> str:
+    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None, project_plan=None) -> str:
         """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
         budget.validate()
         if not goal.strip() or len(goal) > 16000:
@@ -69,6 +69,8 @@ class Runtime:
                 data['intelligence'] = True
             if codegen is not None:
                 data['codegen'] = codegen
+            if project_plan is not None:
+                data['project_plan'] = project_plan
             if hasattr(self.provider, 'profile'):
                 data['model_profile'] = self.provider.profile
             if parent_run_id:
@@ -86,6 +88,10 @@ class Runtime:
             if run["status"] in {"succeeded", "failed", "cancelled", "needs_attention"}:
                 return run
             generation = run['data'].get('codegen')
+            if run['data'].get('project_plan'):
+                # 规划通过不等于代码存在，CLI 也不能执行占位项目。
+                # Approved planning is not generated code; block placeholder execution through CLI too.
+                raise MasaError('project plan only: code generation is not implemented yet')
             if generation:
                 # 人工批准与对应补丁缺一不可，CLI 恢复也不能绕过审核。
                 # Both human approval and its exact patch are mandatory, including CLI resumes.

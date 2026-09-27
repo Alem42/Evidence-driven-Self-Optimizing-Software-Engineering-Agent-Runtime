@@ -13,6 +13,7 @@ from masa.web.settings import Settings
 from masa.workflow import full_verification_policy, collaboration_policy, harness_policy
 from masa.codegen import CodeGeneration
 from masa.workspace import verify_snapshot
+from masa.project_plan import ProjectPlanning
 
 
 class Console:
@@ -43,6 +44,7 @@ class Console:
             "capabilities": {
                 "execute": True,
                 "rerun": True,
+                "project_planning": True,
                 "graph": True,
                 "node_pause": True,
                 "revise_as_new_run": True,
@@ -229,6 +231,8 @@ class Console:
             try:
                 original = store.run(rid)
                 data = original['data']
+                if data.get('project_plan'):
+                    raise MasaError('project plan only: generate code before verification')
                 if original['status'] not in {'succeeded', 'failed', 'needs_attention'}:
                     raise MasaError('finish or approve the current run before rerunning')
                 if data.get('codegen') and data['codegen'].get('status') != 'approved':
@@ -260,6 +264,8 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
+                if store.run(rid)['data'].get('project_plan'):
+                    raise MasaError('project plan only: generate code before execution')
                 generation = store.run(rid)['data'].get('codegen')
                 if generation and generation.get('status') != 'approved':
                     raise MasaError('请先审核代码提案并点击批准执行 / human review required')
@@ -271,6 +277,29 @@ class Console:
                 store.close()
             self._launch(rid, 1 if pause_after is True else 0, self._provider_for(rid))
             return {"id": rid}
+
+    def plan_project(self, body):
+        """串行规划与角色交接，保存为可恢复预览的运行记录。 Serialize role planning into a persistent preview run."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, body.get('goal'))
+                return {'id':rid}
+            finally:
+                store.close()
+
+    def approve_project(self, rid, body):
+        """仅确认规格，不启动工具或生成代码。 Approve specifications without tools or code generation."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                ProjectPlanning(store, Runner(self.runner_path, self.go_path)).approve(rid, body)
+                return {'id':rid}
+            finally:
+                store.close()
 
     def generate(self, body):
         """为需求生成待审核草稿；单服务串行保护生成与执行。 Generate a pending draft while serializing generation/execution."""
