@@ -8,7 +8,7 @@ import uuid
 from masa.domain import Budget, MasaError, canonical
 from masa.patching import Patches
 from masa.runtime import Runtime
-from masa.workflow import full_verification_policy
+from masa.workflow import harness_policy
 
 
 class CodeGeneration:
@@ -97,7 +97,7 @@ class CodeGeneration:
             source,
             goal,
             Budget(model_calls=8, tool_calls=6, deadline_seconds=86400),
-            graph=full_verification_policy(),
+            graph=harness_policy(),
             parent_run_id=parent,
             codegen=generation,
         )

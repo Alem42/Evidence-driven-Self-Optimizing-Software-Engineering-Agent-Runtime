@@ -60,7 +60,7 @@ class CodeGenerationTests(unittest.TestCase):
         self.assertEqual(source.read_text(), "package solution\n")
         result = Runtime(self.store, self.executor).execute(rid)
         self.assertEqual(result["status"], "succeeded")
-        self.assertEqual(result["model_calls"], 7)
+        self.assertEqual(result["model_calls"], 1)
         self.assertEqual(self.executor.calls, 3)
         self.service.approve(rid, ref, edited)
         Runtime(self.store, self.executor).execute(rid)

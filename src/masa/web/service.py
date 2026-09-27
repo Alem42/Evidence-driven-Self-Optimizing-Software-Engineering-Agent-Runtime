@@ -10,7 +10,7 @@ from masa.domain import Budget, MasaError, OPERATIONS
 from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
-from masa.workflow import full_verification_policy, collaboration_policy
+from masa.workflow import full_verification_policy, collaboration_policy, harness_policy
 from masa.codegen import CodeGeneration
 from masa.workspace import verify_snapshot
 
@@ -237,7 +237,7 @@ class Console:
                 verify_snapshot(source, data['snapshot_id'])
                 runtime = Runtime(store, Runner(self.runner_path, self.go_path))
                 new_id = runtime.create(source, data['goal'], self._budget({'full_checks': True}),
-                                        graph=full_verification_policy(), parent_run_id=rid)
+                                        graph=harness_policy(), parent_run_id=rid)
                 # 复制前后都绑定同一版本，避免外部改动绕过审核。
                 # Bind both sides of the copy to the reviewed version.
                 if store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:

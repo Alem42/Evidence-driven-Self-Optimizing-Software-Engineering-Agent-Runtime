@@ -22,6 +22,17 @@ def full_verification_policy() -> Graph:
     return graph
 
 
+def harness_policy() -> Graph:
+    """检查是工具动作，不伪装成决策角色。 Checks are tool actions, not decision-making roles."""
+    graph = Graph((Node('test', 'tool', operation='go_test'),
+                   Node('vet', 'tool', operation='go_vet'),
+                   Node('format', 'tool', operation='go_fmt_check'),
+                   Node('gate', 'gate', ('test', 'vet', 'format'), 'all_terminal')),
+                  policy_version='harness-checks-v1')
+    validate(graph)
+    return graph
+
+
 def validate(graph: Graph) -> None:
     if not 1 <= len(graph.nodes) <= 24 or graph.version < 1:
         raise MasaError("invalid graph size/version")

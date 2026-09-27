@@ -65,6 +65,8 @@ class WebTests(unittest.TestCase):
             self.assertEqual(status, 200, result)
             rerun = self.wait_run(result['id'])
             self.assertEqual(rerun['run']['status'], 'succeeded')
+            self.assertEqual(rerun['run']['model_calls'], 0)
+            self.assertEqual([n['type'] for n in rerun['run']['data']['graph']['nodes']], ['tool', 'tool', 'tool', 'gate'])
             self.assertEqual(rerun['run']['data']['parent_run_id'], created['id'])
             self.assertEqual(rerun['run']['data']['snapshot_id'], original['run']['data']['snapshot_id'])
             self.assertNotEqual(rerun['run']['data']['workspace'], original['run']['data']['workspace'])
