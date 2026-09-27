@@ -10,7 +10,7 @@
 
 ## 2. 每次启动必读与事实检查
 
-依次读：本文件 → [STATUS_PROJECT](STATUS_PROJECT.md) → [PLAN_PRIORITY_ROADMAP](PLAN_PRIORITY_ROADMAP.md) → 最近一份 progress 报告 → 本轮相关 DESIGN。
+依次读：[项目长期约定](MEMORY_PROJECT.md) → 本文件 → [STATUS_PROJECT](STATUS_PROJECT.md) → [PLAN_PRIORITY_ROADMAP](PLAN_PRIORITY_ROADMAP.md) → 最近一份 progress 报告 → 本轮相关 DESIGN。
 
 - 查实际文件和 Git 状态（如果已初始化），识别用户已有改动；文档写完成但文件不存在时先核对，不虚构恢复。
 - 使用 [ENV_LOCAL_SETUP](ENV_LOCAL_SETUP.md) 了解环境；只在需要时检查版本，不每轮重新安装工具链或运行所有测试。
