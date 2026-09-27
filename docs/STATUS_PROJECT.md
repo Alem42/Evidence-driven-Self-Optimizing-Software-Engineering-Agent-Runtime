@@ -30,3 +30,6 @@ C implemented: approved specification -> multi-file draft -> human approval -> i
 
 ## 最新真实验收（2026-09-28）
 完整多文件生成链路已通过真实 DeepSeek 小型 CLI 验收，3821 tokens；执行 aa386729de444b25afd8e8b0114984ce。支持用户选择本地持久密钥保存，重启加载，不提交 Git。下一步前端程序运行。详见 progress/PROGRESS_2026-09-28_004_live-project.md。
+
+## 最新 UI 与恢复
+已支持后台角色进度、来源链日志复制、打开代码文件夹、一键确认方案并生成。Tester 缺覆盖改为显式人工审核补充，不伪装通过。94 Python 测试通过；真实用户失败方案已恢复为 c3e3e648f7fe4bb8866ee650faa4a1a7。详见 progress/PROGRESS_2026-09-28_005_workflow-observability.md。

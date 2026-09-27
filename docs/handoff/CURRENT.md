@@ -42,3 +42,6 @@ npm --prefix frontend run build
 
 ## 最新覆盖记录（2026-09-28）
 真实 DeepSeek 规划/Tester/Developer 已通过，总计 3821 tokens；执行 run aa386729de444b25afd8e8b0114984ce，3 工具检查和独立 4 CLI 场景通过。代码提交 ca1e443。用户授权本地密钥保存已实现，.masa/provider-keys.local.json 被忽略；不再要求每次重新输入。接续以 PLAN_NEXT_STAGE 的 CLI 前端运行为准，上文未进行真实测试的描述属于之前阶段。
+
+## 最新接续：可观察流程与规划恢复
+提交 fa1c5fb、5481331、cf6c5ec。94 Python / 4 frontend / build 通过。真实恢复用户方案 c3e3e648f7fe4bb8866ee650faa4a1a7，等待人工确认；两次 Tester 重试共 2145 tokens。新增 jobs 后台轮询、阶段条、来源链日志复制、Windows 打开工作区、一键确认方案并生成。coverage_warning 是待审核补充，不是验证证据。详见 progress/PROGRESS_2026-09-28_005_workflow-observability.md。下一步仍是前端 go run。
