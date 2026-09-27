@@ -32,6 +32,10 @@ def validate(graph: Graph) -> None:
     if len(gates) != 1:
         raise MasaError("exactly one final gate is required")
     for n in graph.nodes:
+        if n.role not in {'verifier', 'planner', 'developer', 'tester', 'reviewer'}:
+            raise MasaError('unknown agent role')
+        if n.role != 'verifier' and n.type != 'agent':
+            raise MasaError('roles require agent nodes')
         if n.type not in {"agent", "tool", "gate"} or n.operation not in OPERATIONS:
             raise MasaError("unknown node type or operation")
         if n.trigger not in {"all_succeeded", "all_terminal"}:
@@ -40,6 +44,8 @@ def validate(graph: Graph) -> None:
             raise MasaError("duplicate dependency")
         if any(d not in nodes or d == n.id for d in n.dependencies):
             raise MasaError("unknown or self dependency")
+        if n.role != 'verifier' and any(nodes[d].role not in {'planner', 'developer', 'reviewer'} for d in n.dependencies):
+            raise MasaError('role handoff edges must originate from read-only role results')
         if n.type != "gate" and n.trigger != "all_succeeded":
             raise MasaError("only gate nodes can consume failed dependencies")
     ordered: set[str] = set()
@@ -59,6 +65,20 @@ def validate(graph: Graph) -> None:
             frontier.extend(nodes[item].dependencies)
     if gate.trigger != "all_terminal" or ancestors != set(nodes) - {gate.id}:
         raise MasaError("final gate must cover all other nodes")
+    if not any(n.type == 'tool' or n.type == 'agent' and n.role in {'tester', 'verifier'} for n in graph.nodes):
+        raise MasaError('a graph must include real tool verification')
+
+
+def collaboration_policy(operation='go_test') -> Graph:
+    """只读四角色协议演示，Tester 执行真实工具。 Read-only role protocol demo with actual Tester tools."""
+    graph = Graph((Node('planner', 'agent', role='planner'),
+                   Node('developer', 'agent', ('planner',), role='developer'),
+                   Node('tester', 'agent', ('developer',), operation=operation, role='tester'),
+                   Node('reviewer', 'agent', ('developer',), role='reviewer'),
+                   Node('gate', 'gate', ('tester', 'reviewer'), 'all_terminal')),
+                  policy_version='readonly-collaboration-v1')
+    validate(graph)
+    return graph
 
 
 def ready_nodes(graph: Graph, states: dict[str, str]) -> list[Node]:

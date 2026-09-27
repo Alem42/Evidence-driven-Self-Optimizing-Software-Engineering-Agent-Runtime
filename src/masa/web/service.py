@@ -10,7 +10,7 @@ from masa.domain import Budget, MasaError, OPERATIONS
 from masa.report import render
 from masa.runtime import Runtime
 from masa.web.settings import Settings
-from masa.workflow import full_verification_policy
+from masa.workflow import full_verification_policy, collaboration_policy
 
 
 class Console:
@@ -46,6 +46,7 @@ class Console:
                 "live_llm": True,
                 "multi_agent": False,
                 "code_intelligence": True,
+                "readonly_role_protocol": True,
             },
         }
 
@@ -133,7 +134,7 @@ class Console:
         defaults = asdict(
             Budget(
                 deadline_seconds=1800,
-                model_calls=8 if body.get("full_checks") else 4,
+                model_calls=8 if body.get("full_checks") else 6 if body.get('role_demo') else 4,
                 tool_calls=6 if body.get("full_checks") else 3,
             )
         )
@@ -158,9 +159,11 @@ class Console:
             # Validate transport options before side effects; never silently downgrade a mistyped provider.
             if body.get("provider", "scripted") not in {"scripted", "live"}:
                 raise MasaError("unsupported provider; choose scripted or live")
-            for flag in ("full_checks", "pause_after", "intelligence"):
+            for flag in ("full_checks", "pause_after", "intelligence", "role_demo"):
                 if flag in body and type(body[flag]) is not bool:
                     raise MasaError(flag + " must be boolean")
+            if body.get('role_demo') and (body.get('full_checks') or body.get('provider') == 'live'):
+                raise MasaError('read-only role demo requires scripted provider and a separate graph')
             store = Store(self.root)
             try:
                 source = body.get("repo", "")
@@ -184,6 +187,8 @@ class Console:
                     store, Runner(self.runner_path, self.go_path), provider
                 )
                 graph = full_verification_policy() if body.get("full_checks") else None
+                if body.get('role_demo'):
+                    graph = collaboration_policy(operation)
                 rid = runtime.create(
                     Path(source),
                     goal,

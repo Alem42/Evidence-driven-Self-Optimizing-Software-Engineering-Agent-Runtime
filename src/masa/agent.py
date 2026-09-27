@@ -4,6 +4,7 @@ import time
 
 from masa.domain import MasaError, Node
 from masa.policies import route_model
+from masa.collaboration import ANALYSIS_ROLES, receive_handoffs, validate_role_result, role_context
 
 
 def execute_agent(
@@ -18,6 +19,7 @@ def execute_agent(
 ) -> dict:
     """循环处理模型提案，成功必须附带工具证据。 Process model proposals; completion requires tool evidence."""
     results = tools.existing(run_id, node)
+    handoffs = receive_handoffs(store, run_id, node) if node.role != 'verifier' else []
     while True:
         run = store.run(run_id)
         data = run["data"]
@@ -33,15 +35,17 @@ def execute_agent(
             "allowed_tools": [node.operation],
             "phase": "P0",
         }
+        role_context(context, data, node.role, handoffs, run_id)
         if context_builder is not None:
             # 每次调用重新过滤记忆和预算，模型不会隐式继承旧上下文。
             # Refilter memory and budget on each call; models never implicitly inherit old context.
             context, _ = context_builder.build(
                 run_id,
                 index,
-                role="verifier",
+                role=node.role,
                 tool_results=results,
                 operation=node.operation,
+                handoffs=handoffs,
             )
         context_ref = store.put(context)
         # 模型调用前保存实际上下文并扣预算；恢复不会重置额度。
@@ -58,6 +62,8 @@ def execute_agent(
                 )
             else:
                 response = provider.respond(context)
+            if node.role in ANALYSIS_ROLES:
+                validate_role_result(store, run_id, node, response)
         except MasaError:
             store.event(
                 run_id,
@@ -96,6 +102,10 @@ def execute_agent(
                 "cost": 0 if profile["provider"] == "scripted" else None,
             },
         )
+        if node.role in ANALYSIS_ROLES:
+            # 只读角色没有工具或补丁权限，不能借共用 loop 越权。
+            # Sharing a loop never grants analysis roles tool or patch authority.
+            return validate_role_result(store, run_id, node, response)
         if response.get("type") == "tool_call":
             result = tools.execute(run_id, node, attempt_id, response)
             results.append(result)

@@ -29,6 +29,7 @@ class Node:
     dependencies: tuple[str, ...] = ()
     trigger: str = "all_succeeded"
     operation: str = "go_test"
+    role: str = "verifier"
 
 
 @dataclass(frozen=True)

@@ -60,6 +60,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS memories (
               id TEXT PRIMARY KEY, run_id TEXT REFERENCES runs(id), snapshot_id TEXT NOT NULL,
               profile_id TEXT NOT NULL, status TEXT NOT NULL, artifact_ref TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS handoff_receipts (
+              run_id TEXT REFERENCES runs(id), sender TEXT, receiver TEXT,
+              graph_version INTEGER, snapshot_id TEXT, artifact_ref TEXT NOT NULL,
+              PRIMARY KEY(run_id,sender,receiver,graph_version,snapshot_id));
             PRAGMA user_version=1;
         """)
 

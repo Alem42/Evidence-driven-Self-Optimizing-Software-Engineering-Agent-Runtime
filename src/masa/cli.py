@@ -38,6 +38,7 @@ def parser():
     run.add_argument("--pause-after", type=int, default=0)
     run.add_argument("--patch", type=Path, help="apply a controlled JSON patch before verification")
     run.add_argument("--intelligence", action="store_true", help="include versioned Go evidence in each model context")
+    run.add_argument('--collaboration', action='store_true', help='read-only scripted four-role protocol demo; needs at least 5 model calls')
     inspect = sub.add_parser("inspect", help="inspect Go syntax evidence and role context")
     inspect.add_argument("run_id")
     inspect.add_argument("--query", default="")
@@ -79,7 +80,11 @@ def main(argv=None) -> int:
             if args.command == "run":
                 budget = Budget(model_calls=args.model_calls, tool_calls=args.tool_calls,
                                 deadline_seconds=args.deadline_seconds, tool_timeout_ms=args.tool_timeout_ms)
-                run_id = runtime.create(args.repo, args.goal, budget, args.operation, intelligence=args.intelligence)
+                from masa.workflow import collaboration_policy
+                if args.collaboration and args.patch:
+                    raise MasaError('read-only role demo cannot apply a patch')
+                run_id = runtime.create(args.repo, args.goal, budget, args.operation, intelligence=args.intelligence,
+                                        graph=collaboration_policy(args.operation) if args.collaboration else None)
                 print(f"run_id={run_id}", file=sys.stderr, flush=True)
                 if args.patch:
                     # 补丁先发布新快照，再让验证图执行；用户源仓库不参与写入。

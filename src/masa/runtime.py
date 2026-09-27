@@ -14,6 +14,7 @@ from masa.patching import Patches
 from masa.tools import Tools
 from masa.workflow import default_policy, ready_nodes, validate
 from masa.workspace import copy_snapshot, verify_snapshot
+from masa.collaboration import ANALYSIS_ROLES, validate_role_result, receive_handoffs
 
 
 class Runtime:
@@ -49,6 +50,8 @@ class Runtime:
             raise MasaError("goal must be nonempty and at most 16000 characters")
         graph = graph or default_policy(operation)
         validate(graph)
+        if any(n.role != 'verifier' for n in graph.nodes) and hasattr(self.provider, 'profile'):
+            raise MasaError('role protocol currently supports scripted validation only')
         with owner_lock(self.store.root / "runtime.lock"):
             if parent_run_id:
                 parent = self.store.run(parent_run_id)
@@ -141,7 +144,8 @@ class Runtime:
                         verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
                         if node.type == "agent":
                             result = execute_agent(self.store, self.tools, self.provider, run_id, node, attempt_id, builder, index)
-                            passed = all(r["status"] == "completed" and r["exit_code"] == 0 for r in result["tool_results"])
+                            passed = (result['decision'] == 'ready' if node.role in ANALYSIS_ROLES else
+                                      all(r["status"] == "completed" and r["exit_code"] == 0 for r in result["tool_results"]))
                         elif node.type == "tool":
                             known = self.tools.existing(run_id, node)
                             tool_result = known[-1] if known else self.tools.execute(
@@ -186,6 +190,11 @@ class Runtime:
                 passed = False
                 continue
             evidence = self.store.read(step["result_ref"])
+            if n.role != 'verifier':
+                receive_handoffs(self.store, run_id, n, require_existing=True)
+            if n.role in ANALYSIS_ROLES:
+                passed &= validate_role_result(self.store, run_id, n, evidence)['decision'] == 'ready'
+                continue
             results = evidence.get("tool_results", [])
             if evidence.get("snapshot_id") != snapshot or not results:
                 raise MasaError("stale_evidence: gate has no current tool result")
@@ -195,4 +204,5 @@ class Runtime:
                 raise MasaError("integrity_error: node result differs from tool ledger")
             passed &= all(r["status"] == "completed" and r["exit_code"] == 0 for r in recorded)
         return passed, {"snapshot_id": snapshot, "passed": passed,
-                        "reason": "P0 selected checks passed" if passed else "one or more selected checks failed"}
+                        "reason": ("read-only role protocol and selected checks passed" if any(n.role != 'verifier' for n in graph.nodes)
+                                   else "P0 selected checks passed") if passed else "one or more selected checks failed"}

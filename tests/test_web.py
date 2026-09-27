@@ -162,6 +162,22 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.console.list_runs(), [])
         self.assertIsNone(self.console.active)
 
+    def test_readonly_roles_are_explicit_and_reject_live_mode(self):
+        """只读角色入口明确隔离真实 provider 与其他模板。 Keep the read-only demo separate from live models and other templates."""
+        body = {'repo': str(self.source), 'goal': 'roles', 'role_demo': True}
+        for extra in ({'provider': 'live'}, {'full_checks': True}):
+            self.assertEqual(self.request('/api/runs', {**body, **extra})[0], 400)
+        with patch('masa.web.service.Runner', return_value=FakeExecutor()):
+            status, result = self.request('/api/runs', body)
+            self.assertEqual(status, 200)
+            detail = self.wait_run(result['id'])
+            self.assertEqual(detail['run']['status'], 'succeeded')
+            self.assertEqual(detail['run']['model_calls'], 5)
+            self.assertEqual(len(detail['steps']), 5)
+            refs = [e['payload']['handoff_ref'] for e in detail['events'] if e['type'] == 'handoff_received']
+            self.assertEqual(len(refs), 3)
+            self.assertEqual(self.request('/api/runs/'+result['id']+'/artifacts/'+refs[0])[0], 200)
+
     def test_cancel_paused_run_while_another_worker_is_active(self):
         """取消旧任务不依赖另一个 worker，也不取消新任务。 Cancelling a paused run must not affect another worker."""
         entered, release = threading.Event(), threading.Event()

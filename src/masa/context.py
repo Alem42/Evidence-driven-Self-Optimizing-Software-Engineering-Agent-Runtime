@@ -2,6 +2,7 @@
 
 from masa.domain import MasaError, canonical, digest
 from masa.memory import Memory
+from masa.collaboration import role_context
 
 
 class ContextBuilder:
@@ -18,6 +19,7 @@ class ContextBuilder:
         tool_results=None,
         operation="go_test",
         budget_bytes=32000,
+        handoffs=None,
     ):
         """优先保留必需契约与结果，确定性选择证据并记录裁剪。 Preserve required contracts/results, select evidence deterministically, and audit omissions."""
         if (
@@ -59,6 +61,7 @@ class ContextBuilder:
             "unknowns": search["unknowns"],
             "index_partial": search["partial"],
         }
+        role_context(context, data, role, handoffs, run_id)
         reserve = 1024
         size = lambda: len(canonical(context).encode("utf-8"))
         if size() + reserve > budget_bytes:

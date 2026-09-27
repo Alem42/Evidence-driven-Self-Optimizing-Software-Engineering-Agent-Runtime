@@ -12,7 +12,7 @@ def render(store, run_id: str) -> str:
         else "Provider: scripted-v1 (offline, no LLM inference; billed tokens/cost = 0)."
     )
     lines = [
-        f"# MASA P0 run {run_id}",
+        f"# MASA run {run_id}",
         "",
         f"Status: **{run['status']}**",
         "",
@@ -33,6 +33,14 @@ def render(store, run_id: str) -> str:
         lines.append(
             f"| {step['id']} | {step['status']} | {step['result_ref'] or '-'} |"
         )
+    if any(n.get('role', 'verifier') != 'verifier' for n in data['graph']['nodes']):
+        # 报告引用实际 receipt；不把 scripted 摘要当作语义审查。
+        # Reference actual receipts without claiming scripted semantic review.
+        lines += ['', '## Read-only role protocol', '', 'Scripted only: no code edits or independent semantic review.']
+        for event in store.events(run_id):
+            if event['type'] == 'handoff_received':
+                p = event['payload']
+                lines.append(f"- {p['sender']} → {p['step_id']}; receipt artifact `{p['handoff_ref']}`")
     if profile:
         # 汇总返回的真实用量；无 usage 的请求不能记为零费用。
         # Aggregate reported usage without treating missing billing data as zero cost.
@@ -101,7 +109,8 @@ def render(store, run_id: str) -> str:
         "## Scope",
         "",
         "This run verifies only its selected Go operation in a copied workspace. "
-        "It does not generate patches, run multiple agents, or prove hidden acceptance tests passed.",
+        "It does not generate patches or prove hidden acceptance tests passed. "
+        "Scripted role outputs validate protocol only, not independent semantic review.",
         "",
     ]
     return "\n".join(lines)
