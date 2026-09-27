@@ -72,6 +72,8 @@ P0 出口：无 API key 也能稳定运行和恢复一条真实工具链；模�
 
 P1 出口：真正修改并验证一个 Go 仓库，能解释为何看这些代码、为何重规划、为何拒绝旧证据。没有证明成功率提升也可以交付机制完整的 demo，必须公开失败和费用。
 
+P1-04a 已完成只读角色 envelope、权限、定向交接和 receipt 恢复。它使用 scripted，不开放 Developer 写入。P1-04 仍 in_progress，下一项 [P1-04b](PLAN_P1_04B_CONTROLLED_REPAIR.md) 接入语义输出与一次受控修复。
+
 2026-09-27 用户要求优先真实 LLM 验收：拆出 **P1-06a**，仅依赖当前 AgentLoop、Tools、Context，已接入 DeepSeek V4 Pro 并验证成功/失败路径。P1-06 保持 in_progress，四角色接线仍等 P1-04；不因此宣称 P1-04、P1-05 或完整修复验收完成。后续首先回到 P1-04。
 
 隐藏验收由外部 harness 持有，编码 agent 不可读取。只有普通测试通过时称“Gate 通过”，不能与外部验收结果混淆。

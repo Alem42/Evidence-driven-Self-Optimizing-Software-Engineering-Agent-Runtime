@@ -2,6 +2,8 @@
 
 本文件是 P1-04 / P1-05 的实施切片，配合 LLM_IMPLEMENTATION_GUIDE、STATUS_PROJECT 使用。下面均为待实现内容，不代表本轮已完成。
 
+2026-09-27 更新：第 1 步的只读协议切片已经实现并验证，详情见 [角色交接协议](DESIGN_ROLE_HANDOFF_PROTOCOL.md)。下一步的具体预计更新见 [P1-04b 受控修复](PLAN_P1_04B_CONTROLLED_REPAIR.md)；下面保留大更新整体路线，不重复实现已完成机制。
+
 ## 预期演示
 
 输入 Go Todo 的修复需求 → Planner 定位契约与相关文件 → Developer 提交受控补丁 → Tester 整理验证需求、运行 GoCheck → Reviewer 独立审查 diff 与同一快照 → Gate 汇聚证据。失败时先清楚解释原因，再增加最多一次修复回合。

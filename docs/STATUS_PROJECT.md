@@ -1,6 +1,6 @@
 # MASA 当前项目状态
 
-最后更新：2026-09-27。当前阶段：P0 与 P1-01～P1-03 最小实现已完成；按用户要求提前完成 P1-06a 真实模型验证接线和 API 管理。下一核心任务 P1-04。UI-01 浏览器验收仍待完成。
+最后更新：2026-09-27。P0、P1-01～03、P1-06a 与 P1-04a 只读角色协议已完成。下一核心任务 P1-04b 一次受控修复；P1-04 整体仍 in_progress。UI-01 浏览器验收仍待完成。
 
 ## 已确认与已完成
 
@@ -23,7 +23,8 @@
 | P1-01 | done | Go 多文件样例、公开契约；受控补丁、前后哈希、部分写入恢复及真实进程退出验收；仅验证前写已有实现文件 |
 | P1-02 | done | Go AST、地图、imports/声明/测试候选、全量 generation、精确/词法/一跳检索；显式 partial/unknown |
 | P1-03 | done | Run 内来源记忆、整快照/profile 失效及依赖传播、角色材料视图、必需内容保护、字节预算、实际 AgentLoop manifest |
-| P1-04、P1-05 | todo | 四角色交接、受约束重规划尚未实现 |
+| P1-04 | in_progress | 04a done：只读角色 envelope、权限、定向交接、receipt、Gate 重查；04b 语义契约与补丁待实现 |
+| P1-05 | todo | 受约束重规划尚未实现 |
 | P1-06 | in_progress | P1-06a done：真实兼容 HTTP、schema/usage/超时、冻结配置与 DeepSeek 真测；四角色接线待 P1-04 |
 | P1-07、P1-08 | todo | 经验评价、完整修复端到端验收 |
 | UI-01 | in_progress | React 控制台实现、构建、HTTP 验收通过；浏览器视觉与点击验收待完成 |
@@ -34,9 +35,11 @@
 
 ## 下一项工作
 
+本轮 P1-04a 已完成：72 项 Python 测试、2 项前端测试和构建通过，真实 Go 只读角色 run `2aa5a8c6afbf45de82dc3bffceb68733` 成功（5 scripted / 2 tool / 3 receipt），无新增 API 费用。后续按 [PLAN_P1_04B_CONTROLLED_REPAIR](PLAN_P1_04B_CONTROLLED_REPAIR.md) 实现角色语义契约和一次补丁；旧规划证据与新快照验收必须区分，不能简单解除 Patches 守卫。
+
 2026-09-27 小型整理已完成：图依赖分层、workflow 模板归位、请求参数严格校验、跨任务取消回归。最新 Python 全套 61 项测试、前端布局 2 项测试和构建通过；本轮无付费调用，未重启现有服务。下一次大更新按 [PLAN_NEXT_MAJOR_UPDATE](PLAN_NEXT_MAJOR_UPDATE.md) 分段实施。
 
-下一核心任务 P1-04：复用 AgentLoop，接入四角色输出及有界定向交接、receipt 去重；随后 P1-05 增加受约束图修复。先读 DESIGN_INTELLIGENCE_CONTEXT 第 8 节和 DESIGN_ADAPTIVE_OPTIMIZATION。role 视图不是已经实现四角色协作；不得把当前 Developer 上下文直接当作已开放写权限。
+下一核心任务 P1-04b：在现有只读协议上增加 plan/patch/review 语义契约与一次受控写入；随后 P1-05 增加有限图修复。先读 DESIGN_ROLE_HANDOFF_PROTOCOL 和下一阶段计划。当前四角色只运行 scripted，Developer 尚无写权限，Reviewer ready 不代表语义审查通过。
 
 本轮使用说明：[USER_LIVE_LLM_GUIDE](USER_LIVE_LLM_GUIDE.md)，协议边界：[DESIGN_MODEL_PROVIDER](DESIGN_MODEL_PROVIDER.md)。继续中英文注释和按增量 commit。下一轮可连续推进 P1-04 与其后依赖任务；不要重复花费额度证明本轮已验收的接线。
 
@@ -48,7 +51,7 @@
 
 ## 最新报告与接续日志
 
-最新报告：[PROGRESS_2026-09-27_003_small-cleanup](progress/PROGRESS_2026-09-27_003_small-cleanup.md)。真实模型验收见上一份 [DeepSeek 进展](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
+最新报告：[PROGRESS_2026-09-27_004_role-protocol](progress/PROGRESS_2026-09-27_004_role-protocol.md)。真实模型验收见 [DeepSeek 进展](progress/PROGRESS_2026-09-27_002_live-llm-console.md)。
 
 本轮真实模型 run：`72e84c19c6f34386ae9b422c7a3f2198`（复杂 Go 样例，完整验证 succeeded，6 model / 4 tool）；`c04e167a7a0641738aea9979b5639224`（Todo 原始缺陷，预期 failed，2 model / 2 tool）。含探测合计 17,246 tokens，按峰时未命中缓存价格估算 ¥0.163098，实扣未知。本轮服务地址 `http://127.0.0.1:8766`；默认 API 配置已就绪，重启前连接测试记录不会持久化。仅验证真实推理接线，未评价代码修复能力。
 

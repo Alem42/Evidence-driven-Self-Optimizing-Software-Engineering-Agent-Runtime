@@ -34,6 +34,8 @@ P1-06a 新增创建参数 `provider: scripted|live`、`api_profile_id`、`intell
 
 ## 不变量与扩展
 
+P1-04a 增加 `role_demo:true` 和 `readonly_role_protocol` 能力标记：只允许 scripted，且与 full_checks 互斥；默认 model_calls=6。事件接口复用 handoff_received 与 artifact 引用，不增加独立消息服务。旧服务没有该能力时前端禁用入口。`multi_agent` 能力仍为 false，表示尚未提供完整语义协作/修复。
+
 暂停意图落盘到 run_controls，执行线程在节点边界处理；恢复时清除该意图。修改需求是新 run，不重用旧证据充当新结论。原运行目标不可被页面覆盖。
 
 凭据与运行状态分离：密钥仅服务内存，API 不回显、不打印请求日志、不入 SQLite。URL 不接受用户信息、query 或 fragment。后续接入模型必须保持这一边界，并明确注入 provider；不能让“配置已保存”自动被解释为“模型已验证可用”。
