@@ -37,3 +37,6 @@ C implemented: approved specification -> multi-file draft -> human approval -> i
 
 ## 最新 UI 与恢复
 已支持后台角色进度、来源链日志复制、打开代码文件夹、一键确认方案并生成。Tester 缺覆盖改为显式人工审核补充，不伪装通过。94 Python 测试通过；真实用户失败方案已恢复为 c3e3e648f7fe4bb8866ee650faa4a1a7。详见 progress/PROGRESS_2026-09-28_005_workflow-observability.md。
+
+## 最新测试能力
+Tester 有具体输入/预期/层级案例，Agent 选择 1..3 允许检查，Runtime 编译并添加独立 Gate。现实 CSV 项目经过一次提示改进及人工补导入后，12 个生成测试、16 个独立 CLI 场景、2 个变异检查通过；并非零干预生成成功。详见 progress/PROGRESS_2026-09-28_006_realistic-tests.md。

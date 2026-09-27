@@ -45,3 +45,6 @@ npm --prefix frontend run build
 
 ## 最新接续：可观察流程与规划恢复
 提交 fa1c5fb、5481331、cf6c5ec。94 Python / 4 frontend / build 通过。真实恢复用户方案 c3e3e648f7fe4bb8866ee650faa4a1a7，等待人工确认；两次 Tester 重试共 2145 tokens。新增 jobs 后台轮询、阶段条、来源链日志复制、Windows 打开工作区、一键确认方案并生成。coverage_warning 是待审核补充，不是验证证据。详见 progress/PROGRESS_2026-09-28_005_workflow-observability.md。下一步仍是前端 go run。
+
+## 最新：现实场景测试与 Agent 检查图
+494083f / 95a2679。Tester 增加 cases 契约，Agent 选择 1..3 检查，Runtime 加独立 Gate；不是任意动态图。真实 CSV 项目执行 1c29203773ce47eb9a104166673a3d54，12 生成测试/16 独立 CLI/2 变异检验通过。5 次调用 17260 tokens，包含失败与重生成；手工补了缺失 csv 导入。95 Python、4 前端通过。危险递归测试草稿已取消，不要执行。详见 progress/PROGRESS_2026-09-28_006_realistic-tests.md。
