@@ -25,3 +25,5 @@
 [长期记忆](MEMORY_PROJECT.md) 已加入 LLM 必读，这是仓库持久记忆，不是账户记忆。文档已分 guides/design/progress/archive/plans；最新验收见 [报告](progress/PROGRESS_2026-09-28_001_workspace-console.md)。
 
 最新报告：[Planner 项目结构](progress/PROGRESS_2026-09-28_002_project-planner.md)。下一步：Developer 消费已批准规格，生成多文件提案；人审后完整发布项目并验证。go run 应用执行再后续接入。
+
+C implemented: approved specification -> multi-file draft -> human approval -> isolated Go project verification. See progress/PROGRESS_2026-09-28_003_project-generation.md.
