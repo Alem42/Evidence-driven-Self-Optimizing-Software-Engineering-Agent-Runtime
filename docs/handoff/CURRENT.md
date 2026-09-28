@@ -1,5 +1,11 @@
 # 当前接续点
 
+## 2026-09-28 最新修复接续
+
+本轮按用户要求只排查和修复失败，不推进下一阶段。随机数新分支的四轮 Execute 失败最终定位为 `cmd/app/main.go` 使用 `io.Writer` 却缺少 `io` 导入；新验证运行 `cba5c63105934f578753587e350a6fc1` 已通过。小任务 S1/S2/S3/S5 的最终 Go test/vet/format 与 Gate 均通过，分别为 `f52fcac1db024b1497839dab1dd41aae`、`e4223681bb804347a18f68ec00cd450f`、`c88f3851b2f84fdc80d924f6f2acd3ee`、`cfe286fe176b4e19bbe4a11f8cff5294`。S4 本轮未运行。详情与失败原因见 `docs/progress/PROGRESS_2026-09-28_010_failure-matrix.md`，复用任务见 `docs/scenarios/SCENARIO_SMOKE_MATRIX.md`。
+
+系统性修复：保留 Go 关键诊断；测试文件纯格式错误走确定性 gofmt；相同断言连续失败三次停止自动修复；小任务 Planner 控制验收项规模。S5 原测试的负数相邻期望与规格冲突，已用显式测试修订改正；独立探针另找出最大整数 `End+1` 溢出，修复后再次通过。上述测试和修复的历史版本均保留。下一阶段路线不变。先检查 git status 和当前服务版本；不要重复本轮付费 API 测试。
+
 2026-09-28。架构重构与项目工作台已完成，下一步读 PLAN_NEXT_STAGE.md，补浏览器验收后推进 D1/D2 应用运行。
 
 ## 已提交增量
