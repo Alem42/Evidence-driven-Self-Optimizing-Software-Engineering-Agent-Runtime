@@ -40,3 +40,6 @@ C implemented: approved specification -> multi-file draft -> human approval -> i
 
 ## 最新测试能力
 Tester 有具体输入/预期/层级案例，Agent 选择 1..3 允许检查，Runtime 编译并添加独立 Gate。现实 CSV 项目经过一次提示改进及人工补导入后，12 个生成测试、16 个独立 CLI 场景、2 个变异检查通过；并非零干预生成成功。详见 progress/PROGRESS_2026-09-28_006_realistic-tests.md。
+
+## 最新受控修复
+已支持失败项目 → 真实证据修复草稿 → 冻结测试的人审 → 新版本验证，前端有修复卡片和前后版本入口。真实 DeepSeek 修复缺导入成功，未人工改模型修复内容，全部原检查和 16 CLI 验收通过。下一步前端程序运行。最新报告：progress/PROGRESS_2026-09-28_007_controlled-repair.md。

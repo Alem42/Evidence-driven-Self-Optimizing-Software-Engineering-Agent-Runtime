@@ -48,3 +48,6 @@ npm --prefix frontend run build
 
 ## 最新：现实场景测试与 Agent 检查图
 494083f / 95a2679。Tester 增加 cases 契约，Agent 选择 1..3 检查，Runtime 加独立 Gate；不是任意动态图。真实 CSV 项目执行 1c29203773ce47eb9a104166673a3d54，12 生成测试/16 独立 CLI/2 变异检验通过。5 次调用 17260 tokens，包含失败与重生成；手工补了缺失 csv 导入。95 Python、4 前端通过。危险递归测试草稿已取消，不要执行。详见 progress/PROGRESS_2026-09-28_006_realistic-tests.md。
+
+## 最新：受控修复完成
+aea0f9f / 0af117f。project_generation.repair 从失败 project_bundle 读取真实结果，1 次调用生成实现改动，冻结测试/go.mod，人工批准后独立新 run。前端 RepairPanel、结果摘要、变更/前版本查看。97 Python / 4 frontend / build 通过。真实修复 c8d8d566ad3a4b9eab9f85a3ab3293ac，成功执行 1d354cbafd8e4242b08b5306bf46cd5b，16 独立 CLI 通过；一次 9638 tokens。下一步前端固定 CLI 运行。详见 progress/PROGRESS_2026-09-28_007_controlled-repair.md。
