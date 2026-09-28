@@ -73,7 +73,15 @@ def validate_checks(checks, spec, require_coverage=True):
             for case in cases:
                 if not isinstance(case,dict) or set(case)!={'name','input','expected','level'}:
                     raise MasaError('invalid test case contract')
-                for field in ('name','input','expected'):text(case[field],1000)
+                for field in ('name','expected'):
+                    try:
+                        text(case[field],1000)
+                    except MasaError:
+                        raise MasaError('invalid test case ' + field) from None
+                # 空输入和空白输入都是有效的边界样例，不能当作缺失说明拒绝。
+                # Empty and whitespace fixtures are legitimate boundary inputs, not missing descriptions.
+                if not isinstance(case['input'],str) or len(case['input'])>1000 or '\x00' in case['input']:
+                    raise MasaError('invalid test case input')
                 if case['level'] not in ('unit','integration','cli'):
                     raise MasaError('invalid test level')
     if 'go_test' not in operations:

@@ -33,6 +33,14 @@ class PlannerProvider:
 
 
 class ProjectPlanTests(unittest.TestCase):
+    def test_empty_test_fixture_is_a_valid_boundary_case(self):
+        """允许空输入样例，仍要求明确预期。 Accept empty fixtures while requiring explicit expectations."""
+        checks=copy.deepcopy(CHECKS)
+        checks[0]['cases']=[{'name':'empty','input':'','expected':'prints 0','level':'cli'}]
+        self.assertEqual(validate_checks(checks,SPEC),checks)
+        checks[0]['cases'][0]['input']=None
+        with self.assertRaises(MasaError):validate_checks(checks,SPEC)
+
     def test_rejects_nonportable_conflicting_paths_and_missing_acceptance(self):
         for path in ['../evil.go','/evil.go','C:/evil.go','con.go','x/COM1.go','x./a.go','go.mod/a.go','GO.MOD']:
             with self.subTest(path=path):

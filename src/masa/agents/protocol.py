@@ -37,6 +37,8 @@ def instruction_for(context):
                 'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
                 'For go_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
                 'level (unit, integration or cli). Include happy path, malformed input, empty input, boundary cases and CLI behavior. '
+                'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
+                'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
                 'Compute expected values independently, not by calling the implementation. Keep fixtures tiny and deterministic. '
                 'Explain meaningful edge cases in purpose. Do not change the spec or invent results.')
         elif context['purpose']=='project_repair':
