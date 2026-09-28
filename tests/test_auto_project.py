@@ -22,6 +22,27 @@ class CompositeProvider:
 
 
 class AutomaticProjectTests(unittest.TestCase):
+    def test_auto_retries_tester_without_repeating_planner(self):
+        """复用已验证规格，只重试失败的 Tester 响应。 Reuse a validated spec and retry only Tester failures."""
+        class FlakyTester(CompositeProvider):
+            def __init__(self):self.planner_calls=0;self.tester_calls=0
+            def respond(self,context):
+                if context['purpose']=='project_planner':self.planner_calls+=1
+                if context['purpose']=='project_tester':
+                    self.tester_calls+=1
+                    if self.tester_calls<3:return [{'invalid':'shape'}]
+                return super().respond(context)
+        with tempfile.TemporaryDirectory() as temp:
+            provider=FlakyTester()
+            console=Console(Path(temp),Path('fake-runner'),Path('fake-go'),Path.cwd())
+            console.settings.provider=lambda profile_id=None:provider
+            with patch('masa.application.console.Runner',lambda *args:FakeExecutor()):
+                started=console.start_autonomous_project_job({'goal':'Build a CLI'})
+                console.job_thread.join(timeout=10)
+            job=console.project_job(started['job_id'])
+            self.assertEqual(job['status'],'completed')
+            self.assertEqual((provider.planner_calls,provider.tester_calls),(1,3))
+
     def test_failed_test_source_requires_test_revision(self):
         """冻结测试导致的编译错误不能反复交给实现修复。 A frozen test compile error cannot be fixed by implementation-only repair."""
         self.assertTrue(test_revision_needed('random_test.go:7:2: "os" imported and not used'))

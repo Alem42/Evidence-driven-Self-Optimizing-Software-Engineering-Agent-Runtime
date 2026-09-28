@@ -352,7 +352,20 @@ class Console:
                 try:
                     planning=ProjectPlanning(store,runner)
                     generation=ProjectGeneration(store,runner)
-                    plan=planning.generate(provider,goal,lambda rid:phase('planning',rid))
+                    reuse=None
+                    for retry in range(3):
+                        try:
+                            plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse)
+                            break
+                        except MasaError:
+                            failed_id=self.jobs[ident]['run_id']
+                            failed=store.run(failed_id)['data'].get('project_plan',{})
+                            if retry==2 or not failed.get('spec_ref'):
+                                raise
+                            # 仅复用已校验 Planner 结果，Tester 最多额外调用两次。
+                            # Reuse validated Planner output and retry Tester at most twice.
+                            reuse=failed_id
+                            phase('planning_retry',failed_id,retry+1)
                     meta=store.run(plan)['data']['project_plan']
                     planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
                                            'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
