@@ -1,5 +1,11 @@
 # 当前接续点
 
+## 2026-09-29 最新：测试准备错误
+
+优先读取 `docs/progress/PROGRESS_2026-09-29_001_test-setup-and-go-environment.md`。用户新建项目再次失败：随机数测试从 cmd/app 切到 cmd 构建，求和测试切到模块根构建，另有测试常量 maxInt+1 编译越界。真实 API 提案经审核后，只修测试，新成功运行是随机数 `68e1db6c7bf04cba8e7952b3f8e9ff68`、求和 `52d50f2b865d481f98bf105d3b90ef6b`。手动副本与 exe 在 `.masa/manual-verification/<run-id>/`，不要直接编辑旧 workspaces 快照。
+
+代码提交 `69f1768`：诊断按行分类，覆盖 no Go files / overflows int；结果 API 提供 repair_advice，前端复用；保留关键构建诊断，修订提示补充 cwd/常量/io.Writer。111 个 Python 测试、4 个前端测试和构建通过；8765 服务已重启，HTTP 新旧项目建议/状态与 JS 已验证。无浏览器点击验收。详细环境解释在 `docs/guides/USER_GO_ENVIRONMENT_AND_TESTING.md`；缓存当前继承父环境、非完整容器隔离，勿把后续环境预检/依赖安装描述为已完成。
+
 ## 2026-09-28 最新修复接续
 
 本轮按用户要求只排查和修复失败，不推进下一阶段。随机数新分支的四轮 Execute 失败最终定位为 `cmd/app/main.go` 使用 `io.Writer` 却缺少 `io` 导入；新验证运行 `cba5c63105934f578753587e350a6fc1` 已通过。小任务 S1/S2/S3/S5 的最终 Go test/vet/format 与 Gate 均通过，分别为 `f52fcac1db024b1497839dab1dd41aae`、`e4223681bb804347a18f68ec00cd450f`、`c88f3851b2f84fdc80d924f6f2acd3ee`、`cfe286fe176b4e19bbe4a11f8cff5294`。S4 本轮未运行。详情与失败原因见 `docs/progress/PROGRESS_2026-09-28_010_failure-matrix.md`，复用任务见 `docs/scenarios/SCENARIO_SMOKE_MATRIX.md`。
