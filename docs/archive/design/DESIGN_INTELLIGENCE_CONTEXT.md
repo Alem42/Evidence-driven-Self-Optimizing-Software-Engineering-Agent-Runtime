@@ -2,8 +2,8 @@
 
 > 版本：v0.3 / 2026-09-26。前序规划方向已获用户认可，按本轮优化取舍修订。
 > 状态：领域详细设计。P0 与 P1-01～P1-03 最小实现已完成，见下方实施落点和 STATUS_PROJECT；完整多角色机制及效果指标仍待后续实现和评估。
-> 总体边界见 [架构总纲](DESIGN_RUNTIME_ARCHITECTURE.md)；环境历史见 [环境说明](../guides/ENV_LOCAL_SETUP.md)。动态规划、经验与路由见 [优化设计](DESIGN_ADAPTIVE_OPTIMIZATION.md)。
-> 当前执行顺序以 [优先级路线](../PLAN_PRIORITY_ROADMAP.md) 为准；本文件第 13 节旧任务仅作追溯。文中 MVP 对应 P1：完整有界交接与确定性裁剪必做，delta、模型摘要、增量索引移至 P2。原始 Project Plan 仅为归档愿景。
+> 总体边界见 [架构总纲](DESIGN_RUNTIME_ARCHITECTURE.md)；环境历史见 [环境说明](../../guides/ENV_LOCAL_SETUP.md)。动态规划、经验与路由见 [优化设计](DESIGN_ADAPTIVE_OPTIMIZATION.md)。
+> 当前执行顺序以 [优先级路线](../../PLAN_PRIORITY_ROADMAP.md) 为准；本文件第 13 节旧任务仅作追溯。文中 MVP 对应 P1：完整有界交接与确定性裁剪必做，delta、模型摘要、增量索引移至 P2。原始 Project Plan 仅为归档愿景。
 
 ## 2026-09-27 实施落点：P1-02/P1-03
 
@@ -616,7 +616,7 @@ AST 索引还报告文件数、解析覆盖与耗时；增量版本与全量版�
 
 ## 13. 历史任务拆分（保留追溯，不作为当前执行顺序）
 
-下表保留 v0.2 的细粒度任务供查验，业务实现均未开始。当前唯一任务号和依赖以 [PLAN_PRIORITY_ROADMAP](../PLAN_PRIORITY_ROADMAP.md) 的 P0～P3 为准。特别是旧 A03→H03/C02 的完整依赖不再生效：P1 采用完整交接和确定性裁剪，delta/模型摘要在 P2。旧 D01 的“用户审核”已由认可规划方向满足，具体契约在对应实现切片冻结，不反复请求相同授权。大小 S/M/L 仅为复杂度参考。
+下表保留 v0.2 的细粒度任务供查验，业务实现均未开始。当前唯一任务号和依赖以 [PLAN_PRIORITY_ROADMAP](../../PLAN_PRIORITY_ROADMAP.md) 的 P0～P3 为准。特别是旧 A03→H03/C02 的完整依赖不再生效：P1 采用完整交接和确定性裁剪，delta/模型摘要在 P2。旧 D01 的“用户审核”已由认可规划方向满足，具体契约在对应实现切片冻结，不反复请求相同授权。大小 S/M/L 仅为复杂度参考。
 
 ### 13.1 M0：冻结术语、样例与验收契约
 

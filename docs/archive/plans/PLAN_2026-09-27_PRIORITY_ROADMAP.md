@@ -101,7 +101,7 @@ P2-03 是项目自优化目标的核心；P2-02/04/05 是可独立选做的优�
 | UI-01 本地控制台 | CLI 启动 React；任务创建、图、事件、决策与工具证据；暂停/恢复/取消；需求变更关联；内存 API Key | 代码、构建、HTTP 自动验收完成；浏览器视觉/点击验收待执行，详见 STATUS_PROJECT |
 | UI-02 后续增强 | 多 API 管理、真实 provider 接线、完整验证图与自动/单步继续已完成；graph revision HITL、流式日志、分页、大图布局后置 | 已完成部分随 P1-06a 验收；动态图与角色能力仍待后续任务 |
 
-架构与接口见 [DESIGN_LOCAL_CONSOLE](../../design/DESIGN_LOCAL_CONSOLE.md)，使用见 [USER_CONSOLE_GUIDE](../../guides/USER_CONSOLE_GUIDE.md)。
+架构与接口见 [DESIGN_LOCAL_CONSOLE](../design/DESIGN_LOCAL_CONSOLE.md)，使用见 [USER_CONSOLE_GUIDE](../guides/USER_CONSOLE_GUIDE.md)。
 
 类型增强按真实定位失败引入；embedding 按同义检索漏检引入；UI/IDE 按演示需求引入；容器按不可信代码执行需求引入。多机器调度需要租约、fencing 与网络权限，不能被当作一个小开关。
 

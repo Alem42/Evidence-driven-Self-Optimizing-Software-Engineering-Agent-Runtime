@@ -4,7 +4,7 @@
 
 本文件是 P1-04 / P1-05 的实施切片，配合 LLM_IMPLEMENTATION_GUIDE、STATUS_PROJECT 使用。下面均为待实现内容，不代表本轮已完成。
 
-2026-09-27 更新：第 1 步的只读协议切片已经实现并验证，详情见 [角色交接协议](../../design/DESIGN_ROLE_HANDOFF_PROTOCOL.md)。下一步的具体预计更新见 [P1-04b 受控修复](PLAN_P1_04B_CONTROLLED_REPAIR.md)；下面保留大更新整体路线，不重复实现已完成机制。
+2026-09-27 更新：第 1 步的只读协议切片已经实现并验证，详情见 [角色交接协议](../design/DESIGN_ROLE_HANDOFF_PROTOCOL.md)。下一步的具体预计更新见 [P1-04b 受控修复](PLAN_P1_04B_CONTROLLED_REPAIR.md)；下面保留大更新整体路线，不重复实现已完成机制。
 
 ## 预期演示
 

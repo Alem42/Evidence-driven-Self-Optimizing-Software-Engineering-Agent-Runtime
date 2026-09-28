@@ -9,3 +9,5 @@
 - 区分真实 LLM、脚本策略、测试通过与业务正确；不得将路线中的能力描述为已经实现。
 - 角色负责决策，检查节点负责具体动作；Runtime 校验计划与工具请求，Gate 独立核对真实结果。不得用 Agent 自称通过代替验收，不把 test/vet/format 当作三个决策 Agent。
 - 2026-09-28 用户更新：允许 API 密钥保存到本地 Git 忽略文件，重启自动加载；禁止写入文档、代码、日志或 Git。关键功能优先真实 API 验收，预算仍按已授权范围控制；确定性边界回归保留离线测试，不无意义重复付费调用。
+
+- 2026-09-28 架构约定：采用 domain/application/runtime/agents/intelligence/infrastructure/interfaces；React 采用 app/api/features。优先单一项目工作台，模型选择+描述+开始；角色图展示真实状态，结果与人审在下方。先可用闭环，再统一持久角色图，不引入过重平台。

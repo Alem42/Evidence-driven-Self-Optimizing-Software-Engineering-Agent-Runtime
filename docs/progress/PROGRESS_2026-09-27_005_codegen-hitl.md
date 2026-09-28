@@ -10,8 +10,8 @@ API 导入问题已定位并修复：旧 8765 后端没有 profiles 数组，与
 
 ## 主要实现
 
-- [codegen.py](../../src/masa/codegen.py)：一次真实生成、持久化提案、人工编辑/批准、复用 Patches 与原验证图。没有引入第二套 Runtime。
-- [chat.py](../../src/masa/adapters/chat.py)：独立 code_proposal 输出契约，完整文件有大小限制；无隐式付费重试。
+- [codegen.py](../../src/masa/application/single_file.py)：一次真实生成、持久化提案、人工编辑/批准、复用 Patches 与原验证图。没有引入第二套 Runtime。
+- [chat.py](../../src/masa/infrastructure/llm.py)：独立 code_proposal 输出契约，完整文件有大小限制；无隐式付费重试。
 - [CodeGeneration.jsx](../../frontend/src/CodeGeneration.jsx)：需求输入、可编辑审核、反馈重生成、下载。
 - Runtime 增加不可绕过的审核检查：未批准或补丁与批准内容不一致时，CLI 恢复也不能执行。
 - 生成上下文是有界的单文件/邻近 Go 文件文本，不宣称已使用完整四角色推理或所有代码智能能力。
@@ -35,4 +35,4 @@ API 导入问题已定位并修复：旧 8765 后端没有 profiles 数组，与
 
 支持标准库场景、单个 Go 实现文件；现有仓库不允许模型新建/删除文件或改测试。新项目可由用户提供验收测试，没有测试时不把编译成功当作需求完全满足。API 密钥仍仅服务内存。
 
-使用见 [USER_GENERATE_CODE](../guides/USER_GENERATE_CODE.md)。下一阶段预计更新已写入 [PLAN_USABLE_MVP_NEXT](../archive/plans/PLAN_USABLE_MVP_NEXT.md)：优先失败反馈与审核体验，四角色语义协作和自动重规划后置。
+使用见 [USER_GENERATE_CODE](../archive/guides/USER_GENERATE_CODE.md)。下一阶段预计更新已写入 [PLAN_USABLE_MVP_NEXT](../archive/plans/PLAN_USABLE_MVP_NEXT.md)：优先失败反馈与审核体验，四角色语义协作和自动重规划后置。

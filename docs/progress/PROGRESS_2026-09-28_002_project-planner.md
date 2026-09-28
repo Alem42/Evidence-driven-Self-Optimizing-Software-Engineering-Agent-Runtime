@@ -22,4 +22,4 @@
 
 3d33922：角色规划契约与接口；ee7e0ab：Runtime 编译、人审工作台和 HTTP 回归。文档另行提交，便于回滚。
 
-[使用说明](../guides/USER_PROJECT_PLANNING.md)；[下一阶段](../PLAN_NEXT_STAGE.md)：Developer 从已确认规格生成多文件提案，人审后完整发布项目版本，再运行独立工具检查。
+[使用说明](../archive/guides/USER_PROJECT_PLANNING.md)；[下一阶段](../PLAN_NEXT_STAGE.md)：Developer 从已确认规格生成多文件提案，人审后完整发布项目版本，再运行独立工具检查。

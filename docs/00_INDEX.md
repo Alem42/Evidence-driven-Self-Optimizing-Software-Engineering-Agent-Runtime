@@ -1,26 +1,14 @@
 # MASA 文档入口
 
-2026-09-28 更新。当前事实以状态页为准，设计文档不等于已实现。
+当前版本：2026-09-28，项目工作台与分层目录重构。
 
-| 入口 | 用途 |
+| 读者 / 用途 | 权威文档 |
 |---|---|
-| [当前状态](STATUS_PROJECT.md) | 已实现、限制与验收 |
-| [长期路线](PLAN_PRIORITY_ROADMAP.md) | 分阶段交付 |
-| [下一阶段](PLAN_NEXT_STAGE.md) | 下一轮范围和验收 |
-| [生成代码](guides/USER_GENERATE_CODE.md) | 真实模型、人审与验证 |
-| [规划项目](guides/USER_PROJECT_PLANNING.md) | Planner 架构、Tester 检查与人工确认 |
-| [LLM 实施入口](LLM_IMPLEMENTATION_GUIDE.md) | 每次会话操作协议 |
-| [长期记忆](MEMORY_PROJECT.md) | Git、注释、文档持续约定 |
-| [面试技术 20 问](guides/USER_INTERVIEW_TECHNICAL_QA.md) | 当前实现、建议方案与愿景边界 |
-| [最新报告](progress/PROGRESS_2026-09-28_007_controlled-repair.md) | 本轮变化 |
-| [项目修复](guides/USER_PROJECT_REPAIR.md) | 失败证据、修复草稿和冻结测试的人审 |
+| 使用项目 | [工作台指南](guides/USER_WORKBENCH.md) |
+| 理解架构 | [系统架构](design/DESIGN_SYSTEM_ARCHITECTURE.md) |
+| 当前完成情况 | [项目状态](STATUS_PROJECT.md) |
+| 下一步开发 | [下一阶段](PLAN_NEXT_STAGE.md)、[长期路线](PLAN_PRIORITY_ROADMAP.md) |
+| LLM 接续 | [实施入口](LLM_IMPLEMENTATION_GUIDE.md)、[当前交接](handoff/CURRENT.md)、[长期约定](MEMORY_PROJECT.md) |
+| 开发环境 | [本机环境](guides/ENV_LOCAL_SETUP.md) |
 
-文档分区：
-
-- guides/：使用指南与环境；USER_ 前缀。旧 quickstart 是专项示例。
-- design/：架构与模块设计；DESIGN_ 前缀。
-- progress/：PROGRESS_日期_序号_主题.md，历史验收，不覆盖当前状态。
-- archive/plans/：被替代的计划，仅供参考，不再决定实施顺序。
-- templates/：每轮进展模板。
-
-只维护一个 PLAN_NEXT_STAGE.md，不继续堆积并行的“下一阶段”文档。
+`progress/` 保存每次验收报告；`handoff/` 保存中断接续；`templates/` 保存报告模板；`scenarios/` 保存业务验收需求。过期设计与旧界面指南已移至 `archive/design/` 和 `archive/guides/`，仅供历史查询，不是当前开发指令。

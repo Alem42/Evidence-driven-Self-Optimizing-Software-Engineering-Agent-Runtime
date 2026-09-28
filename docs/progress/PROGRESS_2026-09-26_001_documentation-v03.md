@@ -12,12 +12,12 @@
 
 | 文件 | 作用 |
 |---|---|
-| [用户说明](../guides/USER_PROJECT_GUIDE.md) | 用实际修复任务解释项目、亮点与阶段 |
+| [用户说明](../archive/guides/USER_PROJECT_GUIDE.md) | 用实际修复任务解释项目、亮点与阶段 |
 | [LLM 实施入口](../LLM_IMPLEMENTATION_GUIDE.md) | 规定分轮开发、验收、中断接续和每轮报告 |
 | [优先级路线](../PLAN_PRIORITY_ROADMAP.md) | P0/P1 必须实现，P2 优化，P3 可选 |
-| [Runtime 总纲](../design/DESIGN_RUNTIME_ARCHITECTURE.md) | 补写当前磁盘缺失的总纲，统一执行边界 |
-| [优化设计](../design/DESIGN_ADAPTIVE_OPTIMIZATION.md) | 图版本、经验、路由、策略晋升与回退 |
-| [领域详细设计](../design/DESIGN_INTELLIGENCE_CONTEXT.md) | 保留前序细节，协调新旧范围与链接 |
+| [Runtime 总纲](../archive/design/DESIGN_RUNTIME_ARCHITECTURE.md) | 补写当前磁盘缺失的总纲，统一执行边界 |
+| [优化设计](../archive/design/DESIGN_ADAPTIVE_OPTIMIZATION.md) | 图版本、经验、路由、策略晋升与回退 |
+| [领域详细设计](../archive/design/DESIGN_INTELLIGENCE_CONTEXT.md) | 保留前序细节，协调新旧范围与链接 |
 
 所有项目维护的 Markdown 集中到 docs，原愿景原样移入 archive。旧 IDE 标签可能仍指向根目录，请从 [文档入口](../00_INDEX.md) 打开新文件。
 

@@ -12,8 +12,8 @@ Git 基线 `18ad140`（开始时工作区干净）；后端增量 `7c8254c`，Re
 
 | 模块 | 改动与作用 |
 |---|---|
-| [chat.py](../../src/masa/adapters/chat.py)、[agent.py](../../src/masa/agent.py) | 有界 JSON 提案、精确 schema、无自动付费重试、usage 与耗时；模型不能绕过真实证据 |
-| [profiles.py](../../src/masa/web/profiles.py)、[service.py](../../src/masa/web/service.py) | 多 API 元数据管理、内存密钥、连接测试、运行配置冻结；完整验证图与单步恢复 |
+| [chat.py](../../src/masa/infrastructure/llm.py)、[agent.py](../../src/masa/agents/execution.py) | 有界 JSON 提案、精确 schema、无自动付费重试、usage 与耗时；模型不能绕过真实证据 |
+| [profiles.py](../../src/masa/infrastructure/settings.py)、[service.py](../../src/masa/application/console.py) | 多 API 元数据管理、内存密钥、连接测试、运行配置冻结；完整验证图与单步恢复 |
 | [SettingsDialog.jsx](../../frontend/src/SettingsDialog.jsx)、[main.jsx](../../frontend/src/main.jsx) | API 添加/修改/删除/默认/测试；真实模型选择；自动继续与实际 provider 展示 |
 | [go-complex](../../tests/fixtures/go-complex/ledger_test.go)、[test_chat.py](../../tests/test_chat.py) | 跨文件转账回滚、边界与溢出；协议攻击、虚假成功、重复调用与预算拒绝 |
 | [smoke_live.py](../../scripts/smoke_live.py) | 可重复的 9 请求真实验收，隐藏输入密钥，结果只保存非秘密统计 |
@@ -40,6 +40,6 @@ Git 基线 `18ad140`（开始时工作区干净）；后端增量 `7c8254c`，Re
 
 ## 下一轮从哪里接续
 
-从 P1-04 四角色结构化交接开始，复用当前 provider/AgentLoop 和证据上下文，再推进 P1-05 有限修复。不要重复本轮付费测试；先读 [模型协议设计](../design/DESIGN_MODEL_PROVIDER.md) 与 [当前状态](../STATUS_PROJECT.md)。
+从 P1-04 四角色结构化交接开始，复用当前 provider/AgentLoop 和证据上下文，再推进 P1-05 有限修复。不要重复本轮付费测试；先读 [模型协议设计](../archive/design/DESIGN_MODEL_PROVIDER.md) 与 [当前状态](../STATUS_PROJECT.md)。
 
-本轮新版服务在 `http://127.0.0.1:8766`，密钥已注入其会话内存。操作步骤见 [真实模型指南](../guides/USER_LIVE_LLM_GUIDE.md)。原 8765 服务如果仍开着，需要自行重启后才会加载新的后端。
+本轮新版服务在 `http://127.0.0.1:8766`，密钥已注入其会话内存。操作步骤见 [真实模型指南](../archive/guides/USER_LIVE_LLM_GUIDE.md)。原 8765 服务如果仍开着，需要自行重启后才会加载新的后端。

@@ -4,7 +4,7 @@
 
 本文按“一周内可落地的增量”回答附件问题。**当前实现**来自源码；**建议方案**用于补全近期设计，不表示已经实现。昂贵能力只说明取舍，不展开。示例 ID 和阈值不是运行数据，没有编造性能收益。
 
-阅读依据：[当前状态](../STATUS_PROJECT.md)、[接续记录](../handoff/CURRENT.md)、[当前路线](../PLAN_PRIORITY_ROADMAP.md)、[代码与上下文设计](../design/DESIGN_INTELLIGENCE_CONTEXT.md)、[自适应优化设计](../design/DESIGN_ADAPTIVE_OPTIMIZATION.md)。部分状态页前文尚未同步，需结合页末更新与实际代码：目前已存在真实 Planner/Tester 规划和 Developer 多文件提案链路，但尚未组成同一张自主修复角色图。
+阅读依据：[当前状态](../../STATUS_PROJECT.md)、[接续记录](../../handoff/CURRENT.md)、[当前路线](../../PLAN_PRIORITY_ROADMAP.md)、[代码与上下文设计](../design/DESIGN_INTELLIGENCE_CONTEXT.md)、[自适应优化设计](../design/DESIGN_ADAPTIVE_OPTIMIZATION.md)。部分状态页前文尚未同步，需结合页末更新与实际代码：目前已存在真实 Planner/Tester 规划和 Developer 多文件提案链路，但尚未组成同一张自主修复角色图。
 
 ## 一周范围与验收
 
@@ -26,7 +26,7 @@
 
 **实现状态：基础已实现。**
 
-**代码位置：** [domain.py](../../src/masa/domain.py)、[workflow.py](../../src/masa/workflow.py)、[runtime.py](../../src/masa/runtime.py)、[sqlite.py](../../src/masa/adapters/sqlite.py)。
+**代码位置：** [domain.py](../../../src/masa/domain/models.py)、[workflow.py](../../../src/masa/runtime/graph.py)、[runtime.py](../../../src/masa/runtime/engine.py)、[sqlite.py](../../../src/masa/infrastructure/store.py)。
 
 ### 当前实现
 
@@ -80,7 +80,7 @@ Runtime 执行路径通过 Store 提交执行 Run 的成功终态；角色不能
 
 **实现状态：已有具体证据产物，尚未统一成覆盖所有类型的 EvidenceRef 类。**
 
-**代码位置：** [intelligence.py](../../src/masa/intelligence.py)、[tools.py](../../src/masa/tools.py)、[project_generation.py](../../src/masa/project_generation.py)。
+**代码位置：** [intelligence.py](../../../src/masa/intelligence/index.py)、[tools.py](../../../src/masa/runtime/tools.py)、[project_generation.py](../../../src/masa/application/generation.py)。
 
 当前源码 evidence 包含 kind=source_range、snapshot_id、profile_id、path、content_hash、范围和文本；工具结果包含 request_id、snapshot_id、status、exit_code、输出和耗时；审批通过 approval_ref 绑定批准文件集合。它们保存在 artifact 中，并通过引用关联业务数据。
 
@@ -112,7 +112,7 @@ Artifact 是不可变内容及其存储身份；Evidence 是“这份内容证�
 
 **实现状态：已实现仓库视图清单与完整工作副本。**
 
-**代码位置：** [workspace.py](../../src/masa/workspace.py)、`domain.canonical/digest`。
+**代码位置：** [workspace.py](../../../src/masa/infrastructure/workspaces.py)、`domain.canonical/digest`。
 
 manifest 是纳入范围的 `相对路径 → SHA256(文件字节)` 映射。snapshot_id 是规范 JSON 清单的 SHA256，代表整个受控工作区视图；文件有各自哈希，但不独立代表完整构建版本。
 
@@ -131,7 +131,7 @@ rename 按删除旧路径、增加新路径处理；删除通过前后清单差�
 
 **实现状态：Run 内记录、整快照/profile 失效和依赖传播已实现；文件级有效性索引是建议增强。**
 
-**代码位置：** [memory.py](../../src/masa/memory.py)、[context.py](../../src/masa/context.py)。
+**代码位置：** [memory.py](../../../src/masa/intelligence/memory.py)、[context.py](../../../src/masa/intelligence/context.py)。
 
 当前记录有 statement、epistemic_status、evidence_ref、dependencies、snapshot_id、profile_id、required、conflict_group。提供源码证据时只允许与实际片段相等的 observation；模型解释保留 candidate。当前五层记忆是设计分类，不能说已经有五种完整独立子系统。
 
@@ -159,7 +159,7 @@ dependency_kind 可取 file、memory、index_scope、requirement。跨文件 sum
 
 **实现状态：语法级 L1，未做 go/types 类型绑定。**
 
-**代码位置：** [index.go](../../runner/internal/indexer/index.go)、`intelligence.py`。
+**代码位置：** [index.go](../../../runner/internal/indexer/index.go)、`intelligence.py`。
 
 确定事实包括 package 声明、import 路径/别名、函数/方法声明、接收者语法、签名文本、文件和声明范围。调用表达式只能说明代码写了什么，不证明运行时目标。
 
@@ -246,7 +246,7 @@ dependency_kind 可取 file、memory、index_scope、requirement。跨文件 sum
 
 **实现状态：有代码级契约与权限差异，但两条角色路径尚未完全统一。**
 
-**代码位置：** [collaboration.py](../../src/masa/collaboration.py)、[agent.py](../../src/masa/agent.py)、[project_plan.py](../../src/masa/project_plan.py)、[project_generation.py](../../src/masa/project_generation.py)。
+**代码位置：** [collaboration.py](../../../src/masa/agents/handoffs.py)、[agent.py](../../../src/masa/agents/execution.py)、[project_plan.py](../../../src/masa/application/planning.py)、[project_generation.py](../../../src/masa/application/generation.py)。
 
 当前只读协议图中 Planner/Developer/Reviewer 都无工具权限，只能提交精确 role_result schema；Tester 执行选定 Go 操作。Reviewer 不接收作者 summary。真实 LLM 被该图显式拒绝，不会静默替换成脚本模型。
 
@@ -282,7 +282,7 @@ dependency_kind 可取 file、memory、index_scope、requirement。跨文件 sum
 
 **实现状态：保守工具恢复和前后像文件恢复已实现。**
 
-**代码位置：** `Tools.execute/existing`、`Store.recover`、[patching.py](../../src/masa/patching.py)。
+**代码位置：** `Tools.execute/existing`、`Store.recover`、[patching.py](../../../src/masa/runtime/patches.py)。
 
 ```text
 t0：提交 tool intent、request_ref、预算扣费
@@ -313,7 +313,7 @@ t4 后、t5 前崩溃，已记录工具结果可通过账本复用，节点恢�
 
 **实现状态：Windows 路径已有；Linux/macOS 当前明确拒绝。**
 
-**代码位置：** [main.go](../../runner/cmd/masa-runner/main.go)、[execute.go](../../runner/internal/runner/execute.go)、[contain_windows.go](../../runner/internal/runner/contain_windows.go)、[contain_other.go](../../runner/internal/runner/contain_other.go)、[protocol.go](../../runner/internal/runner/protocol.go)。
+**代码位置：** [main.go](../../../runner/cmd/masa-runner/main.go)、[execute.go](../../../runner/internal/runner/execute.go)、[contain_windows.go](../../../runner/internal/runner/contain_windows.go)、[contain_other.go](../../../runner/internal/runner/contain_other.go)、[protocol.go](../../../runner/internal/runner/protocol.go)。
 
 Go 使用 context.WithTimeout 和 exec.CommandContext 执行固定命令；stdout/stderr 接入各自有界 Writer，os/exec 处理管道读取，cmd.Run 等待退出。设置 WaitDelay 限制后代持有管道带来的等待。
 

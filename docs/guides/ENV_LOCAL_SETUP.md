@@ -9,13 +9,13 @@
 | Go | 初始 PATH 未发现 Go，默认安装目录未发现 | 已安装官方 Go 1.27.1 windows/amd64 到 `.tools/go` |
 | Python | 本机有 3.12.7、3.14.5；受限终端初次无法读取 | 复用 3.12.7，创建 `.venv` |
 | uv | 0.11.19 | 复用，项目缓存 `.cache/uv` |
-| Git | 2.54.0.windows.1 | 可用；当前项目尚未初始化 Git 仓库 |
+| Git | 2.54.0.windows.1 | 可用；Git 仓库已初始化，按验证增量提交 |
 | Docker CLI | 29.5.3 | 已存在；没有验证 daemon/容器能力，当前 demo 不依赖 |
-| Node.js | 24.17.0 | 已存在；当前阶段不需要前端构建 |
+| Node.js | 24.17.0 | 已存在；React 前端使用 npm test / npm run build |
 
 Go 从 [官方发布元数据](https://go.dev/dl/?mode=json) 选择稳定版 Windows amd64 ZIP，下载后 SHA-256 校验通过再解压。具体版本、文件大小与校验值记录在 `scripts/go-toolchain.json`，后续安装复用该锁定信息。
 
-环境初始化没有修改系统 PATH、机器执行策略或替换现有 Python。`.tools`、`.cache`、`.venv` 和运行数据 `.masa` 均由 `.gitignore` 排除。后续 P0 已实现，当前代码操作见 [P0 使用说明](USER_P0_QUICKSTART.md)，不要将最初环境检查结果当作全部业务验收。
+环境初始化没有修改系统 PATH、机器执行策略或替换现有 Python。`.tools`、`.cache`、`.venv` 和运行数据 `.masa` 均由 `.gitignore` 排除。后续 P0 已实现，当前代码操作见 [P0 使用说明](../archive/guides/USER_P0_QUICKSTART.md)，不要将最初环境检查结果当作全部业务验收。
 
 ## 开发时使用
 

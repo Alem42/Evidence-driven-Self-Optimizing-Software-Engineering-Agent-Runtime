@@ -23,4 +23,4 @@ CLI 增加 `--collaboration`；前端增加 Scripted 只读演示入口，图中
 
 现有服务进程未重启，保留内存密钥；使用前端新入口需先重启后端，之后重新输入 API Key。旧服务上该入口禁用，避免新 UI 误调旧后端。
 
-实现合同见 [DESIGN_ROLE_HANDOFF_PROTOCOL](../design/DESIGN_ROLE_HANDOFF_PROTOCOL.md)。验证后已生成 [下一阶段预计更新：P1-04b](../archive/plans/PLAN_P1_04B_CONTROLLED_REPAIR.md)，明确一次受控补丁、新旧快照的 Gate 规则及恢复验收。按该计划继续，不提前进入多轮自优化。
+实现合同见 [DESIGN_ROLE_HANDOFF_PROTOCOL](../archive/design/DESIGN_ROLE_HANDOFF_PROTOCOL.md)。验证后已生成 [下一阶段预计更新：P1-04b](../archive/plans/PLAN_P1_04B_CONTROLLED_REPAIR.md)，明确一次受控补丁、新旧快照的 Gate 规则及恢复验收。按该计划继续，不提前进入多轮自优化。
