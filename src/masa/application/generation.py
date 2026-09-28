@@ -4,10 +4,37 @@ from pathlib import Path
 import tempfile
 import time
 import json
+import re
 from masa.domain.models import Budget, MasaError, canonical
 from masa.runtime.engine import Runtime
 from masa.application.planning import ProjectPlanning, validate_spec
 from masa.infrastructure.workspaces import verify_snapshot
+
+
+def concise_failure_evidence(result):
+    """保留测试输出前后文并提取关键编译/断言诊断。 Preserve bounded context and extract actionable compiler/assertion diagnostics."""
+    stdout=result.get('stdout','')
+    stderr=result.get('stderr','')
+    diagnostics=[]
+    markers=re.compile(r'(?i)(?:\.go:\d+|import cycle|FAIL|panic:|undefined:|imported and not used|expected|want |exit code|build failed)')
+    for line in stdout.splitlines():
+        try:
+            frame=json.loads(line)
+            value=frame.get('Output','') if isinstance(frame,dict) else ''
+        except (ValueError,TypeError):
+            value=line
+        for item in str(value).splitlines():
+            item=item.strip()
+            if item and markers.search(item) and item not in diagnostics:
+                diagnostics.append(item[:400])
+    for line in stderr.splitlines():
+        item=line.strip()
+        if item and markers.search(item) and item not in diagnostics:
+            diagnostics.append(item[:400])
+    return {'diagnostics':diagnostics[:24],
+            'stdout':stdout if len(stdout)<=8000 else stdout[:3000]+'\n...[middle omitted; see diagnostics]...\n'+stdout[-5000:],
+            'stderr':stderr[-5000:],
+            'output_may_be_truncated':len(stdout)>8000 or len(stderr)>5000 or bool(result.get('truncated'))}
 
 
 
@@ -63,8 +90,7 @@ class ProjectGeneration:
             result=self.store.read(call['result_ref'])
             evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
                 'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
-                'stdout':result.get('stdout','')[-12000:],'stderr':result.get('stderr','')[-12000:],
-                'output_may_be_truncated':True})
+                **concise_failure_evidence(result)})
         if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
             raise MasaError('repair requires a recorded failed check; unknown results need inspection')
         metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
@@ -107,8 +133,7 @@ class ProjectGeneration:
             result=self.store.read(call['result_ref'])
             evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
                 'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
-                'stdout':result.get('stdout','')[-12000:],'stderr':result.get('stderr','')[-12000:],
-                'output_may_be_truncated':True})
+                **concise_failure_evidence(result)})
         if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
             raise MasaError('test revision requires a recorded failed check')
         metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],

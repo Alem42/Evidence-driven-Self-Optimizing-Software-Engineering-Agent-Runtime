@@ -5,7 +5,7 @@ from pathlib import Path
 from masa.infrastructure.store import Store
 from masa.domain.models import MasaError
 from masa.application.planning import ProjectPlanning
-from masa.application.generation import ProjectGeneration, validate_files, validate_repair
+from masa.application.generation import ProjectGeneration, validate_files, validate_repair, concise_failure_evidence
 from masa.domain.proposals import validate_test_revision
 from masa.runtime.engine import Runtime
 from test_project_plan import SPEC, CHECKS, PlannerProvider
@@ -24,6 +24,16 @@ class DeveloperProvider(PlannerProvider):
 
 
 class ProjectGenerationTests(unittest.TestCase):
+    def test_repair_context_keeps_early_compile_error_amid_long_test_output(self):
+        """长日志末尾不能淹没首部编译错误。 A long test tail must not hide an early compiler error."""
+        import json
+        first=json.dumps({'Output':'cmd/app/main.go:15:40: undefined: io\n'})+'\n'
+        tail=''.join(json.dumps({'Output':f'=== RUN TestCase{i}\n'})+'\n' for i in range(250))
+        evidence=concise_failure_evidence({'stdout':first+tail,'stderr':'','truncated':False})
+        self.assertIn('undefined: io',' '.join(evidence['diagnostics']))
+        self.assertLess(len(evidence['stdout']),8500)
+        self.assertTrue(evidence['output_may_be_truncated'])
+
     def test_test_revision_is_separate_from_implementation_repair(self):
         """测试修订不能改实现，原修复仍冻结测试。 Test revision cannot edit implementation; repair still freezes tests."""
         changed='package app\n\nimport "testing"\nfunc TestValue(t *testing.T) { if Value()!=42 {t.Fatal("wrong")} }\n'
