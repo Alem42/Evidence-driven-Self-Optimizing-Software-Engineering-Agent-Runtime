@@ -7,6 +7,7 @@ import {CodeGeneration, CodeReview} from './CodeGeneration';
 import {ProjectFlow} from './ProjectProgress';
 import {ProjectCodeReview} from './ProjectCodeReview';
 import {ProjectPlanningDialog, ProjectPlanReview} from './ProjectPlanning';
+import {RepairPanel} from './RepairPanel';
 import {ResultsPanel} from './ResultsPanel';
 import {WorkflowGraph} from './WorkflowGraph';
 
@@ -39,7 +40,7 @@ function App() {
   return <div className="shell">
     <aside><a className="brand" href="/">M<span>MASA<small>RUNTIME CONSOLE</small></span></a><button className="primary wide" onClick={()=>{setParent('');setComposer(true);}}>＋ 新建任务</button><div className="side-label">运行记录 <span>{runs.length}</span></div><nav aria-label="运行记录">{runs.map(r=><button key={r.id} className={'run-item '+(id===r.id?'current':'')} onClick={()=>select(r.id)}><span className="run-title">{r.goal}</span><span className="run-meta"><code>{r.id.slice(0,8)}</code><Badge value={r.status}/></span></button>)}</nav><div className="side-foot"><span className={'dot '+(online?'online':'')}/>{online?'本地服务已连接':'正在连接本地服务'}<small>Evidence-driven agent runtime</small></div></aside>
     <main><header><div><div className="eyebrow">需求 → 审核 → 运行 → 结果</div><h1>代码工作台</h1></div><button disabled={!boot?.capabilities.project_planning||!!active} onClick={()=>setPlanning(true)}>规划新项目</button><button className="primary" disabled={!boot?.capabilities.code_generation||!!active} onClick={()=>setGenerationForm({})}>用需求生成代码</button><button onClick={()=>act(async()=>setSettings(await api('/settings')))}>⚙ API 管理</button></header>
-    <div className="notice"><strong>{run?.data.codegen?'LLM → 人工审核 → Go 验证':run?.data.model_profile?'Live LLM':'Scripted'}</strong><span>{run?.data.codegen?run.data.codegen.provider.model:run?.data.model_profile?run.data.model_profile.model+' · '+run.data.model_profile.base_url:'Offline verification; select Live LLM when creating a task.'}</span></div>
+    <div className="notice"><strong>{data?.project_plan?.repair_of?'修复草稿 · 等待审核':data?.project_plan?'项目规划与代码提案':data?.project_bundle?'项目验证 · 真实工具证据':data?.codegen?'单文件生成与审核':data?.model_profile?'真实模型验证':'本地验证'}</strong><span>{data?.project_plan?.provider?.model||data?.codegen?.provider?.model||data?.model_profile?.model||'检查阶段不需要额外模型调用'}</span>{data?.parent_run_id&&<button onClick={()=>select(data.parent_run_id)}>查看来源版本</button>}</div>
     {boot&&!boot.capabilities.code_generation&&<div className="error">后端版本过旧，请重启服务后使用代码生成；API 设置遇到问题也请先确认访问的是新服务。</div>}{error&&<div className="error" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {!run?<section className="empty panel"><div className="eyebrow">YOUR FIRST RUN</div><h2>{id?'正在读取运行记录…':'让每一步执行都有迹可循。'}</h2><p>输入目标，运行 Go 工具链，在这里查看图、决策记录与验证证据。</p><button className="primary" disabled={!boot||!!active||busy} onClick={()=>act(()=>start({...form,repo:boot.default_repo}))}>运行 Go 示例 →</button></section>:<>
     <section className="run-heading"><div><div className="eyebrow">RUN / {id.slice(0,12)}</div><h2>{data.goal}</h2><p className="path">{data.source}</p></div><Badge value={run.status}/></section>
@@ -47,7 +48,7 @@ function App() {
     {data.codegen?.status==='awaiting_review'&&<div className="notice"><strong>草稿等待你的审核</strong><button onClick={()=>setPage('code')}>查看代码并批准运行 →</button></div>}
     {data.project_plan&&page!=='activity'&&(data.project_plan.kind==='code'?<ProjectCodeReview key={id} detail={detail} select={select}/>:<ProjectPlanReview key={id} detail={detail} profiles={apis} select={select}/>)}
     <div className="actions"><button onClick={()=>act(async()=>setInspection({title:'Project logs',value:(await api('/runs/'+id+'/logs')).text}))}>整体运行日志</button>{!data.project_plan&&<button onClick={()=>act(()=>api('/runs/'+id+'/open-workspace',{}))}>打开代码文件夹</button>}</div>
-    {page==='results'&&!data.project_plan&&<ResultsPanel detail={detail}/>}
+    {page==='results'&&!data.project_plan&&<><ResultsPanel detail={detail}/>{run.status==='failed'&&data.project_bundle&&<RepairPanel detail={detail} profiles={apis} select={select}/>}</>}
     {page==='code'&&!data.project_plan&&(data.codegen?.proposal_ref?<CodeReview key={id} detail={detail} onRevision={setGenerationForm}/>:<section className="panel"><h3>代码工作区</h3><p className="path">{data.workspace}</p><p>此任务验证已有代码。当前仅生成任务提供在线代码预览；可在本地编辑器查看此文件夹。</p>{data.parent_run_id&&<button onClick={()=>select(data.parent_run_id)}>查看来源任务与代码审核</button>}</section>)}
     {page==='activity'&&<>
     <div className="metrics"><div><small>节点进度</small><strong>{detail.steps.filter(s=>['succeeded','failed','skipped'].includes(s.status)).length}<em> / {detail.steps.length}</em></strong></div><div><small>模型调用</small><strong>{run.model_calls}<em> / {data.budget.model_calls}</em></strong></div><div><small>工具调用</small><strong>{run.tool_calls}<em> / {data.budget.tool_calls}</em></strong></div><div><small>事件记录</small><strong>{detail.event_count}<em> 条</em></strong></div></div>
