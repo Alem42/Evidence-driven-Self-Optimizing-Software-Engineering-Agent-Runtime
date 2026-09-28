@@ -6,6 +6,7 @@ from masa.infrastructure.store import Store
 from masa.domain.models import MasaError
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration, validate_files, validate_repair
+from masa.domain.proposals import validate_test_revision
 from masa.runtime.engine import Runtime
 from test_project_plan import SPEC, CHECKS, PlannerProvider
 from test_runtime import FakeExecutor
@@ -23,6 +24,14 @@ class DeveloperProvider(PlannerProvider):
 
 
 class ProjectGenerationTests(unittest.TestCase):
+    def test_test_revision_is_separate_from_implementation_repair(self):
+        """测试修订不能改实现，原修复仍冻结测试。 Test revision cannot edit implementation; repair still freezes tests."""
+        changed='package app\n\nimport "testing"\nfunc TestValue(t *testing.T) { if Value()!=42 {t.Fatal("wrong")} }\n'
+        self.assertEqual(validate_test_revision({'internal/app/app_test.go':changed},FILES)['internal/app/app_test.go'],changed)
+        for path in ('go.mod','internal/app/app.go','new_test.go'):
+            with self.assertRaises(MasaError):validate_test_revision({path:changed},FILES)
+        with self.assertRaises(MasaError):validate_repair({'internal/app/app_test.go':changed},FILES)
+
     def test_approved_spec_to_complete_snapshot_and_idempotent_publication(self):
         with tempfile.TemporaryDirectory() as temp:
             store=Store(Path(temp)); executor=FakeExecutor()

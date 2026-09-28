@@ -33,8 +33,8 @@ export function useWorkbench(){
     }
     poll();return()=>{stopped=true;clearTimeout(timer);};
   },[selected,jobId]);
-  async function start(goal,profile){
-    setError('');const result=await api('/projects/plan',{goal,api_profile_id:profile,background:true});
+  async function start(goal,profile,autoVerify=false){
+    setError('');const result=await api('/projects/plan',{goal,api_profile_id:profile,background:true,auto_verify:autoVerify});
     setJob({status:'running',started:Date.now()/1000});setJobId(result.job_id);localStorage.setItem('masa.job',result.job_id);
   }
   return {projects,selected,select,detail,view,profiles,setProfiles,job,track,start,error,setError,online,boot,

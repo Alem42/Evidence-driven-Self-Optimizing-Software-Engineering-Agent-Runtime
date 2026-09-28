@@ -98,6 +98,7 @@ class ProjectPlanning:
             graph = Runtime.compile_project_checks(spec, checks)
             approval = {'spec':spec, 'checks':checks, 'graph':graph.to_dict()}
             plan.update(status='approved', approval_ref=self.store.put(approval))
+            if body.get('review_mode')=='automatic':plan['review_mode']='automatic'
             # 状态和审批事件一起提交，不能形成部分批准。
             # Commit status and approval evidence together.
             self.store.save_metadata(rid,'project_plan',plan,'project_plan_approved')

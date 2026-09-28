@@ -96,7 +96,7 @@ def make_server(console, port=8765):
                 elif path == '/api/generate' and write:
                     result = console.generate(body)
                 elif path == '/api/projects/plan' and write:
-                    result = console.start_project_job(body) if body.get('background') else console.plan_project(body)
+                    result = console.start_autonomous_project_job(body) if body.get('auto_verify') else console.start_project_job(body) if body.get('background') else console.plan_project(body)
                 elif len(parts)==3 and parts[:2]==['api','jobs'] and not write:
                     result = console.project_job(parts[2])
                 elif path == "/api/runs":
@@ -125,6 +125,8 @@ def make_server(console, port=8765):
                             result = console.start_project_job(body,rid) if body.get('background') else console.generate_project(rid, body)
                         elif action == 'repair-project':
                             result = console.start_project_job({**body,'repair':True},rid) if body.get('background') else console.repair_project(rid,body)
+                        elif action == 'revise-project-tests':
+                            result = console.start_project_job({**body,'test_revision':True},rid) if body.get('background') else console.revise_project_tests(rid,body)
                         elif action == 'open-workspace':
                             result = console.open_workspace(rid)
                         elif action == 'approve-project-code':

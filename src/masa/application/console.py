@@ -310,11 +310,73 @@ class Console:
                 self.jobs[ident]['run_id']=run_id
             def work():
                 try:
-                    result=(self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
+                    result=(self.revise_project_tests(rid,body,created) if body.get('test_revision') else self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
                     self.jobs[ident].update(status='completed',result=result)
                 except Exception as exc:
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
+            self.job_thread.start()
+            return {'job_id':ident}
+
+    def start_autonomous_project_job(self, body):
+        """一次选择后有界完成生成、校验与最多两轮修复。 Complete a bounded project loop after one explicit choice."""
+        with self.lock:
+            self._available()
+            provider=self.settings.provider(body.get('api_profile_id'))
+            goal=body.get('goal')
+            if not isinstance(goal,str) or not goal.strip():
+                raise MasaError('project goal required')
+            ident=uuid.uuid4().hex
+            self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
+                              'mode':'auto','phase':'planning','attempt':0}
+            def phase(name,rid=None,attempt=None):
+                job=self.jobs[ident]
+                job['phase']=name
+                if rid:job['run_id']=rid
+                if attempt is not None:job['attempt']=attempt
+            def work():
+                store=Store(self.root)
+                runner=Runner(self.runner_path,self.go_path)
+                try:
+                    planning=ProjectPlanning(store,runner)
+                    generation=ProjectGeneration(store,runner)
+                    plan=planning.generate(provider,goal,lambda rid:phase('planning',rid))
+                    meta=store.run(plan)['data']['project_plan']
+                    planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
+                                           'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
+                                           'review_mode':'automatic'})
+                    phase('generation',plan)
+                    draft=generation.generate(plan,provider,lambda rid:phase('generation',rid))
+                    for attempt in range(3):
+                        meta=store.run(draft)['data']['project_plan']
+                        phase('verification',draft,attempt)
+                        verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
+                                                           'review_mode':'automatic'})
+                        phase('verification',verified,attempt)
+                        result=Runtime(store,runner).execute(verified)
+                        if result['status']=='succeeded':
+                            self.jobs[ident].update(status='completed',result={'id':verified})
+                            return
+                        if attempt==2:
+                            self.jobs[ident].update(status='completed',result={'id':verified},
+                                                    note='automatic repair limit reached; inspect failed checks')
+                            return
+                        # 失败中含测试包循环导入时，必须新建测试修订；普通修复不能改变冻结测试。
+                        # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
+                        outputs=[store.read(t['result_ref']) for t in store.tools(verified) if t['result_ref']]
+                        evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
+                        if 'import cycle not allowed in test' in evidence:
+                            phase('test_revision',verified,attempt+1)
+                            draft=generation.revise_tests(verified,provider,
+                                'Fix the import cycle in _test.go. Preserve behavioral assertions and requirements.',
+                                lambda rid:phase('test_revision',rid,attempt+1))
+                        else:
+                            phase('repair',verified,attempt+1)
+                            draft=generation.repair(verified,provider,'',lambda rid:phase('repair',rid,attempt+1))
+                except Exception as exc:
+                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'automatic project job failed')
+                finally:store.close()
+            self.job_thread=threading.Thread(target=work,daemon=True,name='masa-auto-project-job')
             self.job_thread.start()
             return {'job_id':ident}
 
@@ -326,7 +388,7 @@ class Console:
         if job['run_id']:
             detail=self.detail(job['run_id'])
             requested=[e for e in detail['events'] if e['type']=='model_requested']
-            job['stage']=requested[-1]['payload']['step_id'] if requested else 'preparing'
+            job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
         return job
 
     def open_workspace(self, rid):
@@ -407,6 +469,17 @@ class Console:
             store=Store(self.root)
             try:
                 return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created)}
+            finally:store.close()
+
+    def revise_project_tests(self, rid, body, on_created=None):
+        """显式创建只修改测试的草稿。 Create a test-only draft on explicit request."""
+        with self.lock:
+            self._available()
+            provider=self.settings.provider(body.get('api_profile_id'))
+            store=Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).revise_tests(
+                    rid,provider,body.get('feedback',''),on_created)}
             finally:store.close()
 
     def approve_project_code(self, rid, body):

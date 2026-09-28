@@ -3,7 +3,7 @@ import {api} from '../../api/client';
 import {projectJob,ProjectProgress} from './progress';
 
 // 从持久化引用恢复审核内容，确认提交的是当前可见版本。 Restore persisted artifacts and approve the visible revision.
-export function ProjectPlanReview({detail,profiles,select,onProgress}) {
+export function ProjectPlanReview({detail,profiles,select,onProgress,working}) {
   const plan=detail.run.data.project_plan;
   const [spec,setSpec]=useState(null),[checks,setChecks]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false);
   const [profile,setProfile]=useState('');
@@ -20,7 +20,7 @@ export function ProjectPlanReview({detail,profiles,select,onProgress}) {
   async function approve(andGenerate=false){setBusy(true);setError('');try{await api('/runs/'+detail.run.id+'/approve-project',{spec,checks,spec_ref:plan.spec_ref,checks_ref:plan.checks_ref});setSaved(true);if(andGenerate){const r=await projectJob('/runs/'+detail.run.id+'/generate-project',{api_profile_id:profile||profiles?.active_id},j=>{setJob(j);onProgress?.(j);});select(r.id);}}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <section className="panel code-review"><h3>项目方案 · {plan.status==='approved'||saved?'已确认，等待代码生成阶段':plan.status==='awaiting_review'?'等待你确认':plan.status==='failed'?'规划失败':'角色规划中'}</h3>
     {(busy||plan.status==='planning')&&<ProjectProgress job={job||{stage:detail.events.filter(e=>e.type==='model_requested').at(-1)?.payload.step_id,started:detail.run.data.created_at}}/>}<p className="notice">确认规格后可让 Developer 生成整套代码草稿。代码还需逐文件审核批准，才会写入项目并运行验证。</p>
-    {(plan.status==='approved'||saved)&&<div><label>生成代码使用的 API<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><button className="primary" disabled={busy||!profiles?.profiles?.some(p=>p.key_configured)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；生成后审核代码，再自动验证。</p></div>}
+    {(plan.status==='approved'||saved)&&plan.review_mode!=='automatic'&&<div><label>生成代码使用的 API<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><button className="primary" disabled={busy||working||!profiles?.profiles?.some(p=>p.key_configured)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；生成后审核代码，再自动验证。</p></div>}
     {plan.coverage_warning&&<p className="notice">{plan.coverage_warning}</p>}
     {plan.status==='failed'&&plan.spec_ref&&<button disabled={busy} onClick={retry}>保留架构，仅重试验证方案</button>}
     {(error||plan.error)&&<p className="error">{error||plan.error}</p>}{spec&&<><fieldset disabled={!editable||busy}><legend>Planner · 架构与职责</legend>
@@ -29,6 +29,6 @@ export function ProjectPlanReview({detail,profiles,select,onProgress}) {
     <h4>目录与文件职责</h4>{spec.files.map((f,i)=><div className="field-pair" key={i}><label>文件路径<input value={f.path} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,path:e.target.value}:v)})}/></label><label>负责什么<input value={f.purpose} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,purpose:e.target.value}:v)})}/></label></div>)}
     <h4>验收标准</h4>{spec.acceptance.map((v,i)=><label key={i}>#{i+1}<textarea rows={2} value={v} onChange={e=>setSpec({...spec,acceptance:spec.acceptance.map((a,n)=>n===i?e.target.value:a)})}/></label>)}
     <h4>Tester · 验证方案</h4>{checks.map((c,i)=><div key={c.operation}><label>{c.operation} · 覆盖验收项 {c.acceptance_indices.map(n=>n+1).join(', ')||'通用检查'}<textarea rows={3} value={c.purpose} onChange={e=>setChecks(checks.map((v,n)=>n===i?{...v,purpose:e.target.value}:v))}/></label>{c.cases?.map((t,n)=><details key={n}><summary>{t.level} · {t.name}</summary><p>输入：{t.input}</p><p>预期：{t.expected}</p></details>)}</div>)}
-    </fieldset>{editable&&<button className="primary" disabled={busy} onClick={()=>approve(true)}>{busy?'正在确认…':'确认方案并生成代码与测试'}</button>}</>}
+    </fieldset>{editable&&<button className="primary" disabled={busy||working} onClick={()=>approve(true)}>{busy?'正在确认…':'确认方案并生成代码与测试'}</button>}</>}
   </section>;
 }

@@ -106,6 +106,18 @@ def validate_repair(changes, original):
     return {**original,**changes}
 
 
+def validate_test_revision(changes, original):
+    """只允许在显式测试修订中修改既有测试文件。 Allow only existing test files in an explicit test revision."""
+    if not isinstance(changes, dict) or not changes:
+        raise MasaError('test revision must change at least one existing test file')
+    for path, content in changes.items():
+        if path not in original or not path.endswith('_test.go'):
+            raise MasaError('test revision may only change existing _test.go files')
+        if not isinstance(content, str) or not content.strip() or len(content.encode()) > 60000 or '\x00' in content:
+            raise MasaError('invalid revised test content')
+    return {**original, **changes}
+
+
 def validate_files(files, spec):
     """文件集合必须严格匹配批准目录，限制内容与模块声明。 Bind bounded contents to the exact approved file set."""
     validate_spec(spec)

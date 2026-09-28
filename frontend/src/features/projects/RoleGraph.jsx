@@ -7,8 +7,8 @@ export function RoleGraph({stages,selected,onSelect}){
   return <section className="workflow-panel"><div className="section-heading"><div><span className="eyebrow">WORKFLOW</span><h2>项目执行流程</h2></div><span className="muted">角色决策 → 人工确认 → 真实执行</span></div>
     <div className="role-graph" role="list" aria-label="项目角色流程">{stages.map((stage,index)=><React.Fragment key={stage.id}>
       {index>0&&<span className="flow-arrow" aria-hidden="true">→</span>}
-      <button role="listitem" className={`role-card ${stage.status} ${selected===stage.id?'selected':''}`} onClick={()=>onSelect(stage)} aria-label={`${stage.label}：${statusLabel[stage.status]||stage.status}`}>
-        <span className="role-kind">{stage.kind==='human'?'人工确认':stage.kind==='gate'?'独立验收':'执行角色'}</span>
+      <button data-stage-id={stage.id} role="listitem" className={`role-card ${stage.status} ${selected===stage.id?'selected':''}`} onClick={()=>onSelect(stage)} aria-label={`${stage.label}：${statusLabel[stage.status]||stage.status}`}>
+        <span className="role-kind">{stage.kind==='human'?stage.label.startsWith('自动')?'自动采用':'方案或代码确认':stage.kind==='gate'?'独立结果核对':stage.role==='project_tester'?'设计测试方案':stage.role==='executor'?'运行 Go 检查':'执行角色'}</span>
         <strong>{stage.label}</strong><span className="role-status"><i/>{statusLabel[stage.status]||stage.status}</span>
       </button></React.Fragment>)}</div>
   </section>;

@@ -1,4 +1,4 @@
-from masa.domain.proposals import validate_files, validate_repair
+from masa.domain.proposals import validate_files, validate_repair, validate_test_revision
 """已批准架构到多文件草稿和隔离执行。 Approved architecture to multi-file drafts and isolated execution."""
 from pathlib import Path
 import tempfile
@@ -89,6 +89,50 @@ class ProjectGeneration:
             self.planning.update(rid,metadata,'failed','project_repair_failed')
             raise MasaError(f'repair failed; run {rid}: {metadata["error"]}') from None
 
+    def revise_tests(self, parent, provider, feedback='', on_created=None):
+        """失败证据表明测试本身有缺陷时建立新版本。 Revise existing tests in a new evidence-linked version."""
+        original=self.store.run(parent)
+        data=original['data']
+        if original['status']!='failed' or not data.get('project_bundle'):
+            raise MasaError('test revision requires a failed generated-project verification')
+        if not isinstance(feedback,str) or len(feedback)>4000:
+            raise MasaError('feedback must be at most 4000 characters')
+        verify_snapshot(Path(data['workspace']),data['snapshot_id'])
+        base_ref=data['project_bundle']['approval_ref']
+        base=self.store.read(base_ref)
+        approved=self.store.read(base['spec_approval_ref'])
+        evidence=[]
+        for call in self.store.tools(parent):
+            if not call['result_ref']:continue
+            result=self.store.read(call['result_ref'])
+            evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
+                'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
+                'stdout':result.get('stdout','')[-12000:],'stderr':result.get('stderr','')[-12000:],
+                'output_may_be_truncated':True})
+        if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
+            raise MasaError('test revision requires a recorded failed check')
+        metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
+                  'base_approval_ref':base_ref,'repair_of':parent,'revision_scope':'tests','provider':provider.profile}
+        rid=Runtime(self.store,self.executor).create(Path(data['workspace']),data['goal'],
+            Budget(model_calls=1,tool_calls=3,deadline_seconds=86400),
+            graph=Runtime.compile_project_checks(approved['spec'],approved['checks']),
+            parent_run_id=parent,project_plan=metadata)
+        if on_created:on_created(rid)
+        try:
+            changes=self.planning.call(rid,provider,'project_test_revision',{
+                'goal':data['goal'],**approved,'original_files':base['files'],
+                'failure_evidence':evidence,'feedback':feedback})
+            files=validate_test_revision(changes,base['files'])
+            validate_files(files,approved['spec'])
+            metadata.update(status='awaiting_review',files_ref=self.store.put(files),
+                            changed_files=[p for p in changes if files[p]!=base['files'][p]])
+            self.planning.update(rid,metadata,'paused','project_test_revision_review_requested')
+            return rid
+        except Exception as exc:
+            metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'test revision generation failed')
+            self.planning.update(rid,metadata,'failed','project_test_revision_failed')
+            raise MasaError(f'test revision failed; run {rid}: {metadata["error"]}') from None
+
     def approve(self, rid, body):
         """先准备完整目录再创建可运行快照；重试复用已发布运行。 Prepare all files before publishing a run; retries reuse it."""
         run = self.store.run(rid)
@@ -103,7 +147,11 @@ class ProjectGeneration:
         files = validate_files(body.get('files'), spec['spec'])
         if plan.get('base_approval_ref'):
             base=self.store.read(plan['base_approval_ref'])['files']
-            if any(files[p]!=content for p,content in base.items() if p=='go.mod' or p.endswith('_test.go')):
+            scope=plan.get('revision_scope','implementation')
+            if scope=='tests':
+                if any(files[p]!=content for p,content in base.items() if not p.endswith('_test.go')):
+                    raise MasaError('test revision cannot change implementation or module')
+            elif any(files[p]!=content for p,content in base.items() if p=='go.mod' or p.endswith('_test.go')):
                 raise MasaError('repair approval cannot change frozen tests or module')
         approval_ref = self.store.put({'files':files, 'spec_approval_ref':plan['spec_approval_ref']})
         if plan.get('approval_ref') and plan['approval_ref'] != approval_ref:
@@ -111,6 +159,7 @@ class ProjectGeneration:
         # 先锁定审批内容，再发布快照；中断后只允许重试同一批准版本。
         # Freeze approved content before publishing; recovery can only retry this revision.
         plan.update(approval_ref=approval_ref, status='approved')
+        if body.get('review_mode')=='automatic':plan['review_mode']='automatic'
         self.planning.update(rid, plan, 'paused', 'project_code_approved')
         published=self.store.published_child(rid,approval_ref)
         if published:

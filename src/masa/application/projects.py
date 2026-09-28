@@ -40,7 +40,13 @@ class Projects:
         chain=[];current=rid
         while current in runs:
             chain.append(runs[current]);current=runs[current]['data'].get('parent_run_id')
-        chain.reverse();stages=[]
+        chain.reverse()
+        # 主图只展示选中版本的最新方案/代码/验证；旧失败保留在版本历史。
+        # Show one current lifecycle; retain superseded failures in version history.
+        planning=next((r for r in reversed(chain) if r['data'].get('project_plan') and r['data']['project_plan'].get('kind')!='code'),None)
+        code=next((r for r in reversed(chain) if r['data'].get('project_plan',{}).get('kind')=='code'),None)
+        chain=[r for r in (planning,code,runs[rid] if runs[rid]['data'].get('project_bundle') else None) if r]
+        stages=[]
         def add(run,role,label,status,kind='role',**extra):
             stages.append({'id':run['id']+':'+role,'run_id':run['id'],'role':role,'label':label,
                            'status':status,'kind':kind,**extra})
@@ -48,7 +54,7 @@ class Projects:
             plan=run['data'].get('project_plan')
             if plan:
                 events=self.store.events(run['id'])
-                roles=[('project_repair','Developer 修复')] if plan.get('repair_of') else (
+                roles=[('project_test_revision','Tester 修订测试') if plan.get('revision_scope')=='tests' else ('project_repair','Developer 修复')] if plan.get('repair_of') else (
                     [('project_developer','Developer')] if plan.get('kind')=='code' else [('project_planner','Planner'),('project_tester','Tester')])
                 for role,label in roles:
                     related=[e for e in events if e['payload'].get('step_id')==role]
@@ -61,7 +67,7 @@ class Projects:
                     if run['status']=='cancelled' and state=='running':state='cancelled'
                     result=next((e['payload'].get('response_ref') for e in reversed(related) if e['type']=='model_completed'),None)
                     add(run,role,label,state,response_ref=result,reused=reused)
-                label='审核代码' if plan.get('kind')=='code' else '确认方案'
+                label=('自动采用代码' if plan.get('kind')=='code' else '自动采用方案') if plan.get('review_mode')=='automatic' else ('审核代码' if plan.get('kind')=='code' else '确认方案')
                 status='succeeded' if plan['status']=='approved' else 'blocked' if plan['status']=='awaiting_review' else 'pending'
                 add(run,'review',label,status,'human')
             elif run['data'].get('project_bundle'):
