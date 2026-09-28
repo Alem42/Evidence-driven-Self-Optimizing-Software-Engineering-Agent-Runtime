@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from masa.adapters.runner import Runner
-from masa.adapters.sqlite import Store
-from masa.context import ContextBuilder
-from masa.domain import Budget, MasaError
-from masa.intelligence import Intelligence
-from masa.memory import Memory
-from masa.patching import Patches
-from masa.runtime import Runtime
+from masa.infrastructure.runner import Runner
+from masa.infrastructure.store import Store
+from masa.intelligence.context import ContextBuilder
+from masa.domain.models import Budget, MasaError
+from masa.intelligence.index import Intelligence
+from masa.intelligence.memory import Memory
+from masa.runtime.patches import Patches
+from masa.runtime.engine import Runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 

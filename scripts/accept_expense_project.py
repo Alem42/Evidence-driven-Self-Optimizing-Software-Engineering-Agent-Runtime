@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from masa.adapters.sqlite import Store
+from masa.infrastructure.store import Store
 
 
 def main():

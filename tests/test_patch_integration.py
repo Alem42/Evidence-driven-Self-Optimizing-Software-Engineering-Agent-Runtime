@@ -8,8 +8,8 @@ import sys
 import tempfile
 import unittest
 
-from masa.adapters.sqlite import Store
-from masa.workspace import manifest
+from masa.infrastructure.store import Store
+from masa.infrastructure.workspaces import manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,11 +54,11 @@ class PatchIntegrationTests(unittest.TestCase):
         code = '''
 import json, os, sys
 from pathlib import Path
-from masa.adapters.sqlite import Store
-from masa.adapters.runner import Runner
-from masa.domain import Budget
-from masa.runtime import Runtime
-from masa.patching import Patches
+from masa.infrastructure.store import Store
+from masa.infrastructure.runner import Runner
+from masa.domain.models import Budget
+from masa.runtime.engine import Runtime
+from masa.runtime.patches import Patches
 root, state, proposal = map(Path, sys.argv[1:])
 store = Store(state)
 runtime = Runtime(store, Runner(root/'.tools/bin/masa-runner.exe', root/'.tools/go/bin/go.exe'))

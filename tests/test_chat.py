@@ -7,11 +7,11 @@ import tempfile
 import threading
 import unittest
 
-from masa.adapters.chat import ChatProvider
-from masa.adapters.sqlite import Store
-from masa.domain import Budget, MasaError
-from masa.runtime import Runtime
-from masa.web.settings import Settings
+from masa.infrastructure.llm import ChatProvider
+from masa.infrastructure.store import Store
+from masa.domain.models import Budget, MasaError
+from masa.runtime.engine import Runtime
+from masa.infrastructure.settings import Settings
 from test_runtime import FakeExecutor
 
 

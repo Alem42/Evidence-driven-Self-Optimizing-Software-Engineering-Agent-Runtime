@@ -1,12 +1,12 @@
 """以保留的真实缺导入草稿验证修复；显式运行会调用 API。 Validate repair from a preserved broken draft; spends API tokens."""
 import argparse
 from pathlib import Path
-from masa.adapters.sqlite import Store
-from masa.adapters.runner import Runner
-from masa.domain import Budget
-from masa.project_generation import ProjectGeneration
-from masa.runtime import Runtime
-from masa.web.settings import Settings
+from masa.infrastructure.store import Store
+from masa.infrastructure.runner import Runner
+from masa.domain.models import Budget
+from masa.application.generation import ProjectGeneration
+from masa.runtime.engine import Runtime
+from masa.infrastructure.settings import Settings
 
 
 def main():

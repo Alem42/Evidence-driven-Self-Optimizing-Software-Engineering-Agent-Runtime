@@ -2,12 +2,12 @@
 from pathlib import Path
 import argparse
 import json
-from masa.adapters.sqlite import Store
-from masa.adapters.runner import Runner
-from masa.web.settings import Settings
-from masa.project_plan import ProjectPlanning
-from masa.project_generation import ProjectGeneration
-from masa.runtime import Runtime
+from masa.infrastructure.store import Store
+from masa.infrastructure.runner import Runner
+from masa.infrastructure.settings import Settings
+from masa.application.planning import ProjectPlanning
+from masa.application.generation import ProjectGeneration
+from masa.runtime.engine import Runtime
 
 
 def main():

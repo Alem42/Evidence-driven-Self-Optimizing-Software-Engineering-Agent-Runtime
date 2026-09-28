@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from masa.domain import digest
-from masa.workspace import manifest
+from masa.domain.models import digest
+from masa.infrastructure.workspaces import manifest
 
 
 def build_patch(source: Path) -> dict:

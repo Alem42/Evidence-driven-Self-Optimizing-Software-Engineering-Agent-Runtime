@@ -3,10 +3,10 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
-from masa.adapters.sqlite import Store
-from masa.domain import MasaError
-from masa.project_plan import ProjectPlanning, validate_spec, validate_checks
-from masa.runtime import Runtime
+from masa.infrastructure.store import Store
+from masa.domain.models import MasaError
+from masa.application.planning import ProjectPlanning, validate_spec, validate_checks
+from masa.runtime.engine import Runtime
 from test_runtime import FakeExecutor
 
 

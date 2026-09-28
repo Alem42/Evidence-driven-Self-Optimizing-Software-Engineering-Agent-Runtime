@@ -8,10 +8,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-from masa.web.server import make_server
-from masa.web.service import Console
-from masa.web.settings import Settings
-from masa.adapters.sqlite import Store
+from masa.interfaces.http.server import make_server
+from masa.application.console import Console
+from masa.infrastructure.settings import Settings
+from masa.infrastructure.store import Store
 from test_runtime import FakeExecutor
 
 
@@ -58,7 +58,7 @@ class WebTests(unittest.TestCase):
         self.fail('worker did not finish')
 
     def test_rerun_preserves_snapshot_and_returns_real_ledger_outputs(self):
-        with patch('masa.web.service.Runner', return_value=FakeExecutor()):
+        with patch('masa.application.console.Runner', return_value=FakeExecutor()):
             _, created = self.request('/api/runs', {'repo': str(self.source), 'goal': 'verify'})
             original = self.wait_run(created['id'])
             status, result = self.request('/api/runs/' + created['id'] + '/rerun', {})
@@ -78,14 +78,14 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.request('/api/runs/' + created['id'] + '/rerun', {})[0], 400)
 
     def test_rerun_rejects_paused_run(self):
-        with patch('masa.web.service.Runner', return_value=FakeExecutor()):
+        with patch('masa.application.console.Runner', return_value=FakeExecutor()):
             _, created = self.request('/api/runs', {'repo': str(self.source), 'goal': 'verify', 'pause_after': True})
             self.wait_run(created['id'])
             self.assertEqual(self.request('/api/runs/' + created['id'] + '/rerun', {})[0], 400)
 
     def test_project_plan_http_review_and_execution_guards(self):
         from test_project_plan import PlannerProvider, SPEC, CHECKS
-        with patch.object(self.console.settings, 'provider', return_value=PlannerProvider()), patch('masa.web.service.Runner', return_value=FakeExecutor()):
+        with patch.object(self.console.settings, 'provider', return_value=PlannerProvider()), patch('masa.application.console.Runner', return_value=FakeExecutor()):
             status, result = self.request('/api/projects/plan', {'goal':'Build a CSV CLI'})
             self.assertEqual(status,200,result)
             rid=result['id']
@@ -110,7 +110,7 @@ class WebTests(unittest.TestCase):
 
     def test_background_planning_progress_and_logs(self):
         from test_project_plan import PlannerProvider
-        with patch.object(self.console.settings,'provider',return_value=PlannerProvider()), patch('masa.web.service.Runner',return_value=FakeExecutor()):
+        with patch.object(self.console.settings,'provider',return_value=PlannerProvider()), patch('masa.application.console.Runner',return_value=FakeExecutor()):
             status,job=self.request('/api/projects/plan',{'goal':'A CLI','background':True})
             self.assertEqual(status,200)
             self.console.job_thread.join(10)
@@ -153,7 +153,7 @@ class WebTests(unittest.TestCase):
 
     def test_run_pause_resume_revision_and_evidence(self):
         executor = FakeExecutor()
-        with patch('masa.web.service.Runner', return_value=executor):
+        with patch('masa.application.console.Runner', return_value=executor):
             body = {'repo':str(self.source),'goal':'verify','pause_after':True}
             status, result = self.request('/api/runs', body)
             self.assertEqual(status, 200)
@@ -183,7 +183,7 @@ class WebTests(unittest.TestCase):
                 entered.set()
                 release.wait(5)
                 return super().execute(*args)
-        with patch('masa.web.service.Runner', return_value=SlowExecutor()):
+        with patch('masa.application.console.Runner', return_value=SlowExecutor()):
             rid = self.request('/api/runs', {'repo':str(self.source),'goal':'pause'})[1]['id']
             try:
                 self.assertTrue(entered.wait(5))
@@ -204,7 +204,7 @@ class WebTests(unittest.TestCase):
                 result = super().execute(request, *args)
                 result['exit_code'] = int(request['operation'] == 'go_vet')
                 return result
-        with patch('masa.web.service.Runner', return_value=MixedExecutor()):
+        with patch('masa.application.console.Runner', return_value=MixedExecutor()):
             status, result = self.request('/api/runs', {'repo': str(self.source), 'goal': 'complete', 'full_checks': True})
             self.assertEqual(status, 200)
             detail = self.wait_run(result['id'])
@@ -216,7 +216,7 @@ class WebTests(unittest.TestCase):
     def test_complete_graph_supports_step_then_automatic_resume(self):
         """单步恢复不会重跑完成节点，可再次切换自动推进。 Step-resume preserves completed nodes before auto continuation."""
         executor = FakeExecutor()
-        with patch('masa.web.service.Runner', return_value=executor):
+        with patch('masa.application.console.Runner', return_value=executor):
             rid = self.request('/api/runs', {'repo': str(self.source), 'goal': 'step', 'full_checks': True, 'pause_after': True})[1]['id']
             self.assertEqual(self.wait_run(rid)['run']['status'], 'paused')
             self.request('/api/runs/'+rid+'/resume', {'pause_after': True})
@@ -240,7 +240,7 @@ class WebTests(unittest.TestCase):
         body = {'repo': str(self.source), 'goal': 'roles', 'role_demo': True}
         for extra in ({'provider': 'live'}, {'full_checks': True}):
             self.assertEqual(self.request('/api/runs', {**body, **extra})[0], 400)
-        with patch('masa.web.service.Runner', return_value=FakeExecutor()):
+        with patch('masa.application.console.Runner', return_value=FakeExecutor()):
             status, result = self.request('/api/runs', body)
             self.assertEqual(status, 200)
             detail = self.wait_run(result['id'])
@@ -254,7 +254,7 @@ class WebTests(unittest.TestCase):
     def test_generation_http_requires_review_before_execution(self):
         """HTTP 从生成到审核再到验证，恢复按钮不能跳过人工确认。 HTTP generation/review/verification cannot bypass human approval."""
         from test_codegen import ProposalProvider
-        with patch.object(self.console.settings, 'provider', return_value=ProposalProvider()), patch('masa.web.service.Runner', return_value=FakeExecutor()):
+        with patch.object(self.console.settings, 'provider', return_value=ProposalProvider()), patch('masa.application.console.Runner', return_value=FakeExecutor()):
             status, generated = self.request('/api/generate', {'goal':'Implement Add'})
             self.assertEqual(status, 200)
             rid = generated['id']
@@ -277,7 +277,7 @@ class WebTests(unittest.TestCase):
                     entered.set()
                     release.wait(5)
                 return super().execute(*args)
-        with patch('masa.web.service.Runner', return_value=BlockingExecutor()):
+        with patch('masa.application.console.Runner', return_value=BlockingExecutor()):
             body = {'repo': str(self.source), 'goal': 'verify', 'pause_after': True}
             first = self.request('/api/runs', body)[1]['id']
             self.assertEqual(self.wait_run(first)['run']['status'], 'paused')

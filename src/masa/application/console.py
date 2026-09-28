@@ -1,0 +1,520 @@
+"""Browser application service: one worker, separate SQLite connection per thread."""
+
+from dataclasses import asdict
+from pathlib import Path
+import threading
+import uuid
+import time
+import os
+
+from masa.infrastructure.runner import Runner
+from masa.infrastructure.store import Store
+from masa.domain.models import Budget, Graph, MasaError, OPERATIONS
+from masa.application.reports import render
+from masa.runtime.engine import Runtime
+from masa.infrastructure.settings import Settings
+from masa.runtime.graph import full_verification_policy, collaboration_policy, harness_policy
+from masa.application.single_file import CodeGeneration
+from masa.infrastructure.workspaces import verify_snapshot
+from masa.application.planning import ProjectPlanning
+from masa.application.generation import ProjectGeneration
+from masa.application.projects import Projects
+
+
+class Console:
+    def __init__(self, state_dir, runner, go, project):
+        self.root = Path(state_dir).resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.runner_path, self.go_path, self.project = (
+            Path(runner),
+            Path(go),
+            Path(project),
+        )
+        self.settings = Settings(self.root)
+        self.lock = threading.RLock()
+        self.active = None
+        self.worker = None
+        self.errors = {}
+        self.closing = False
+        self.jobs = {}
+        self.job_thread = None
+        Store(self.root).close()
+
+    def bootstrap(self):
+        """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
+        return {
+            "console_version": "workspace-console-v2",
+            "default_repo": str(self.project / "tests/fixtures/go-pass"),
+            "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
+            "active_run": self.active,
+            "provider": "scripted-v1",
+            "capabilities": {
+                "execute": True,
+                "rerun": True,
+                "project_planning": True,
+                "project_generation": True,
+                "graph": True,
+                "node_pause": True,
+                "revise_as_new_run": True,
+                "code_edit": True,
+                "code_generation": True,
+                "live_llm": True,
+                "multi_agent": False,
+                "code_intelligence": True,
+                "readonly_role_protocol": True,
+            },
+        }
+
+    def projects(self, rid=None):
+        """为前端提供项目中心读取视图。 Expose project-centered read models to the interface."""
+        store=Store(self.root)
+        try:
+            return Projects(store).view(rid) if rid else {'projects':Projects(store).catalog()}
+        finally:store.close()
+
+    def list_runs(self):
+        store = Store(self.root)
+        try:
+            ids = [
+                r[0]
+                for r in store.db.execute(
+                    "SELECT id FROM runs ORDER BY rowid DESC LIMIT 100"
+                )
+            ]
+            result = []
+            for rid in ids:
+                run = store.run(rid)
+                result.append(
+                    {
+                        "id": rid,
+                        "status": run["status"],
+                        "goal": run["data"]["goal"],
+                        "created_at": run["data"]["created_at"],
+                        "reason": run["reason"],
+                        "active": rid == self.active,
+                    }
+                )
+            return result
+        finally:
+            store.close()
+
+    def detail(self, rid):
+        store = Store(self.root)
+        try:
+            # A read transaction yields one coherent run/step/event view.
+            store.db.execute("BEGIN")
+            run = store.run(rid)
+            events = store.events(rid)
+            return {
+                "run": run,
+                "steps": store.steps(rid),
+                "events": events[-500:],
+                "event_count": len(events),
+                "tools": store.tools(rid),
+                "attempts": [
+                    dict(r)
+                    for r in store.db.execute(
+                        "SELECT * FROM attempts WHERE run_id=? ORDER BY started", (rid,)
+                    )
+                ],
+                "active": rid == self.active,
+                "worker_error": self.errors.get(rid),
+                "pause_requested": store.pause_requested(rid),
+            }
+        finally:
+            store.close()
+
+    def artifact(self, rid, ref):
+        store = Store(self.root)
+        try:
+            run = store.run(rid)
+            refs = {run["data"]["manifest_ref"]}
+            for row in store.steps(rid) + store.tools(rid):
+                refs.update(v for k, v in row.items() if k.endswith("_ref") and v)
+            for event in store.events(rid):
+                refs.update(
+                    v
+                    for k, v in event["payload"].items()
+                    if k.endswith("_ref") and isinstance(v, str)
+                )
+            if ref not in refs:
+                raise MasaError("artifact is not referenced by this run")
+            return store.read(ref)
+        finally:
+            store.close()
+
+    def report(self, rid):
+        store = Store(self.root)
+        try:
+            return render(store, rid)
+        finally:
+            store.close()
+
+    @staticmethod
+    def _budget(body):
+        """完整图共享总预算，节点不能自行扩充额度。 Full graphs share a budget that nodes cannot expand."""
+        defaults = asdict(
+            Budget(
+                deadline_seconds=1800,
+                model_calls=8 if body.get("full_checks") else 6 if body.get('role_demo') else 4,
+                tool_calls=6 if body.get("full_checks") else 3,
+            )
+        )
+        supplied = body.get("budget", {})
+        if not isinstance(supplied, dict) or set(supplied) - set(defaults):
+            raise MasaError("unknown budget fields")
+        budget = Budget(**{**defaults, **supplied})
+        budget.validate()
+        if (
+            budget.deadline_seconds > 86400
+            or budget.model_calls > 100
+            or budget.tool_calls > 100
+        ):
+            raise MasaError("console budget exceeds local limits")
+        return budget
+
+    def create(self, body, parent=None):
+        """创建隔离任务并选择是否使用证据上下文。 Create an isolated run with optional evidence context."""
+        with self.lock:
+            self._available()
+            # 先校验传输层选项，禁止拼写错误静默变成离线运行。
+            # Validate transport options before side effects; never silently downgrade a mistyped provider.
+            if body.get("provider", "scripted") not in {"scripted", "live"}:
+                raise MasaError("unsupported provider; choose scripted or live")
+            for flag in ("full_checks", "pause_after", "intelligence", "role_demo"):
+                if flag in body and type(body[flag]) is not bool:
+                    raise MasaError(flag + " must be boolean")
+            if body.get('role_demo') and (body.get('full_checks') or body.get('provider') == 'live'):
+                raise MasaError('read-only role demo requires scripted provider and a separate graph')
+            store = Store(self.root)
+            try:
+                source = body.get("repo", "")
+                goal = body.get("goal", "")
+                operation = body.get("operation", "go_test")
+                if (
+                    not isinstance(source, str)
+                    or not source.strip()
+                    or not isinstance(goal, str)
+                ):
+                    raise MasaError("repository and goal are required")
+                if operation not in OPERATIONS:
+                    raise MasaError("unsupported operation")
+                budget = self._budget(body)
+                provider = (
+                    self.settings.provider(body.get("api_profile_id"))
+                    if body.get("provider") == "live"
+                    else None
+                )
+                runtime = Runtime(
+                    store, Runner(self.runner_path, self.go_path), provider
+                )
+                graph = full_verification_policy() if body.get("full_checks") else None
+                if body.get('role_demo'):
+                    graph = collaboration_policy(operation)
+                rid = runtime.create(
+                    Path(source),
+                    goal,
+                    budget,
+                    operation,
+                    parent_run_id=parent,
+                    intelligence=body.get("intelligence") is True,
+                    graph=graph,
+                )
+            finally:
+                store.close()
+            self._launch(rid, 1 if body.get("pause_after") is True else 0, provider)
+            return {"id": rid}
+
+    def results(self, rid):
+        """读取工具账本中的实际输出。 Read actual outputs from the tool ledger."""
+        store = Store(self.root)
+        try:
+            store.run(rid)
+            return {'checks': [
+                {'id': row['id'], 'step_id': row['step_id'],
+                 'operation': store.read(row['request_ref'])['operation'],
+                 'result': store.read(row['result_ref']) if row['result_ref'] else None}
+                for row in store.tools(rid)]}
+        finally:
+            store.close()
+
+    def rerun(self, rid):
+        """复制已完成的代码快照重新验证，不调用付费模型。 Verify a completed snapshot in a new run without paid models."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                original = store.run(rid)
+                data = original['data']
+                if data.get('project_plan'):
+                    raise MasaError('project plan only: generate code before verification')
+                if original['status'] not in {'succeeded', 'failed', 'needs_attention'}:
+                    raise MasaError('finish or approve the current run before rerunning')
+                if data.get('codegen') and data['codegen'].get('status') != 'approved':
+                    raise MasaError('human review required before rerunning generated code')
+                source = Path(data['workspace'])
+                verify_snapshot(source, data['snapshot_id'])
+                runtime = Runtime(store, Runner(self.runner_path, self.go_path))
+                # 项目重验保留已批准 Agent 图，旧演示继续使用完整固定检查。
+                # Preserve approved agent graphs on reruns; legacy demos retain full checks.
+                graph=Graph.from_dict(data['graph']) if data['graph'].get('policy_version')=='agent-check-plan-v1' else harness_policy()
+                new_id = runtime.create(source, data['goal'], self._budget({'full_checks': True}),
+                                        graph=graph, parent_run_id=rid,project_bundle=data.get('project_bundle'))
+                # 复制前后都绑定同一版本，避免外部改动绕过审核。
+                # Bind both sides of the copy to the reviewed version.
+                if store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:
+                    store.set_status(new_id, 'needs_attention', 'snapshot_mismatch')
+                    raise MasaError('snapshot changed while preparing rerun')
+            finally:
+                store.close()
+            self._launch(new_id, 0)
+            return {'id': new_id}
+
+    def _available(self):
+        if self.job_thread and self.job_thread.is_alive() and threading.current_thread() is not self.job_thread:
+            raise MasaError('project generation is busy; wait for the current job')
+        if self.closing:
+            raise MasaError("console is shutting down")
+        if self.active:
+            raise MasaError("another run is executing; pause or cancel it first")
+
+    def resume(self, rid, pause_after=False):
+        """恢复运行，支持单节点或自动推进。 Resume one node or automatically advance the graph."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                if store.run(rid)['data'].get('project_plan'):
+                    raise MasaError('project plan only: generate code before execution')
+                generation = store.run(rid)['data'].get('codegen')
+                if generation and generation.get('status') != 'approved':
+                    raise MasaError('请先审核代码提案并点击批准执行 / human review required')
+                if store.run(rid)["status"] not in {"created", "paused", "running"}:
+                    raise MasaError(
+                        "this run cannot be resumed; create a new run instead"
+                    )
+            finally:
+                store.close()
+            self._launch(rid, 1 if pause_after is True else 0, self._provider_for(rid))
+            return {"id": rid}
+
+    def start_project_job(self, body, rid=None):
+        """快速返回任务标识，让浏览器轮询真实阶段。 Return a job ID immediately for polling actual stages."""
+        with self.lock:
+            self._available()
+            ident=uuid.uuid4().hex
+            self.jobs[ident]={'status':'running','run_id':None,'started':time.time()}
+            def created(run_id):
+                self.jobs[ident]['run_id']=run_id
+            def work():
+                try:
+                    result=(self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
+                    self.jobs[ident].update(status='completed',result=result)
+                except Exception as exc:
+                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
+            self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
+            self.job_thread.start()
+            return {'job_id':ident}
+
+    def project_job(self, ident):
+        """返回服务端进度，不编造 token 百分比。 Return server progress without inventing token percentages."""
+        if ident not in self.jobs:
+            raise MasaError('job unavailable after restart; check saved run records')
+        job=dict(self.jobs[ident])
+        if job['run_id']:
+            detail=self.detail(job['run_id'])
+            requested=[e for e in detail['events'] if e['type']=='model_requested']
+            job['stage']=requested[-1]['payload']['step_id'] if requested else 'preparing'
+        return job
+
+    def open_workspace(self, rid):
+        """仅打开该运行绑定的目录，不接受任意路径或命令。 Open only the workspace bound to this run."""
+        run=self.detail(rid)['run']
+        if run['data'].get('project_plan'):
+            raise MasaError('approve generated code before opening the project folder')
+        path=Path(run['data']['workspace']).resolve()
+        if not path.is_relative_to(self.root/'workspaces') or not path.is_dir():
+            raise MasaError('workspace unavailable')
+        if os.name!='nt':
+            raise MasaError('folder opening currently supports Windows; copy the workspace path')
+        os.startfile(str(path))
+        return {'path':str(path)}
+
+    def project_logs(self, rid):
+        """汇总来源链的角色事件与工具输出，便于复制。 Collect lineage events and tool outputs for copying."""
+        lines=[];seen=set()
+        while rid and rid not in seen and len(seen)<30:
+            seen.add(rid);d=self.detail(rid)
+            lines.append(f"RUN {rid} | {d['run']['status']} | {d['run']['data']['goal']}")
+            for event in d['events']:
+                lines.append(f"{event['created']} {event['type']} {event['payload']}")
+            for check in self.results(rid)['checks']:
+                result=check['result']
+                lines.append(f"{check['operation']}: {result}")
+                if result:
+                    lines.extend(['STDOUT:',result.get('stdout',''),'STDERR:',result.get('stderr','')])
+            rid=d['run']['data'].get('parent_run_id')
+        return {'text':'\n'.join(lines)}
+
+    def plan_project(self, body, on_created=None):
+        """串行规划与角色交接，保存为可恢复预览的运行记录。 Serialize role planning into a persistent preview run."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                reuse=body.get('retry_run_id')
+                goal=body.get('goal')
+                if reuse:
+                    old=store.run(reuse)
+                    if old['status']!='failed' or not old['data'].get('project_plan',{}).get('spec_ref'):
+                        raise MasaError('only failed plans with saved Planner output can retry Tester')
+                    goal=old['data']['goal']
+                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, goal,on_created,reuse)
+                return {'id':rid}
+            finally:
+                store.close()
+
+    def approve_project(self, rid, body):
+        """仅确认规格，不启动工具或生成代码。 Approve specifications without tools or code generation."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                ProjectPlanning(store, Runner(self.runner_path, self.go_path)).approve(rid, body)
+                return {'id':rid}
+            finally:
+                store.close()
+
+    def generate_project(self, rid, body, on_created=None):
+        """生成多文件草稿，密钥继续只在服务内存。 Generate a multi-file draft with session-only credentials."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider,on_created)}
+            finally:
+                store.close()
+
+    def repair_project(self, rid, body, on_created=None):
+        """用户显式发起一次证据驱动修复。 Start one evidence-driven repair on explicit request."""
+        with self.lock:
+            self._available()
+            provider=self.settings.provider(body.get('api_profile_id'))
+            store=Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created)}
+            finally:store.close()
+
+    def approve_project_code(self, rid, body):
+        """批准整套文件后启动独立检查，重复请求不重复运行。 Approve the bundle and launch checks without duplicate runs."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                child = ProjectGeneration(store, Runner(self.runner_path,self.go_path)).approve(rid,body)
+                status = store.run(child)['status']
+            finally:
+                store.close()
+            if status == 'created':
+                self._launch(child,0)
+            return {'id':child}
+
+    def generate(self, body):
+        """为需求生成待审核草稿；单服务串行保护生成与执行。 Generate a pending draft while serializing generation/execution."""
+        with self.lock:
+            self._available()
+            provider = self.settings.provider(body.get('api_profile_id'))
+            store = Store(self.root)
+            try:
+                rid = CodeGeneration(store, Runner(self.runner_path, self.go_path)).generate(
+                    provider, body.get('goal',''), body.get('repo',''), body.get('target','solution.go'),
+                    body.get('tests',''), body.get('parent_run_id'))
+                return {'id':rid}
+            finally:
+                store.close()
+
+    def review_code(self, rid, body):
+        """人工拒绝或批准后启动确定性真实工具验证。 Reject or approve before deterministic real-tool verification."""
+        with self.lock:
+            self._available()
+            store = Store(self.root)
+            try:
+                service = CodeGeneration(store, Runner(self.runner_path, self.go_path))
+                if body.get('action') == 'reject':
+                    service.reject(rid)
+                    return {'id':rid}
+                if body.get('action') != 'approve':
+                    raise MasaError('choose approve or reject')
+                service.approve(rid, body.get('proposal_ref'), body.get('content'))
+            finally:
+                store.close()
+            self._launch(rid, 0)
+            return {'id':rid}
+
+    def _provider_for(self, rid):
+        """按运行身份解析配置，避免默认切换影响恢复。 Resolve the frozen identity independently of the selected default."""
+        store = Store(self.root)
+        try:
+            expected = store.run(rid)["data"].get("model_profile")
+            return self.settings.provider(expected=expected) if expected else None
+        finally:
+            store.close()
+
+    def _launch(self, rid, pause_after, provider=None):
+        """后台执行绑定了 provider 的任务。 Run with a bound provider in the background."""
+        self.active = rid
+        self.errors.pop(rid, None)
+
+        def work():
+            store = None
+            try:
+                store = Store(self.root)
+                Runtime(
+                    store, Runner(self.runner_path, self.go_path), provider
+                ).execute(rid, pause_after)
+            except Exception as exc:
+                # Provider failures are sanitized; never expose credentials in worker diagnostics.
+                self.errors[rid] = str(exc)
+            finally:
+                if store is not None:
+                    store.close()
+                with self.lock:
+                    self.active = None
+
+        self.worker = threading.Thread(target=work, name=f"masa-{rid[:8]}", daemon=True)
+        self.worker.start()
+
+    def control(self, rid, action):
+        """持久化人工控制，无 worker 时直接完成取消。 Persist human control and finalize detached cancellation."""
+        with self.lock:
+            store = Store(self.root)
+            try:
+                if action == "pause":
+                    store.request_pause(rid)
+                else:
+                    store.cancel(rid)
+                    # 另一个任务的 worker 不会处理本任务的取消。
+                    # A different run's worker cannot observe this run's cancellation.
+                    if self.active != rid:
+                        store.set_status(rid, "cancelled", "cancellation_requested")
+            finally:
+                store.close()
+        return {"id": rid, "requested": action}
+
+    def close(self):
+        with self.lock:
+            self.closing = True
+            rid, worker = self.active, self.worker
+        if rid:
+            store = Store(self.root)
+            try:
+                try:
+                    store.cancel(rid)
+                except MasaError:
+                    pass
+            finally:
+                store.close()
+        if worker:
+            worker.join(timeout=15)

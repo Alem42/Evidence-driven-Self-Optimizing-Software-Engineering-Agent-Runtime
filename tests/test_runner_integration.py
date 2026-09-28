@@ -10,7 +10,7 @@ import time
 import unittest
 import uuid
 
-from masa.adapters.runner import Runner
+from masa.infrastructure.runner import Runner
 
 
 ROOT = Path(__file__).resolve().parents[1]

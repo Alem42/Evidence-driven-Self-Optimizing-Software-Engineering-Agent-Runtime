@@ -3,10 +3,10 @@
 from pathlib import Path
 import tempfile
 import unittest
-from masa.codegen import CodeGeneration
-from masa.adapters.sqlite import Store
-from masa.domain import MasaError
-from masa.runtime import Runtime
+from masa.application.single_file import CodeGeneration
+from masa.infrastructure.store import Store
+from masa.domain.models import MasaError
+from masa.runtime.engine import Runtime
 from test_runtime import FakeExecutor
 
 

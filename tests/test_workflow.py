@@ -1,7 +1,7 @@
 import unittest
 
-from masa.domain import Graph, MasaError, Node
-from masa.workflow import default_policy, ready_nodes, validate
+from masa.domain.models import Graph, MasaError, Node
+from masa.runtime.graph import default_policy, ready_nodes, validate
 
 
 class WorkflowTests(unittest.TestCase):

@@ -10,10 +10,10 @@ requires-python = ">=3.12,<3.15"
 dependencies = []
 
 [project.scripts]
-masa = "masa.cli:main"
+masa = "masa.interfaces.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"masa.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"masa.interfaces.http" = ["static/*.html", "static/*.css", "static/*.js"]

@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from masa.adapters.sqlite import Store
-from masa.domain import Budget, MasaError, digest
-from masa.patching import Patches
-from masa.runtime import Runtime
-from masa.workspace import manifest
+from masa.infrastructure.store import Store
+from masa.domain.models import Budget, MasaError, digest
+from masa.runtime.patches import Patches
+from masa.runtime.engine import Runtime
+from masa.infrastructure.workspaces import manifest
 from test_runtime import FakeExecutor
 
 

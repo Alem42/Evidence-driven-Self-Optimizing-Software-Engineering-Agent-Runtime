@@ -2,11 +2,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from masa.adapters.sqlite import Store
-from masa.domain import Budget, Graph, MasaError, Node
-from masa.locking import owner_lock
-from masa.runtime import Runtime
-from masa.workspace import copy_snapshot, manifest
+from masa.infrastructure.store import Store
+from masa.domain.models import Budget, Graph, MasaError, Node
+from masa.infrastructure.locking import owner_lock
+from masa.runtime.engine import Runtime
+from masa.infrastructure.workspaces import copy_snapshot, manifest
 
 
 class FakeExecutor:

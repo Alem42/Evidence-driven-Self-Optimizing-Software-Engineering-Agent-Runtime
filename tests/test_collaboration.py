@@ -5,12 +5,12 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from masa.adapters.model import ScriptedProvider
-from masa.adapters.sqlite import Store
-from masa.collaboration import receive_handoffs, validate_role_result
-from masa.domain import Budget, MasaError, canonical
-from masa.runtime import Runtime
-from masa.workflow import collaboration_policy
+from masa.agents.scripted import ScriptedProvider
+from masa.infrastructure.store import Store
+from masa.agents.handoffs import receive_handoffs, validate_role_result
+from masa.domain.models import Budget, MasaError, canonical
+from masa.runtime.engine import Runtime
+from masa.runtime.graph import collaboration_policy
 from test_runtime import FakeExecutor
 
 
@@ -191,7 +191,7 @@ class CollaborationTests(unittest.TestCase):
 
     def test_handoffs_are_mandatory_budgeted_context(self):
         """超限交接不能在裁剪后追加或丢弃。 Mandatory handoffs cannot bypass trimming or be silently dropped."""
-        from masa.context import ContextBuilder
+        from masa.intelligence.context import ContextBuilder
         from types import SimpleNamespace
         engine = SimpleNamespace(search=lambda *args: {'unknowns': [], 'partial': False, 'candidates': [], 'policy': 'test'})
         builder = ContextBuilder(self.store, engine)

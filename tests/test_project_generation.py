@@ -2,11 +2,11 @@
 import tempfile
 import unittest
 from pathlib import Path
-from masa.adapters.sqlite import Store
-from masa.domain import MasaError
-from masa.project_plan import ProjectPlanning
-from masa.project_generation import ProjectGeneration, validate_files, validate_repair
-from masa.runtime import Runtime
+from masa.infrastructure.store import Store
+from masa.domain.models import MasaError
+from masa.application.planning import ProjectPlanning
+from masa.application.generation import ProjectGeneration, validate_files, validate_repair
+from masa.runtime.engine import Runtime
 from test_project_plan import SPEC, CHECKS, PlannerProvider
 from test_runtime import FakeExecutor
 
