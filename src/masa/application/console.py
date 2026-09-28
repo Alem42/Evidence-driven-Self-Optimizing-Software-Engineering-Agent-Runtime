@@ -6,6 +6,8 @@ import threading
 import uuid
 import time
 import os
+import json
+import re
 
 from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
@@ -43,6 +45,26 @@ def test_format_only(checks):
     if result.get('status')!='completed':return False
     paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
     return bool(paths) and all(p.endswith('_test.go') for p in paths)
+
+
+def repeated_assertion_signature(checks):
+    """提取失败测试的断言指纹，避免同一矛盾反复消耗修复调用。 / Fingerprint failing assertions to stop repeated ineffective repairs."""
+    for operation, result in checks:
+        if operation != 'go_test' or result.get('exit_code') == 0:
+            continue
+        assertions = []
+        for line in result.get('stdout', '').splitlines():
+            try:
+                frame = json.loads(line)
+                output = frame.get('Output', '') if isinstance(frame, dict) else line
+            except (ValueError, TypeError):
+                output = line
+            for item in str(output).splitlines():
+                if re.search(r'_test\.go:\d+:', item) and re.search(r'\b(?:want|expected|got)\b', item, re.I):
+                    assertions.append(re.sub(r'_test\.go:\d+:', '_test.go:', item.strip()))
+        if assertions:
+            return tuple(sorted(set(assertions)))
+    return ()
 
 
 class Console:
@@ -388,6 +410,8 @@ class Console:
                                            'review_mode':'automatic'})
                     phase('generation',plan)
                     draft=generation.generate(plan,provider,lambda rid:phase('generation',rid))
+                    prior_assertion=None
+                    repeated_assertions=0
                     for attempt in range(5):
                         meta=store.run(draft)['data']['project_plan']
                         phase('verification',draft,attempt)
@@ -406,6 +430,15 @@ class Console:
                         # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
                         checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
                                 for t in store.tools(verified) if t['result_ref']]
+                        # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
+                        # Three identical assertion failures require spec/test review instead of another implementation repair.
+                        assertion=repeated_assertion_signature(checks)
+                        repeated_assertions=repeated_assertions+1 if assertion and assertion==prior_assertion else 1
+                        prior_assertion=assertion
+                        if assertion and repeated_assertions>=3:
+                            self.jobs[ident].update(status='completed',result={'id':verified},
+                                note='same test assertion failed three times; inspect specification and test expectation before further repair')
+                            return
                         outputs=[result for _,result in checks]
                         evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
                         if test_format_only(checks):

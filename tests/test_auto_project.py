@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.console import Console, test_revision_needed, test_format_only
+from masa.application.console import Console, test_revision_needed, test_format_only, repeated_assertion_signature
 from masa.application.projects import Projects
 from masa.infrastructure.store import Store
 from test_project_plan import SPEC, CHECKS
@@ -22,6 +22,16 @@ class CompositeProvider:
 
 
 class AutomaticProjectTests(unittest.TestCase):
+    def test_repeated_assertion_signature_ignores_go_json_metadata(self):
+        """断言不变时识别停滞，时间戳与行号不影响判断。 / Stable assertions survive JSON timestamps and line shifts."""
+        def check(line, timestamp):
+            output='    merge_test.go:'+line+': got [{-5 2}], want three intervals\\n'
+            import json
+            return [('go_test', {'exit_code':1, 'stdout':json.dumps({'Time':timestamp,'Output':output})})]
+        self.assertEqual(repeated_assertion_signature(check('75','first')),
+                         repeated_assertion_signature(check('79','second')))
+        self.assertEqual(repeated_assertion_signature([('go_test',{'exit_code':0,'stdout':''})]),())
+
     def test_auto_retries_tester_without_repeating_planner(self):
         """复用已验证规格，只重试失败的 Tester 响应。 Reuse a validated spec and retry only Tester failures."""
         class FlakyTester(CompositeProvider):
