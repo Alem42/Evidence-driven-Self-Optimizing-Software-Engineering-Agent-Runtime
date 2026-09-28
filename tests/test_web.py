@@ -16,6 +16,31 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_second_service_cannot_listen_on_same_port(self):
+        """同端口只允许一个工作台服务。 Prevent two workbench versions from sharing one port."""
+        with self.assertRaises(OSError):
+            make_server(self.console,self.server.server_port)
+
+    def test_http_auto_project_finishes_with_gate_without_intermediate_clicks(self):
+        """一次 HTTP 请求后可轮询到真实 Gate，审批来自自动模式。 One request advances to a real Gate without intermediate clicks."""
+        from test_auto_project import CompositeProvider
+        with patch.object(self.console.settings,'provider',return_value=CompositeProvider()), patch('masa.application.console.Runner',return_value=FakeExecutor()):
+            status, started=self.request('/api/projects/plan',{'goal':'Build a CLI','auto_verify':True})
+            self.assertEqual(status,200,started)
+            self.console.job_thread.join(timeout=10)
+        status,job=self.request('/api/jobs/'+started['job_id'])
+        self.assertEqual(status,200)
+        self.assertEqual(job['status'],'completed')
+        status,view=self.request('/api/projects/'+job['result']['id'])
+        self.assertEqual(status,200)
+        self.assertEqual(view['stages'][-1]['role'],'gate')
+        self.assertEqual(view['stages'][-1]['status'],'succeeded')
+        _, detail=self.request('/api/runs/'+job['result']['id'])
+        ref=detail['run']['data']['project_bundle']['approval_ref']
+        status,artifact=self.request('/api/runs/'+job['result']['id']+'/artifacts/'+ref)
+        self.assertEqual(status,200)
+        self.assertIn('cmd/app/main.go',artifact['artifact']['files'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

@@ -5,6 +5,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
 import sqlite3
+import socket
+import os
 from urllib.parse import urlsplit
 import webbrowser
 
@@ -13,6 +15,17 @@ from masa.application.console import Console
 
 
 STATIC = Path(__file__).parent / "static"
+
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    """独占本机端口，避免 Windows 把请求分发给多个不同版本。 Own the loopback port exclusively across versions."""
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        """Windows 使用独占绑定；同端口第二个服务必须报错。 Reject a second listener on the same port on Windows."""
+        if os.name == 'nt' and hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def make_server(console, port=8765):
@@ -149,7 +162,7 @@ def make_server(console, port=8765):
             except (OSError, sqlite3.Error):
                 self.send(500, {"error": "local storage or tool access failed"})
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return LocalHTTPServer(("127.0.0.1", port), Handler)
 
 
 def serve(state_dir, runner, go, project, port=8765, open_browser=False):

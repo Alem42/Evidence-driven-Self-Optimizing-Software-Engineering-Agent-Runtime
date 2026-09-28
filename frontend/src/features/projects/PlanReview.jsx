@@ -23,12 +23,14 @@ export function ProjectPlanReview({detail,profiles,select,onProgress,working}) {
     {(plan.status==='approved'||saved)&&plan.review_mode!=='automatic'&&<div><label>生成代码使用的 API<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><button className="primary" disabled={busy||working||!profiles?.profiles?.some(p=>p.key_configured)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；生成后审核代码，再自动验证。</p></div>}
     {plan.coverage_warning&&<p className="notice">{plan.coverage_warning}</p>}
     {plan.status==='failed'&&plan.spec_ref&&<button disabled={busy} onClick={retry}>保留架构，仅重试验证方案</button>}
-    {(error||plan.error)&&<p className="error">{error||plan.error}</p>}{spec&&<><fieldset disabled={!editable||busy}><legend>Planner · 架构与职责</legend>
+    {(error||plan.error)&&<p className="error">{error||plan.error}</p>}{spec&&<><p>{spec.summary}</p><p className="muted">{spec.files.length} 个计划文件 · {spec.acceptance.length} 条验收标准 · {checks.length} 项拟执行检查。Tester 此时只设计测试，尚未运行 Go 测试。</p>
+    {editable&&<button className="primary" disabled={busy||working} onClick={()=>approve(true)}>{busy?'正在确认…':'确认方案并生成代码与测试'}</button>}
+    <details className="plan-edit"><summary>查看或修改项目结构、验收标准和测试方案</summary><fieldset disabled={!editable||busy}><legend>Planner · 架构与职责</legend>
     <label>设计说明<textarea rows={4} value={spec.summary} onChange={e=>setSpec({...spec,summary:e.target.value})}/></label>
     <label>Go 模块名<input value={spec.module} onChange={e=>setSpec({...spec,module:e.target.value})}/></label><p>固定入口：{spec.entrypoint}</p>
     <h4>目录与文件职责</h4>{spec.files.map((f,i)=><div className="field-pair" key={i}><label>文件路径<input value={f.path} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,path:e.target.value}:v)})}/></label><label>负责什么<input value={f.purpose} onChange={e=>setSpec({...spec,files:spec.files.map((v,n)=>n===i?{...v,purpose:e.target.value}:v)})}/></label></div>)}
     <h4>验收标准</h4>{spec.acceptance.map((v,i)=><label key={i}>#{i+1}<textarea rows={2} value={v} onChange={e=>setSpec({...spec,acceptance:spec.acceptance.map((a,n)=>n===i?e.target.value:a)})}/></label>)}
     <h4>Tester · 验证方案</h4>{checks.map((c,i)=><div key={c.operation}><label>{c.operation} · 覆盖验收项 {c.acceptance_indices.map(n=>n+1).join(', ')||'通用检查'}<textarea rows={3} value={c.purpose} onChange={e=>setChecks(checks.map((v,n)=>n===i?{...v,purpose:e.target.value}:v))}/></label>{c.cases?.map((t,n)=><details key={n}><summary>{t.level} · {t.name}</summary><p>输入：{t.input}</p><p>预期：{t.expected}</p></details>)}</div>)}
-    </fieldset>{editable&&<button className="primary" disabled={busy||working} onClick={()=>approve(true)}>{busy?'正在确认…':'确认方案并生成代码与测试'}</button>}</>}
+    </fieldset></details></>}
   </section>;
 }

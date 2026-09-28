@@ -21,6 +21,14 @@ from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 
 
+def test_revision_needed(evidence):
+    """只把测试文件的编译/导入错误路由到测试修订。 Route test-file compile/import errors to a test revision."""
+    return ('import cycle not allowed in test' in evidence or
+            ('_test.go:' in evidence and any(marker in evidence for marker in
+             ('imported and not used','undefined:', 'expected ', 'syntax error',
+              'executable file not found in %PATH%'))))
+
+
 class Console:
     def __init__(self, state_dir, runner, go, project):
         self.root = Path(state_dir).resolve()
@@ -131,6 +139,10 @@ class Console:
         try:
             run = store.run(rid)
             refs = {run["data"]["manifest_ref"]}
+            if run['data'].get('project_bundle'):
+                # 只允许读取本次发布快照绑定的完整代码 artifact。
+                # Expose only the exact approval artifact bound to this published snapshot.
+                refs.add(run['data']['project_bundle']['approval_ref'])
             for row in store.steps(rid) + store.tools(rid):
                 refs.update(v for k, v in row.items() if k.endswith("_ref") and v)
             for event in store.events(rid):
@@ -319,7 +331,7 @@ class Console:
             return {'job_id':ident}
 
     def start_autonomous_project_job(self, body):
-        """一次选择后有界完成生成、校验与最多两轮修复。 Complete a bounded project loop after one explicit choice."""
+        """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
             self._available()
             provider=self.settings.provider(body.get('api_profile_id'))
@@ -347,7 +359,7 @@ class Console:
                                            'review_mode':'automatic'})
                     phase('generation',plan)
                     draft=generation.generate(plan,provider,lambda rid:phase('generation',rid))
-                    for attempt in range(3):
+                    for attempt in range(5):
                         meta=store.run(draft)['data']['project_plan']
                         phase('verification',draft,attempt)
                         verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
@@ -357,7 +369,7 @@ class Console:
                         if result['status']=='succeeded':
                             self.jobs[ident].update(status='completed',result={'id':verified})
                             return
-                        if attempt==2:
+                        if attempt==4:
                             self.jobs[ident].update(status='completed',result={'id':verified},
                                                     note='automatic repair limit reached; inspect failed checks')
                             return
@@ -365,7 +377,7 @@ class Console:
                         # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
                         outputs=[store.read(t['result_ref']) for t in store.tools(verified) if t['result_ref']]
                         evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
-                        if 'import cycle not allowed in test' in evidence:
+                        if test_revision_needed(evidence):
                             phase('test_revision',verified,attempt+1)
                             draft=generation.revise_tests(verified,provider,
                                 'Fix the import cycle in _test.go. Preserve behavioral assertions and requirements.',

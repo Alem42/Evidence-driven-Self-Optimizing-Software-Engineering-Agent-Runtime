@@ -46,6 +46,7 @@ def instruction_for(context):
                 'Return exactly {"files":{existing_test_path:complete_replacement_content}}. '
                 'Change only existing _test.go files. Keep all meaningful requirements and assertions, '
                 'especially edge cases. Correct invalid imports, package cycles, or test setup. '
+                'For CLI tests on Windows, go build -o target must use a .exe suffix; choose suffix by runtime.GOOS. '
                 'Do not weaken or delete assertions merely to pass. Do not change implementation, go.mod or paths. '
                 'The revised test bundle will be reviewed and verified again; never claim success.')
         elif context['purpose']=='project_repair':
@@ -63,6 +64,7 @@ def instruction_for(context):
                 'Test observable behavior, not implementation details. Include entrypoint-level tests where paths permit; use t.TempDir, '
                 'For CLI testing prefer run(args []string, stdout, stderr io.Writer) int with main calling os.Exit(run(...)); '
                 'test run directly with buffers and temp input files. NEVER exec os.Args[0] in tests: it recursively launches the test binary. '
+                'If building a CLI binary in tests, use a .exe suffix on Windows, chosen by runtime.GOOS. '
                 'avoid network/time-dependent tests, never skip failing cases or change requirements to make tests pass. '
                 'Use bilingual Chinese/English function comments. No placeholders. The human reviews before any write.')
     return instruction

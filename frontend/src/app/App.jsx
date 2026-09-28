@@ -18,7 +18,7 @@ export default function App(){
   const selectedStage=stages.find(s=>s.id===focus?.id)||currentStage;
   // 阶段真正变化时定位对应节点与下方操作区，避免长图和长表单造成手动滚动。
   // Follow real stage transitions into view without scrolling on every polling tick.
-  useEffect(()=>{if(!currentStage||lastStageRef.current===currentStage.id)return;lastStageRef.current=currentStage.id;
+  useEffect(()=>{if(!currentStage||lastStageRef.current===currentStage.id)return;lastStageRef.current=currentStage.id;setFocus(null);
     const node=graphRef.current?.querySelector(`[data-stage-id="${currentStage.id}"]`);
     node?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
     detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -33,8 +33,8 @@ export default function App(){
       {!w.selected&&!w.working?<section className="start-panel"><span className="eyebrow">从需求开始</span><h1>描述项目，观察每一步。</h1><p>Planner 规划结构，Tester 设计验证。你确认方案和代码后，Runtime 执行检查，Gate 独立验收。</p>
         <form onSubmit={start}><label>使用模型<select required value={model||ready.find(p=>p.id===profiles?.active_id)?.id||ready[0]?.id||''} onChange={e=>setModel(e.target.value)}><option value="">选择已配置的 API</option>{ready.map(p=><option key={p.id} value={p.id}>{p.name||p.model} · {p.model}</option>)}</select></label>
         <label>你想构建什么？<textarea autoFocus rows={7} required maxLength={16000} value={goal} onChange={e=>setGoal(e.target.value)} placeholder="例如：做一个 CSV 费用汇总工具，按类别汇总金额，支持退款；输入有错误时提示行号，不输出半份报表。"/></label>
-        <label className="check"><input type="checkbox" checked={autoVerify} onChange={e=>setAutoVerify(e.target.checked)}/><span>自动生成、检查并最多修复两轮</span></label>
-        {autoVerify&&<p className="hint">自动模式会直接采用符合契约的模型草稿并运行 Go 检查；不会逐步等你批准。遇到测试文件循环导入会生成新测试版本。最多约 5 次模型调用，失败会停下供你查看。</p>}
+        <label className="check"><input type="checkbox" checked={autoVerify} onChange={e=>setAutoVerify(e.target.checked)}/><span>自动生成、检查并最多修复四轮</span></label>
+        {autoVerify&&<p className="hint">自动模式会直接采用符合契约的模型草稿并运行 Go 检查；不会逐步等你批准。遇到测试文件问题会生成新测试版本。最多 7 次模型调用，失败会停下供你查看。</p>}
         <div className="start-footer"><span>当前支持 Go 标准库 CLI 项目</span><button className="primary" disabled={starting||!ready.length||!w.boot?.runner_ready}>{starting?'正在启动…':'开始规划 →'}</button></div></form>
         {!ready.length&&<p className="hint">先在 API 与模型设置中添加密钥。</p>}</section>:<>
         {!w.detail&&<ProjectProgress job={w.job}/>}
