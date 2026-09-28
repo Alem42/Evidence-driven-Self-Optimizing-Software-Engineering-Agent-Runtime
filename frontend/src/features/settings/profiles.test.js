@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeProfiles,parseProfile} from './apiProfiles.js';
+import {normalizeProfiles,parseProfile} from './profiles.js';
 
 test('old backend cannot crash API list rendering',()=>{
   assert.deepEqual(normalizeProfiles({name:'legacy'}).profiles,[]);

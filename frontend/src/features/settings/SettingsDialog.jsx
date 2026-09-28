@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
-import {api} from './api';
-import {normalizeProfiles, parseProfile} from './apiProfiles';
+import {api} from '../../api/client';
+import {normalizeProfiles, parseProfile} from './profiles';
 
 const defaults={name:'DeepSeek V4 Pro',base_url:'https://api.deepseek.com',model:'deepseek-v4-pro',api_key:'',timeout_seconds:60,max_output_tokens:4096,token_parameter:'max_tokens',thinking:'disabled'};
 

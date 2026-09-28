@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
-import {api} from './api';
-import {ProjectProgress} from './ProjectProgress';
+import {api} from '../../api/client';
+import {ProjectProgress} from './progress';
 
 // 文件内容来自不可变草稿，批准时提交当前完整集合。 Load immutable draft files and submit the complete visible bundle.
 export function ProjectCodeReview({detail,select}) {

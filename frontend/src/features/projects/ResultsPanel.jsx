@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {api} from './api';
+import {api} from '../../api/client';
 
 // 将 Go JSON 测试输出转换为可读日志，保留其他工具原文。 Render Go test output while preserving other tool logs.
 export function readableOutput(value='') {

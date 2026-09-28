@@ -1,1 +1,17 @@
-{"name":"masa-console","private":true,"version":"0.1.0","type":"module","scripts":{"build":"vite build","test":"node --test src/*.test.js"},"dependencies":{"react":"19.3.0","react-dom":"19.3.0"},"devDependencies":{"vite":"8.3.1"}}
+{
+  "name": "masa-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test src/features/projects/*.test.js src/features/settings/*.test.js"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.1"
+  }
+}

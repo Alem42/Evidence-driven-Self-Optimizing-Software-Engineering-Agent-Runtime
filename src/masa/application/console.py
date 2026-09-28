@@ -69,6 +69,8 @@ class Console:
         """为前端提供项目中心读取视图。 Expose project-centered read models to the interface."""
         store=Store(self.root)
         try:
+            # 同一读取事务避免跨阶段混用元数据与事件。 Read metadata and events from one consistent snapshot.
+            store.db.execute('BEGIN')
             return Projects(store).view(rid) if rid else {'projects':Projects(store).catalog()}
         finally:store.close()
 
