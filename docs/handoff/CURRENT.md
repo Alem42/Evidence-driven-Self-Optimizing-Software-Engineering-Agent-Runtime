@@ -21,3 +21,9 @@
 密钥已本地持久化，不打印、不提交。旧导入路径已删除，读取 src/masa/interfaces/http/server.py 和 application/console.py。Python venv 无 pip，安装使用 uv。前端构建产物提交在 interfaces/http/static。后台 job 为内存对象，重启不恢复模型调用；图为证据投影，勿声称任意自适应调度已完成。
 
 先 git status，再进行用户当前要求；保留旧证据，不重新运行本轮付费测试。docs/archive 为历史材料，权威入口是 docs/00_INDEX.md。
+
+## 2026-09-28 追加：随机数项目已修复
+
+当前最新成功运行 `4d162e1bf86043b58b4d0364d0fe793b`。之前的模型方案格式失败、测试循环导入、未使用导入、Windows CLI 测试路径错误、无参数行为失败均有独立运行记录。详见 `docs/progress/PROGRESS_2026-09-28_009_random-workflow-fix.md`。
+
+新增有界自动模式、测试修订、前端当前阶段自动定位和单流程角色图。Windows 8765 发现两组服务同时监听，已统一停止并启用独占端口后只启动新版。下次恢复先检查端口服务与 git status，不要重复调用付费 API。`PLAN_NEXT_STAGE.md` 仍以生成应用实际运行入口为主；浏览器视觉验收未完成。新增测试的实际数量和最终提交号以测试命令与 git log 为准。
