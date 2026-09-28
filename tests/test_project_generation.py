@@ -5,7 +5,7 @@ from pathlib import Path
 from masa.adapters.sqlite import Store
 from masa.domain import MasaError
 from masa.project_plan import ProjectPlanning
-from masa.project_generation import ProjectGeneration, validate_files
+from masa.project_generation import ProjectGeneration, validate_files, validate_repair
 from masa.runtime import Runtime
 from test_project_plan import SPEC, CHECKS, PlannerProvider
 from test_runtime import FakeExecutor
@@ -54,3 +54,35 @@ class ProjectGenerationTests(unittest.TestCase):
                       {**FILES,'go.mod':'module evil\n'}, {**FILES,'internal/app/app.go':'a'*60001}]:
             with self.subTest(files=list(files)):
                 with self.assertRaises(MasaError): validate_files(files,SPEC)
+
+    def test_repair_preserves_tests_and_requires_real_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp));executor=FakeExecutor(exit_code=1)
+            try:
+                planning=ProjectPlanning(store,executor)
+                parent=planning.generate(PlannerProvider(),'Build CLI')
+                plan=store.run(parent)['data']['project_plan']
+                planning.approve(parent,{'spec_ref':plan['spec_ref'],'checks_ref':plan['checks_ref'],'spec':SPEC,'checks':CHECKS})
+                service=ProjectGeneration(store,executor);draft=service.generate(parent,DeveloperProvider())
+                meta=store.run(draft)['data']['project_plan']
+                child=service.approve(draft,{'files_ref':meta['files_ref'],'files':FILES})
+                with self.assertRaises(MasaError):service.repair(child,DeveloperProvider())
+                Runtime(store,executor).execute(child)
+                class RepairProvider:
+                    profile={'provider':'test','model':'fake'}
+                    usage={'total_tokens':1}
+                    def respond(self,context):
+                        self.context=context
+                        return {'internal/app/app.go':'package app\n\nfunc Value() int { return 43 }\n'}
+                provider=RepairProvider();repair=service.repair(child,provider)
+                self.assertEqual(provider.context['purpose'],'project_repair')
+                self.assertTrue(provider.context['failure_evidence'])
+                meta=store.run(repair)['data']['project_plan'];files=store.read(meta['files_ref'])
+                self.assertEqual(files['internal/app/app_test.go'],FILES['internal/app/app_test.go'])
+                edited={**files,'internal/app/app_test.go':'package app\n'}
+                with self.assertRaises(MasaError):service.approve(repair,{'files_ref':meta['files_ref'],'files':edited})
+                self.assertEqual(store.run(child)['status'],'failed')
+                self.assertEqual(store.run(repair)['tool_calls'],0)
+            finally:store.close()
+        for forbidden in ['go.mod','internal/app/app_test.go','new.go']:
+            with self.assertRaises(MasaError):validate_repair({forbidden:'changed'},FILES)

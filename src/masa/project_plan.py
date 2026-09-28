@@ -102,8 +102,9 @@ class ProjectPlanning:
         with self.store.transaction():
             data = self.store.run(rid)['data']
             data['project_plan'] = plan
+            reason=plan.get('error') or ('code proposal: review before verification' if plan.get('kind')=='code' else 'project specification: review before generation')
             self.store.db.execute('UPDATE runs SET data=?,status=?,reason=? WHERE id=?',
-                                  (canonical(data), status, 'project planning only; code not generated', rid))
+                                  (canonical(data), status, reason, rid))
             self.store._event(rid, event, plan)
 
     def generate(self, provider, goal, on_created=None, reuse=None):
@@ -152,7 +153,7 @@ class ProjectPlanning:
     def call(self, rid, provider, purpose, values):
         """先记调用预算，再保存响应与用量，不自动重试。 Charge before calling; persist output and usage without retries."""
         context = {'purpose':purpose, **values}
-        self.store.charge_model(rid, purpose, 2, provider.profile, self.store.put(context))
+        self.store.charge_model(rid, purpose, self.store.run(rid)['data']['budget']['model_calls'], provider.profile, self.store.put(context))
         started = time.monotonic()
         try:
             output = provider.respond(context)

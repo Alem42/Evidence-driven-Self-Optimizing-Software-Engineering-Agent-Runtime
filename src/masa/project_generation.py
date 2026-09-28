@@ -6,6 +6,19 @@ import json
 from masa.domain import Budget, MasaError, canonical
 from masa.runtime import Runtime
 from masa.project_plan import ProjectPlanning, validate_spec
+from masa.workspace import verify_snapshot
+
+
+def validate_repair(changes, original):
+    """修复只改实现，原测试和模块不变。 Repair implementation only; freeze original tests and module."""
+    if not isinstance(changes,dict) or not changes:
+        raise MasaError('repair must propose at least one implementation file')
+    for path,content in changes.items():
+        if path not in original or not path.endswith('.go') or path.endswith('_test.go'):
+            raise MasaError('repair cannot change tests, module or file structure')
+        if not isinstance(content,str) or not content.strip() or len(content.encode())>60000 or '\x00' in content:
+            raise MasaError('invalid repair file content')
+    return {**original,**changes}
 
 
 def validate_files(files, spec):
@@ -59,6 +72,50 @@ class ProjectGeneration:
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
             raise MasaError(f'project generation failed; run {rid}: {metadata["error"]}') from None
 
+    def repair(self, parent, provider, feedback='', on_created=None):
+        """以真实失败证据生成一次修复草稿，不自动批准或循环。 Propose one evidence-backed repair without auto-approval or loops."""
+        original=self.store.run(parent)
+        data=original['data']
+        if original['status']!='failed' or not data.get('project_bundle'):
+            raise MasaError('repair requires a failed generated-project verification')
+        if not isinstance(feedback,str) or len(feedback)>4000:
+            raise MasaError('feedback must be at most 4000 characters')
+        verify_snapshot(Path(data['workspace']),data['snapshot_id'])
+        base_ref=data['project_bundle']['approval_ref']
+        base=self.store.read(base_ref)
+        approved=self.store.read(base['spec_approval_ref'])
+        evidence=[]
+        for call in self.store.tools(parent):
+            if not call['result_ref']:continue
+            result=self.store.read(call['result_ref'])
+            evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
+                'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
+                'stdout':result.get('stdout','')[-12000:],'stderr':result.get('stderr','')[-12000:],
+                'output_may_be_truncated':True})
+        if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
+            raise MasaError('repair requires a recorded failed check; unknown results need inspection')
+        metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
+                  'base_approval_ref':base_ref,'repair_of':parent,'provider':provider.profile}
+        rid=Runtime(self.store,self.executor).create(Path(data['workspace']),data['goal'],
+            Budget(model_calls=1,tool_calls=3,deadline_seconds=86400),
+            graph=Runtime.compile_project_checks(approved['spec'],approved['checks']),
+            parent_run_id=parent,project_plan=metadata)
+        if on_created:on_created(rid)
+        try:
+            changes=self.planning.call(rid,provider,'project_repair',{
+                'goal':data['goal'],**approved,'original_files':base['files'],
+                'failure_evidence':evidence,'feedback':feedback})
+            files=validate_repair(changes,base['files'])
+            validate_files(files,approved['spec'])
+            metadata.update(status='awaiting_review',files_ref=self.store.put(files),
+                            changed_files=[p for p in changes if files[p]!=base['files'][p]])
+            self.planning.update(rid,metadata,'paused','project_repair_review_requested')
+            return rid
+        except Exception as exc:
+            metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'repair generation failed')
+            self.planning.update(rid,metadata,'failed','project_repair_failed')
+            raise MasaError(f'repair failed; run {rid}: {metadata["error"]}') from None
+
     def approve(self, rid, body):
         """先准备完整目录再创建可运行快照；重试复用已发布运行。 Prepare all files before publishing a run; retries reuse it."""
         run = self.store.run(rid)
@@ -71,6 +128,10 @@ class ProjectGeneration:
             raise MasaError('stale code draft')
         spec = self.store.read(plan['spec_approval_ref'])
         files = validate_files(body.get('files'), spec['spec'])
+        if plan.get('base_approval_ref'):
+            base=self.store.read(plan['base_approval_ref'])['files']
+            if any(files[p]!=content for p,content in base.items() if p=='go.mod' or p.endswith('_test.go')):
+                raise MasaError('repair approval cannot change frozen tests or module')
         approval_ref = self.store.put({'files':files, 'spec_approval_ref':plan['spec_approval_ref']})
         if plan.get('approval_ref') and plan['approval_ref'] != approval_ref:
             raise MasaError('approved files cannot be changed; generate a new draft')

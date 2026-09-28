@@ -97,6 +97,15 @@ class ChatTests(unittest.TestCase):
         with self.assertRaises(MasaError):
             self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
 
+    def test_repair_schema_rejects_test_rewrites(self):
+        from test_project_generation import FILES
+        self.action={'files':{'internal/app/app.go':'package app\n'}}
+        context={'purpose':'project_repair','original_files':FILES}
+        self.assertEqual(self.provider.respond(context),self.action['files'])
+        self.assertIn('repairing',self.requests[-1]['messages'][0]['content'])
+        self.action={'files':{'internal/app/app_test.go':'package app\n'}}
+        with self.assertRaises(MasaError):self.provider.respond(context)
+
     def test_developer_only_returns_approved_file_set(self):
         from test_project_plan import SPEC
         from test_project_generation import FILES

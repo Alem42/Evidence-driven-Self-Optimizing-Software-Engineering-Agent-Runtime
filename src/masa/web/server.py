@@ -119,6 +119,8 @@ def make_server(console, port=8765):
                             result = console.approve_project(rid, body)
                         elif action == 'generate-project':
                             result = console.start_project_job(body,rid) if body.get('background') else console.generate_project(rid, body)
+                        elif action == 'repair-project':
+                            result = console.start_project_job({**body,'repair':True},rid) if body.get('background') else console.repair_project(rid,body)
                         elif action == 'open-workspace':
                             result = console.open_workspace(rid)
                         elif action == 'approve-project-code':

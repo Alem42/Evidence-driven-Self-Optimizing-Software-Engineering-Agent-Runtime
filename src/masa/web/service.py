@@ -251,7 +251,7 @@ class Console:
                 # Preserve approved agent graphs on reruns; legacy demos retain full checks.
                 graph=Graph.from_dict(data['graph']) if data['graph'].get('policy_version')=='agent-check-plan-v1' else harness_policy()
                 new_id = runtime.create(source, data['goal'], self._budget({'full_checks': True}),
-                                        graph=graph, parent_run_id=rid)
+                                        graph=graph, parent_run_id=rid,project_bundle=data.get('project_bundle'))
                 # 复制前后都绑定同一版本，避免外部改动绕过审核。
                 # Bind both sides of the copy to the reviewed version.
                 if store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:
@@ -300,7 +300,7 @@ class Console:
                 self.jobs[ident]['run_id']=run_id
             def work():
                 try:
-                    result=self.generate_project(rid,body,created) if rid else self.plan_project(body,created)
+                    result=(self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
                     self.jobs[ident].update(status='completed',result=result)
                 except Exception as exc:
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
@@ -388,6 +388,16 @@ class Console:
                 return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider,on_created)}
             finally:
                 store.close()
+
+    def repair_project(self, rid, body, on_created=None):
+        """用户显式发起一次证据驱动修复。 Start one evidence-driven repair on explicit request."""
+        with self.lock:
+            self._available()
+            provider=self.settings.provider(body.get('api_profile_id'))
+            store=Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created)}
+            finally:store.close()
 
     def approve_project_code(self, rid, body):
         """批准整套文件后启动独立检查，重复请求不重复运行。 Approve the bundle and launch checks without duplicate runs."""
