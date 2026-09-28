@@ -26,13 +26,16 @@ def instruction_for(context):
             instruction = common + ('You are Planner. Explain a small practical architecture matching the goal. '
                 'Return exactly summary (brief design rationale and tradeoffs), module (e.g. example.com/task), '
                 'entrypoint (exactly cmd/app/main.go), files (3..20 objects with path and purpose), '
-                'acceptance (1..24 concrete testable requirement strings). Include go.mod, cmd/app/main.go, '
+                'acceptance (prefer 4..8 concise, concrete requirements; never exceed 12 for a small task). '
+                'Group similar invalid-input cases; do not invent requirements absent from the goal. '
+                'Keep summary under 500 characters. Include go.mod, cmd/app/main.go, '
                 'implementation and _test.go files. Paths are relative and portable. Only .go files and go.mod. '
                 'Avoid unnecessary layers; explain each file responsibility. Use the user language for descriptions.')
         elif context['purpose'] == 'project_tester':
             instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
                 'one to three objects chosen for this project: operation (go_test required; go_vet and go_fmt_check recommended, each at most once), purpose (concrete verification strategy), '
-                'acceptance_indices (zero-based indices into spec.acceptance). Together the three checks must reference ALL acceptance indices. '
+                'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
+                'Together the three checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
                 'Assign behavior to go_test; static and formatting criteria may belong to go_vet or go_fmt_check. '
                 'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
                 'For go_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
