@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.console import Console, test_revision_needed, test_format_only, repeated_assertion_signature
+from masa.application.console import Console, test_revision_needed, test_format_only, repeated_assertion_signature, repair_advice
 from masa.application.projects import Projects
 from masa.infrastructure.store import Store
 from test_project_plan import SPEC, CHECKS
@@ -22,6 +22,19 @@ class CompositeProvider:
 
 
 class AutomaticProjectTests(unittest.TestCase):
+    def test_build_path_and_overflow_are_test_revisions(self):
+        """复现真实项目的测试路径与常量错误，同时避免误判实现诊断。 Reproduce setup failures without confusing implementation errors."""
+        import json
+        build='\n'.join(json.dumps({'Output':line}) for line in [
+            '    main_test.go:103: build failed: exit status 1\n',
+            '    no Go files in C:\\work\\cmd\n'])
+        cases=[build,'internal\\sum\\sum_test.go:15:47: constant 9223372036854775808 overflows int']
+        for output in cases:
+            self.assertTrue(test_revision_needed(output))
+            self.assertEqual(repair_advice([('go_test',{'exit_code':1,'stdout':output})])['action'],'revise_tests')
+        self.assertFalse(test_revision_needed('main.go:8:2: undefined: io\nmain_test.go:30: got 1 want 2'))
+        self.assertFalse(test_revision_needed('main_test.go:30: expected 2 got 1'))
+
     def test_repeated_assertion_signature_ignores_go_json_metadata(self):
         """断言不变时识别停滞，时间戳与行号不影响判断。 / Stable assertions survive JSON timestamps and line shifts."""
         def check(line, timestamp):

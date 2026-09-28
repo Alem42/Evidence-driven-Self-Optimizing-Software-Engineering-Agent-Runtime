@@ -18,7 +18,7 @@ def concise_failure_evidence(result):
     stdout=result.get('stdout','')
     stderr=result.get('stderr','')
     diagnostics=[]
-    markers=re.compile(r'(?i)(?:\.go:\d+|import cycle|FAIL|panic:|undefined:|imported and not used|expected|want |exit code|build failed)')
+    markers=re.compile(r'(?i)(?:\.go:\d+|no Go files in |import cycle|FAIL|panic:|undefined:|imported and not used|expected|want |exit code|build failed)')
     for line in stdout.splitlines():
         try:
             frame=json.loads(line)

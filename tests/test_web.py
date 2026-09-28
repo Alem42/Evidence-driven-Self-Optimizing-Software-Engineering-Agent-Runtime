@@ -16,6 +16,26 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_results_expose_test_setup_repair_advice(self):
+        """HTTP 修复建议来自实际工具输出，前端无需重复猜测。 Derive browser repair advice from recorded tool output."""
+        from masa.runtime.engine import Runtime
+        from masa.domain.models import Budget
+        class FailedBuild(FakeExecutor):
+            def execute(self,request,workspace,cancelled):
+                result=super().execute(request,workspace,cancelled)
+                result.update(exit_code=1,stdout='main_test.go:103: build failed\nno Go files in C:\\work\\cmd\n')
+                return result
+        store=Store(self.root/'state')
+        try:
+            runtime=Runtime(store,FailedBuild())
+            rid=runtime.create(self.source,'verify CLI',Budget())
+            runtime.execute(rid)
+        finally:store.close()
+        status,result=self.request('/api/runs/'+rid+'/results')
+        self.assertEqual(status,200)
+        self.assertEqual(result['repair_advice']['action'],'revise_tests')
+        self.assertEqual(result['checks'][0]['result']['exit_code'],1)
+
     def test_second_service_cannot_listen_on_same_port(self):
         """同端口只允许一个工作台服务。 Prevent two workbench versions from sharing one port."""
         with self.assertRaises(OSError):

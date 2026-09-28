@@ -50,6 +50,10 @@ def instruction_for(context):
                 'Change only existing _test.go files. Keep all meaningful requirements and assertions, '
                 'especially edge cases. Correct invalid imports, package cycles, or test setup. '
                 'For CLI tests on Windows, go build -o target must use a .exe suffix; choose suffix by runtime.GOOS. '
+                'Go runs tests from the package source directory. In cmd/app/main_test.go build "." with cmd.Dir unset; '
+                'if cmd.Dir is the module root, build "./cmd/app" instead. Never build an empty cmd directory. '
+                'For int boundary expectations, maxInt+1 as a typed constant does not compile; use minInt=-maxInt-1 '
+                'when the approved behavior is wraparound. Do not invent overflow semantics. '
                 'Do not weaken or delete assertions merely to pass. Do not change implementation, go.mod or paths. '
                 'The revised test bundle will be reviewed and verified again; never claim success.')
         elif context['purpose']=='project_repair':
@@ -71,6 +75,10 @@ def instruction_for(context):
                 'For CLI testing prefer run(args []string, stdout, stderr io.Writer) int with main calling os.Exit(run(...)); '
                 'test run directly with buffers and temp input files. NEVER exec os.Args[0] in tests: it recursively launches the test binary. '
                 'If building a CLI binary in tests, use a .exe suffix on Windows, chosen by runtime.GOOS. '
+                'Tests run from their package source directory: from cmd/app/main_test.go build "." without changing cmd.Dir. '
+                'If deliberately building from the module root, the target must be "./cmd/app", not ".". '
+                'Use representable int constants for boundary expectations (minInt=-maxInt-1); typed maxInt+1 overflows at compile time. '
+                'Keep run output parameters as io.Writer so tests can pass bytes.Buffer. '
                 'Before returning, check that each referenced package is imported exactly once, all imports and variables are used, '
                 'and crypto/rand and math/rand have distinct aliases when both are needed. '
                 'avoid network/time-dependent tests, never skip failing cases or change requirements to make tests pass. '
