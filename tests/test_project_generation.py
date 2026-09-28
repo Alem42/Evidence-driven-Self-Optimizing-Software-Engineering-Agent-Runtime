@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
 from masa.domain.models import MasaError
 from masa.application.planning import ProjectPlanning
@@ -24,6 +25,37 @@ class DeveloperProvider(PlannerProvider):
 
 
 class ProjectGenerationTests(unittest.TestCase):
+    def test_format_only_test_revision_preserves_assertions_and_passes_real_go_checks(self):
+        """真实 Go 格式失败可零模型调用修复且原断言保留。 Repair a real Go format failure with no model call or assertion change."""
+        root=Path(__file__).resolve().parents[1]
+        go=root/'.tools/go/bin/go.exe';binary=root/'.tools/bin/masa-runner.exe'
+        if not go.is_file() or not binary.is_file():self.skipTest('built Go runner unavailable')
+        unformatted={**FILES,'internal/app/app_test.go':
+            'package app\nimport "testing"\nfunc TestValue(t *testing.T){if Value()!=42{t.Fatal("wrong value")}}\n'}
+        class UnformattedProvider(DeveloperProvider):
+            def respond(self,context):return dict(unformatted)
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp));runner=Runner(binary,go)
+            try:
+                planning=ProjectPlanning(store,runner)
+                parent=planning.generate(PlannerProvider(),'Build a small CLI')
+                p=store.run(parent)['data']['project_plan']
+                planning.approve(parent,{'spec_ref':p['spec_ref'],'checks_ref':p['checks_ref'],'spec':SPEC,'checks':CHECKS})
+                service=ProjectGeneration(store,runner)
+                draft=service.generate(parent,UnformattedProvider())
+                p=store.run(draft)['data']['project_plan']
+                original=service.approve(draft,{'files_ref':p['files_ref'],'files':unformatted})
+                self.assertEqual(Runtime(store,runner).execute(original)['status'],'failed')
+                revised=service.format_test_files(original)
+                p=store.run(revised)['data']['project_plan']
+                files=store.read(p['files_ref'])
+                self.assertIn('Value() != 42',files['internal/app/app_test.go'])
+                self.assertEqual(store.run(revised)['model_calls'],0)
+                verified=service.approve(revised,{'files_ref':p['files_ref'],'files':files})
+                self.assertEqual(Runtime(store,runner).execute(verified)['status'],'succeeded')
+                self.assertEqual(store.run(original)['status'],'failed')
+            finally:store.close()
+
     def test_repair_context_keeps_early_compile_error_amid_long_test_output(self):
         """长日志末尾不能淹没首部编译错误。 A long test tail must not hide an early compiler error."""
         import json

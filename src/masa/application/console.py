@@ -21,12 +21,28 @@ from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 
 
-def test_revision_needed(evidence):
-    """只把测试文件的编译/导入错误路由到测试修订。 Route test-file compile/import errors to a test revision."""
-    return ('import cycle not allowed in test' in evidence or
-            ('_test.go:' in evidence and any(marker in evidence for marker in
-             ('imported and not used','undefined:', 'expected ', 'syntax error',
-              'executable file not found in %PATH%'))))
+def test_revision_needed(evidence, checks=()):
+    """测试源码或仅测试文件的格式错误归 Tester。 Route test-source and test-only formatting errors to Tester."""
+    source_error=('import cycle not allowed in test' in evidence or
+                  ('_test.go:' in evidence and any(marker in evidence for marker in
+                   ('imported and not used','undefined:', 'expected ', 'syntax error',
+                    'executable file not found in %PATH%'))))
+    if source_error:return True
+    for operation,result in checks:
+        if operation!='go_fmt_check' or result.get('exit_code')==0:continue
+        paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
+        if paths and all(p.endswith('_test.go') for p in paths):return True
+    return False
+
+
+def test_format_only(checks):
+    """只有测试文件格式不合格时可无模型修订。 Detect the exact deterministic test-format-only case."""
+    failures=[(op,result) for op,result in checks if result.get('status')!='completed' or result.get('exit_code')!=0]
+    if len(failures)!=1 or failures[0][0]!='go_fmt_check':return False
+    result=failures[0][1]
+    if result.get('status')!='completed':return False
+    paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
+    return bool(paths) and all(p.endswith('_test.go') for p in paths)
 
 
 class Console:
@@ -388,12 +404,18 @@ class Console:
                             return
                         # 失败中含测试包循环导入时，必须新建测试修订；普通修复不能改变冻结测试。
                         # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
-                        outputs=[store.read(t['result_ref']) for t in store.tools(verified) if t['result_ref']]
+                        checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
+                                for t in store.tools(verified) if t['result_ref']]
+                        outputs=[result for _,result in checks]
                         evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
-                        if test_revision_needed(evidence):
+                        if test_format_only(checks):
+                            phase('test_format',verified,attempt+1)
+                            draft=generation.format_test_files(verified,
+                                lambda rid:phase('test_format',rid,attempt+1))
+                        elif test_revision_needed(evidence,checks):
                             phase('test_revision',verified,attempt+1)
                             draft=generation.revise_tests(verified,provider,
-                                'Fix the import cycle in _test.go. Preserve behavioral assertions and requirements.',
+                                'Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.',
                                 lambda rid:phase('test_revision',rid,attempt+1))
                         else:
                             phase('repair',verified,attempt+1)
@@ -505,6 +527,15 @@ class Console:
             try:
                 return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).revise_tests(
                     rid,provider,body.get('feedback',''),on_created)}
+            finally:store.close()
+
+    def format_project_tests(self, rid):
+        """纯格式错误直接产生待审测试修订。 Create a reviewable test formatting revision without model usage."""
+        with self.lock:
+            self._available()
+            store=Store(self.root)
+            try:
+                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).format_test_files(rid)}
             finally:store.close()
 
     def approve_project_code(self, rid, body):

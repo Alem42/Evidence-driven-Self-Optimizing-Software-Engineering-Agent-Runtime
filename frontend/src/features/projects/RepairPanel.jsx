@@ -8,13 +8,22 @@ export function RepairPanel({detail,profiles,select,onProgress}) {
   const [profile,setProfile]=useState('');
   async function repair(){setBusy(true);setError('');try{const r=await projectJob('/runs/'+detail.run.id+'/repair-project',{feedback,api_profile_id:profile||profiles?.active_id},j=>{setJob(j);onProgress?.(j);});select(r.id);}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function reviseTests(){setBusy(true);setError('');try{const r=await projectJob('/runs/'+detail.run.id+'/revise-project-tests',{feedback,api_profile_id:profile||profiles?.active_id},j=>{setJob(j);onProgress?.(j);});select(r.id);}catch(e){setError(e.message);}finally{setBusy(false);}}
-  const [cycle,setCycle]=useState(false);
-  React.useEffect(()=>{let stop=false;api('/runs/'+detail.run.id+'/results').then(r=>{if(!stop)setCycle(r.checks.some(c=>{const text=JSON.stringify(c.result||{});return text.includes('import cycle not allowed in test')||text.includes('_test.go:')&&/imported and not used|undefined:|syntax error|executable file not found in %PATH%/.test(text);}));}).catch(()=>{});return()=>{stop=true;};},[detail.run.id]);
+  const [cycle,setCycle]=useState(false),[formatOnly,setFormatOnly]=useState(false);
+  React.useEffect(()=>{let stop=false;api('/runs/'+detail.run.id+'/results').then(r=>{if(stop)return;
+    const failed=r.checks.filter(c=>c.result?.status!=='completed'||c.result?.exit_code!==0);
+    const paths=failed.length===1&&failed[0].operation==='go_fmt_check'?(failed[0].result?.stdout||'').trim().split(/\r?\n/).filter(Boolean):[];
+    setFormatOnly(failed.length===1&&failed[0].operation==='go_fmt_check'&&
+      paths.length>0&&paths.every(p=>p.endsWith('_test.go')));
+    setCycle(r.checks.some(c=>{const text=JSON.stringify(c.result||{});
+    const fmtPaths=c.operation==='go_fmt_check'&&c.result?.exit_code!==0?c.result.stdout.trim().split(/\r?\n/).filter(Boolean):[];
+    return text.includes('import cycle not allowed in test')||text.includes('_test.go:')&&/imported and not used|undefined:|syntax error|executable file not found in %PATH%/.test(text)||fmtPaths.length>0&&fmtPaths.every(p=>p.endsWith('_test.go'));
+  }));}).catch(()=>{});return()=>{stop=true;};},[detail.run.id]);
+  async function formatTests(){setBusy(true);setError('');try{select((await api('/runs/'+detail.run.id+'/format-project-tests',{})).id);}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <section className="panel repair-panel"><h3>验证失败 · 下一步修复</h3><p>选择修改实现，或在测试本身无法编译时创建单独的测试修订；每次修订都形成新版本并重新验证。</p>
-    {cycle&&<p className="error">检测到测试文件编译或导入错误。实现修复无法修改被冻结的测试文件；请选择测试修订，并检查断言是否保留。</p>}
+    {cycle&&<p className="error">{formatOnly?'只有测试文件格式不合格，可直接格式化并重新验证，无需模型调用。':'检测到测试文件编译或导入错误。实现修复无法修改被冻结的测试文件；请选择测试修订，并检查断言是否保留。'}</p>}
     <label>补充说明（可选）<textarea rows={2} maxLength={4000} value={feedback} disabled={busy} onChange={e=>setFeedback(e.target.value)} placeholder="例如：保留现有接口，修复编译错误，不更改测试预期。"/></label>
     <label>修复使用的 API<select disabled={busy} value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择已配置密钥的 API</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label>
-    {busy&&<ProjectProgress job={job}/>}<div className="action-bar"><button className="primary" disabled={busy||cycle||!profiles?.profiles?.some(p=>p.key_configured)} onClick={repair}>{busy?'正在生成草稿…':'修复实现（冻结测试）'}</button><button disabled={busy||!profiles?.profiles?.some(p=>p.key_configured)} onClick={reviseTests}>修订测试（新版本）</button></div>
+    {busy&&<ProjectProgress job={job}/>}<div className="action-bar">{formatOnly&&<button className="primary" disabled={busy} onClick={formatTests}>格式化测试文件（无模型调用）</button>}<button className={!formatOnly?'primary':''} disabled={busy||cycle||!profiles?.profiles?.some(p=>p.key_configured)} onClick={repair}>{busy?'正在生成草稿…':'修复实现（冻结测试）'}</button><button disabled={busy||!profiles?.profiles?.some(p=>p.key_configured)} onClick={reviseTests}>修订测试（新版本）</button></div>
     {error&&<p className="error" role="alert">{error}</p>}
   </section>;
 }

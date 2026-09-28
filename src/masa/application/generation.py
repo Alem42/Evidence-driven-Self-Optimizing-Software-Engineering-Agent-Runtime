@@ -5,6 +5,8 @@ import tempfile
 import time
 import json
 import re
+import subprocess
+import os
 from masa.domain.models import Budget, MasaError, canonical
 from masa.runtime.engine import Runtime
 from masa.application.planning import ProjectPlanning, validate_spec
@@ -157,6 +159,58 @@ class ProjectGeneration:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'test revision generation failed')
             self.planning.update(rid,metadata,'failed','project_test_revision_failed')
             raise MasaError(f'test revision failed; run {rid}: {metadata["error"]}') from None
+
+    def format_test_files(self, parent, on_created=None):
+        """仅格式检查失败时无模型地修订测试快照。 Format test-only failures deterministically in a new reviewable snapshot."""
+        original=self.store.run(parent)
+        data=original['data']
+        if original['status']!='failed' or not data.get('project_bundle'):
+            raise MasaError('format revision requires a failed generated-project verification')
+        verify_snapshot(Path(data['workspace']),data['snapshot_id'])
+        base_ref=data['project_bundle']['approval_ref']
+        base=self.store.read(base_ref)
+        approved=self.store.read(base['spec_approval_ref'])
+        format_paths=[]
+        for call in self.store.tools(parent):
+            if not call['result_ref']:continue
+            operation=self.store.read(call['request_ref'])['operation']
+            result=self.store.read(call['result_ref'])
+            if result['status']!='completed':
+                raise MasaError('format revision requires completed check evidence')
+            if result['exit_code']==0:continue
+            if operation!='go_fmt_check':
+                raise MasaError('format revision requires all other checks to pass')
+            format_paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
+        if not format_paths or any(p not in base['files'] or not p.endswith('_test.go') for p in format_paths):
+            raise MasaError('format revision requires only existing test files')
+        formatter=self.executor.go_executable.parent / ('gofmt.exe' if os.name=='nt' else 'gofmt')
+        if not formatter.is_file():
+            raise MasaError('gofmt binary missing')
+        changes={}
+        for path in format_paths:
+            try:
+                process=subprocess.run([str(formatter)],input=base['files'][path].encode('utf-8'),
+                                       capture_output=True,timeout=10,check=False)
+            except (OSError,subprocess.TimeoutExpired):
+                raise MasaError('gofmt did not complete') from None
+            if process.returncode!=0 or len(process.stdout)>60000:
+                raise MasaError('gofmt rejected test file')
+            changes[path]=process.stdout.decode('utf-8')
+        files=validate_test_revision(changes,base['files'])
+        validate_files(files,approved['spec'])
+        if all(files[p]==base['files'][p] for p in format_paths):
+            raise MasaError('gofmt made no test changes')
+        metadata={'kind':'code','status':'awaiting_review','spec_approval_ref':base['spec_approval_ref'],
+                  'base_approval_ref':base_ref,'repair_of':parent,'revision_scope':'tests',
+                  'format_only':True,'changed_files':format_paths,'files_ref':self.store.put(files)}
+        rid=Runtime(self.store,self.executor).create(Path(data['workspace']),data['goal'],
+            Budget(model_calls=1,tool_calls=3,deadline_seconds=86400),
+            graph=Runtime.compile_project_checks(approved['spec'],approved['checks']),
+            parent_run_id=parent,project_plan=metadata)
+        if on_created:on_created(rid)
+        self.store.event(rid,'test_format_applied',{'files_ref':metadata['files_ref'],'paths':format_paths})
+        self.planning.update(rid,metadata,'paused','project_test_format_review_requested')
+        return rid
 
     def approve(self, rid, body):
         """先准备完整目录再创建可运行快照；重试复用已发布运行。 Prepare all files before publishing a run; retries reuse it."""

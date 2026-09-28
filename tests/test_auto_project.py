@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.console import Console, test_revision_needed
+from masa.application.console import Console, test_revision_needed, test_format_only
 from masa.application.projects import Projects
 from masa.infrastructure.store import Store
 from test_project_plan import SPEC, CHECKS
@@ -49,6 +49,12 @@ class AutomaticProjectTests(unittest.TestCase):
         self.assertTrue(test_revision_needed('import cycle not allowed in test'))
         self.assertTrue(test_revision_needed('random_test.go:174: exec: executable file not found in %PATH%'))
         self.assertFalse(test_revision_needed('random.go:7:2: "os" imported and not used'))
+        self.assertTrue(test_revision_needed('',[('go_fmt_check',{'exit_code':1,'stdout':'cmd\\app\\main_test.go\n'})]))
+        self.assertFalse(test_revision_needed('',[('go_fmt_check',{'exit_code':1,'stdout':'cmd\\app\\main.go\ncmd\\app\\main_test.go\n'})]))
+        self.assertTrue(test_format_only([('go_test',{'status':'completed','exit_code':0}),
+                                          ('go_fmt_check',{'status':'completed','exit_code':1,'stdout':'cmd\\app\\main_test.go\n'})]))
+        self.assertFalse(test_format_only([('go_test',{'status':'completed','exit_code':1}),
+                                           ('go_fmt_check',{'status':'completed','exit_code':1,'stdout':'cmd\\app\\main_test.go\n'})]))
 
     def test_opt_in_advances_all_roles_and_real_gate(self):
         """自动审批仍需 Runtime 工具和 Gate 成功。 Auto-approval still requires tools and independent Gate success."""

@@ -61,7 +61,8 @@ class Projects:
                     started=any(e['type']=='model_requested' for e in related)
                     done=any(e['type']=='model_completed' for e in related)
                     failed=any(e['type']=='model_failed' for e in related)
-                    reused=role=='project_planner' and any(e['type']=='planner_reused' for e in events)
+                    reused=(role=='project_planner' and any(e['type']=='planner_reused' for e in events)) or (
+                        role=='project_test_revision' and any(e['type']=='test_format_applied' for e in events))
                     state='succeeded' if done or reused else 'running' if started else 'pending'
                     if failed or (started and not done and plan['status']=='failed'):state='failed'
                     if run['status']=='cancelled' and state=='running':state='cancelled'
