@@ -473,12 +473,9 @@ class Console:
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
                               'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,
                               'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
-            def phase(name,rid=None,attempt=None):
-                job=self.jobs[ident]
-                update={'phase':name}
-                if rid:update['run_id']=rid
-                if attempt is not None:update['attempt']=attempt
-                job.update(update)
+            from masa.application.workflow import WorkflowCheckpoint
+            workflow=WorkflowCheckpoint(self.jobs[ident])
+            phase=workflow.phase
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
@@ -530,8 +527,6 @@ class Console:
                         else:
                             draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
                         checkpoint['draft_id']=draft
-                    prior_assertion=checkpoint.get('prior_assertion')
-                    repeated_assertions=checkpoint.get('repeated_assertions',0)
                     for attempt in range(checkpoint.get('attempt',0),5):
                         meta=store.run(draft)['data']['project_plan']
                         phase('verification',draft,attempt)
@@ -553,15 +548,7 @@ class Console:
                         # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
                         # Three identical assertion failures require spec/test review instead of another implementation repair.
                         assertion=repeated_assertion_signature(checks)
-                        # JSON 标准化使重启前后的元组/列表比较一致，同一验证不重复计数。
-                        # Normalize persisted signatures and count each verification only once.
-                        assertion=json.loads(json.dumps(assertion))
-                        if checkpoint.get('evaluated_verification')!=verified:
-                            repeated_assertions=repeated_assertions+1 if assertion and assertion==prior_assertion else 1
-                            checkpoint.update(prior_assertion=assertion,repeated_assertions=repeated_assertions,
-                                              evaluated_verification=verified)
-                        prior_assertion=assertion
-                        if assertion and repeated_assertions>=3:
+                        if workflow.record_assertion(verified,assertion):
                             self.jobs[ident].update(status='completed',result={'id':verified},
                                 note='same test assertion failed three times; inspect specification and test expectation before further repair')
                             return

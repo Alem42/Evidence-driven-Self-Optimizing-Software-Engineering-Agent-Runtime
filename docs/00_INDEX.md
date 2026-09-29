@@ -13,3 +13,5 @@
 | Go 原理与手动验证 | [环境、harness 与已修复项目](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) |
 
 `progress/` 保存每次验收报告；`handoff/` 保存中断接续；`templates/` 保存报告模板；`scenarios/` 保存业务验收需求。过期设计与旧界面指南已移至 `archive/design/` 和 `archive/guides/`，仅供历史查询，不是当前开发指令。
+
+- [主动需求澄清设计（待实现）](PLAN_RUNTIME_CLARIFICATION.md)：角色主动提问、持久等待、用户回答与恢复，及与原路线合并的优先级。

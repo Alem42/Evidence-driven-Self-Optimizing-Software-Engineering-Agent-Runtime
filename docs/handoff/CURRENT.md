@@ -16,3 +16,9 @@
 4. 再推进独立测试评审、上下文收益评估和中型仓库任务。
 
 保留 .masa 历史快照，不打印/提交密钥。核心函数中英注释，按模块验证并提交 Git。8765 现有服务可能未加载新代码，需重启。未做浏览器视觉验收。当前不等于完整任意自适应角色 DAG。
+
+## 2026-09-29 最新追加：原路线继续，主动澄清并入
+
+本轮完成 WorkflowCheckpoint 拆分，121 Python 测试通过，真实历史随机数自动恢复复验通过（无新模型调用）。先读 ../progress/PROGRESS_2026-09-29_004_checkpoint-and-clarification.md 和 ../PLAN_RUNTIME_CLARIFICATION.md。
+
+下一步统一角色 Step/Attempt 与 invocation_id，兼容已有 (run_id,purpose) 缓存；随后实现 Planner 问题/回答闭环。澄清目前仅设计，未上线。完整 Coordinator 尚未提取。原定独立测试评审、上下文收益评估和中型仓库任务必须继续，不能被新需求替代。

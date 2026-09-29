@@ -25,3 +25,7 @@
 ## 2026-09-29 自动恢复增量
 
 修复/测试修订已保存结果可接回自动流程；发布窗口和断言计数恢复已处理。前端中断状态刷新已修复。下一步提取 WorkflowCoordinator 并统一状态转换；test_format/planning_retry 恢复暂不支持。详见 [003 进展](progress/PROGRESS_2026-09-29_003_auto-recovery.md)。
+
+## 主动澄清并入既定路线
+
+实施契约见 [Runtime 主动澄清](PLAN_RUNTIME_CLARIFICATION.md)。先统一角色调用标识，再支持 Planner 等待用户回答；原独立测试评审、上下文收益评估和中型任务保持推进。检查点规则已拆到 application/workflow.py，完整 Coordinator 待继续提取。
