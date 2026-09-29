@@ -49,7 +49,7 @@ class ProjectGeneration:
         self.store, self.executor = store, executor
         self.planning = ProjectPlanning(store, executor)
 
-    def generate(self, parent, provider, on_created=None):
+    def generate(self, parent, provider, on_created=None, resume_id=None):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         original = self.store.run(parent)
         plan = original['data'].get('project_plan', {})
@@ -57,10 +57,17 @@ class ProjectGeneration:
             raise MasaError('approve the project specification first')
         approved = self.store.read(plan['approval_ref'])
         graph = Runtime.compile_project_checks(approved['spec'], approved['checks'])
-        metadata = {'kind':'code','status':'generating','spec_approval_ref':plan['approval_ref'], 'provider':provider.profile}
-        rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
-              Budget(model_calls=2, tool_calls=3, deadline_seconds=86400), graph=graph,
-              parent_run_id=parent, project_plan=metadata)
+        if resume_id:
+            existing=self.store.run(resume_id)
+            metadata=existing['data'].get('project_plan',{})
+            if existing['data'].get('parent_run_id')!=parent or metadata.get('status')!='generating' or metadata.get('repair_of'):
+                raise MasaError('only interrupted generation can resume')
+            rid=resume_id
+        else:
+            metadata = {'kind':'code','status':'generating','spec_approval_ref':plan['approval_ref'], 'provider':provider.profile}
+            rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
+                  Budget(model_calls=2, tool_calls=3, deadline_seconds=86400), graph=graph,
+                  parent_run_id=parent, project_plan=metadata)
         if on_created:
             on_created(rid)
         try:
@@ -74,7 +81,7 @@ class ProjectGeneration:
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
             raise MasaError(f'project generation failed; run {rid}: {metadata["error"]}') from None
 
-    def repair(self, parent, provider, feedback='', on_created=None):
+    def repair(self, parent, provider, feedback='', on_created=None, use_intelligence=False):
         """以真实失败证据生成一次修复草稿，不自动批准或循环。 Propose one evidence-backed repair without auto-approval or loops."""
         original=self.store.run(parent)
         data=original['data']
@@ -103,9 +110,16 @@ class ProjectGeneration:
             parent_run_id=parent,project_plan=metadata)
         if on_created:on_created(rid)
         try:
+            original_files=base['files']
+            context_report=None
+            if use_intelligence:
+                from masa.intelligence.repair_context import build_repair_context
+                original_files,context_report=build_repair_context(self.store,self.executor,rid,base['files'],evidence,feedback)
             changes=self.planning.call(rid,provider,'project_repair',{
-                'goal':data['goal'],**approved,'original_files':base['files'],
-                'failure_evidence':evidence,'feedback':feedback})
+                'goal':data['goal'],**approved,'original_files':original_files,
+                'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report})
+            if any(path not in original_files for path in changes):
+                raise MasaError('repair changed a file outside supplied context; request a broader revision')
             files=validate_repair(changes,base['files'])
             validate_files(files,approved['spec'])
             metadata.update(status='awaiting_review',files_ref=self.store.put(files),

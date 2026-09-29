@@ -6,6 +6,7 @@ import uuid
 from masa.domain.models import Budget, MasaError, canonical
 from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
+from masa.runtime.roles import RoleRuntime
 
 
 
@@ -25,19 +26,28 @@ class ProjectPlanning:
             reason=plan.get('error') or ('code proposal: review before verification' if plan.get('kind')=='code' else 'project specification: review before generation')
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
-    def generate(self, provider, goal, on_created=None, reuse=None):
+    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
-        seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
-        seed.mkdir(parents=True)
-        (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
-        plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
-        rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
-                                                       graph=harness_policy(), project_plan=plan, parent_run_id=reuse)
+        if resume_id:
+            run=self.store.run(resume_id)
+            plan=run['data'].get('project_plan',{})
+            if plan.get('kind')=='code' or plan.get('status')!='planning' or run['data']['goal']!=goal:
+                raise MasaError('only interrupted planning can resume')
+            rid=resume_id
+        else:
+            seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
+            seed.mkdir(parents=True)
+            (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
+            plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
+                                                           graph=harness_policy(), project_plan=plan, parent_run_id=reuse)
         if on_created:
             on_created(rid)
         try:
-            if reuse:
+            if resume_id and plan.get('spec_ref'):
+                spec=self.store.read(plan['spec_ref'])
+            elif reuse:
                 old=self.store.run(reuse)['data']['project_plan']
                 spec=self.store.read(old['spec_ref'])
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
@@ -69,18 +79,8 @@ class ProjectPlanning:
             raise MasaError(f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
 
     def call(self, rid, provider, purpose, values):
-        """先记调用预算，再保存响应与用量，不自动重试。 Charge before calling; persist output and usage without retries."""
-        context = {'purpose':purpose, **values}
-        self.store.charge_model(rid, purpose, self.store.run(rid)['data']['budget']['model_calls'], provider.profile, self.store.put(context))
-        started = time.monotonic()
-        try:
-            output = provider.respond(context)
-        except Exception:
-            self.store.event(rid, 'model_failed', {'step_id':purpose, 'usage':getattr(provider,'usage',None)})
-            raise
-        self.store.event(rid, 'model_completed', {'step_id':purpose, 'response_ref':self.store.put(output),
-                         'usage':getattr(provider,'usage',None), 'duration_ms':round((time.monotonic()-started)*1000)})
-        return output
+        """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""
+        return RoleRuntime(self.store).call(rid,provider,purpose,values)
 
     def approve(self, rid, body):
         """确认最终可见规格，绑定原提案；批准规划不授权执行空项目。 Approve visible specifications without authorizing execution."""

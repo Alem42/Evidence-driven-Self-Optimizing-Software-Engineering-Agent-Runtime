@@ -24,6 +24,19 @@ ROOT = Path(__file__).resolve().parents[1]
     "built Windows runner required",
 )
 class IntelligenceTests(unittest.TestCase):
+    def test_repair_context_keeps_diagnostic_file_and_audits_selection(self):
+        """真实 AST 修复上下文必须保留报错文件和测试。 Real AST repair context retains diagnostics and test contracts."""
+        from masa.intelligence.repair_context import build_repair_context
+        files={p.relative_to(self.source).as_posix():p.read_text(encoding='utf-8')
+               for p in self.source.rglob('*') if p.is_file() and (p.suffix=='.go' or p.name=='go.mod')}
+        target=next(p for p in files if p.endswith('.go') and not p.endswith('_test.go'))
+        chosen,report=build_repair_context(self.store,self.runner,self.rid,files,
+            [{'diagnostics':[target+':12: undefined: missingSymbol']}],'repair the compiler error')
+        self.assertIn(target,chosen)
+        self.assertTrue(all(p in chosen for p in files if p.endswith('_test.go')))
+        self.assertEqual(set(chosen)|set(report['omitted']),set(files))
+        self.assertLessEqual(report['selected_bytes'],report['original_bytes'])
+
     def setUp(self):
         """使用真实 Go 索引器创建隔离副本。 Create an isolated copy with the real Go indexer."""
         self.temp = tempfile.TemporaryDirectory()
