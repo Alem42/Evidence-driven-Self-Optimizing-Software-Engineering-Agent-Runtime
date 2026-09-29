@@ -131,6 +131,40 @@ class ProjectGeneration:
             self.planning.update(rid,metadata,'failed','project_repair_failed')
             raise MasaError(f'repair failed; run {rid}: {metadata["error"]}') from None
 
+    def resume_revision(self, rid, provider):
+        """重新校验已保存的修复结果，不重复请求模型。 Revalidate a saved revision without replaying model requests."""
+        from masa.runtime.roles import RoleRuntime
+        run=self.store.run(rid)
+        metadata=run['data'].get('project_plan',{})
+        if not metadata.get('repair_of') or metadata.get('provider')!=provider.profile:
+            raise MasaError('resume requires a revision and its original provider')
+        if run['cancel_requested'] or time.time()>=run['data']['deadline_at']:
+            raise MasaError('role run cancelled or deadline expired')
+        if metadata.get('status')=='awaiting_review':
+            return rid
+        if metadata.get('status')!='generating':
+            raise MasaError('only interrupted revision generation can resume')
+        roles=RoleRuntime(self.store)
+        purpose='project_test_revision' if metadata.get('revision_scope')=='tests' else 'project_repair'
+        saved=next((row for row in roles.states(rid) if row['purpose']==purpose),None)
+        if not saved or saved['status']!='completed':
+            raise MasaError('revision result unavailable; create an explicit retry revision')
+        # 使用原始输入和原始模型配置校验缓存身份，恢复时仍执行所有提案约束。
+        # Check cached input/route identity and repeat every proposal validation on recovery.
+        context=dict(self.store.read(saved['input_ref']));context.pop('purpose')
+        changes=roles.call(rid,provider,purpose,context)
+        base=self.store.read(metadata['base_approval_ref'])
+        approved=self.store.read(metadata['spec_approval_ref'])
+        if purpose=='project_repair' and any(path not in context['original_files'] for path in changes):
+            raise MasaError('repair changed a file outside supplied context; request a broader revision')
+        validator=validate_test_revision if purpose=='project_test_revision' else validate_repair
+        files=validator(changes,base['files'])
+        validate_files(files,approved['spec'])
+        metadata.update(status='awaiting_review',files_ref=self.store.put(files),
+                        changed_files=[p for p in changes if files[p]!=base['files'][p]])
+        self.planning.update(rid,metadata,'paused',purpose+'_review_requested')
+        return rid
+
     def revise_tests(self, parent, provider, feedback='', on_created=None):
         """失败证据表明测试本身有缺陷时建立新版本。 Revise existing tests in a new evidence-linked version."""
         original=self.store.run(parent)

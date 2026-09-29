@@ -125,7 +125,18 @@ class ProjectGenerationTests(unittest.TestCase):
                     def respond(self,context):
                         self.context=context
                         return {'internal/app/app.go':'package app\n\nfunc Value() int { return 43 }\n'}
-                provider=RepairProvider();repair=service.repair(child,provider)
+                from unittest.mock import patch
+                from test_role_recovery import Crash
+                provider=RepairProvider();ids=[]
+                # 模拟响应已落盘但草稿尚未发布时中断。 Interrupt after response persistence, before publication.
+                with patch.object(service.planning,'update',side_effect=Crash):
+                    with self.assertRaises(Crash):service.repair(child,provider,on_created=ids.append)
+                repair=ids[0]
+                store.close();store=Store(Path(temp));service=ProjectGeneration(store,executor)
+                with patch.object(provider,'respond',side_effect=AssertionError('unexpected model replay')):
+                    self.assertEqual(service.resume_revision(repair,provider),repair)
+                    self.assertEqual(service.resume_revision(repair,provider),repair)
+                self.assertEqual(store.run(repair)['model_calls'],1)
                 self.assertEqual(provider.context['purpose'],'project_repair')
                 self.assertTrue(provider.context['failure_evidence'])
                 meta=store.run(repair)['data']['project_plan'];files=store.read(meta['files_ref'])

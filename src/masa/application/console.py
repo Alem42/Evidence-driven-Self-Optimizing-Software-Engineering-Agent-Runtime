@@ -412,7 +412,10 @@ class Console:
                 if plan.get('provider')!=provider.profile:
                     raise MasaError('select the original API profile to resume')
                 runner=Runner(self.runner_path,self.go_path)
-                if plan.get('kind')=='code':
+                if plan.get('repair_of'):
+                    if on_created:on_created(rid)
+                    result=ProjectGeneration(store,runner).resume_revision(rid,provider)
+                elif plan.get('kind')=='code':
                     result=ProjectGeneration(store,runner).generate(data['parent_run_id'],provider,on_created,resume_id=rid)
                 else:
                     result=ProjectPlanning(store,runner).generate(provider,data['goal'],on_created,resume_id=rid)
