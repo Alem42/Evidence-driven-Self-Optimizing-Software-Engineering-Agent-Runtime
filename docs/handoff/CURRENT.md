@@ -1,41 +1,17 @@
-# 当前接续点
+﻿# 当前接续点
 
-## 2026-09-29 最新：测试准备错误
+2026-09-29。先读 ../progress/PROGRESS_2026-09-29_002_durable-roles-and-app-run.md，再检查 git status/git log。上一轮已实现 RoleRuntime、SQLite jobs、应用运行和诊断驱动修复上下文。本轮补齐保存响应后的修复草稿恢复；真实 API + Go 验证通过。
 
-优先读取 `docs/progress/PROGRESS_2026-09-29_001_test-setup-and-go-environment.md`。用户新建项目再次失败：随机数测试从 cmd/app 切到 cmd 构建，求和测试切到模块根构建，另有测试常量 maxInt+1 编译越界。真实 API 提案经审核后，只修测试，新成功运行是随机数 `68e1db6c7bf04cba8e7952b3f8e9ff68`、求和 `52d50f2b865d481f98bf105d3b90ef6b`。手动副本与 exe 在 `.masa/manual-verification/<run-id>/`，不要直接编辑旧 workspaces 快照。
+## 下一次直接处理
 
-代码提交 `69f1768`：诊断按行分类，覆盖 no Go files / overflows int；结果 API 提供 repair_advice，前端复用；保留关键构建诊断，修订提示补充 cwd/常量/io.Writer。111 个 Python 测试、4 个前端测试和构建通过；8765 服务已重启，HTTP 新旧项目建议/状态与 JS 已验证。无浏览器点击验收。详细环境解释在 `docs/guides/USER_GO_ENVIRONMENT_AND_TESTING.md`；缓存当前继承父环境、非完整容器隔离，勿把后续环境预检/依赖安装描述为已完成。
+1. application/console.py 自动流程仍拒绝 repair/test_revision/test_format/planning_retry 恢复。连接 generation.resume_revision，但只复用已完成响应，未知请求不得静默重发。
+2. 补齐草稿已发布 awaiting_review、job 尚未保存 plan_id/draft_id 的崩溃窗口。
+3. 持久化重复断言计数和已评估的 verification id，防止恢复重置预算或重复计数。
+4. 修正前端仅凭 planning/generating 元数据判断 working 的情况；重启后应显示恢复入口。刷新 interrupted job 列表避免陈旧卡片。
+5. 再统一角色 Step/Attempt，独立测试评审与中型仓库任务随后推进。
 
-## 2026-09-28 最新修复接续
+## 已验证事实
 
-本轮按用户要求只排查和修复失败，不推进下一阶段。随机数新分支的四轮 Execute 失败最终定位为 `cmd/app/main.go` 使用 `io.Writer` 却缺少 `io` 导入；新验证运行 `cba5c63105934f578753587e350a6fc1` 已通过。小任务 S1/S2/S3/S5 的最终 Go test/vet/format 与 Gate 均通过，分别为 `f52fcac1db024b1497839dab1dd41aae`、`e4223681bb804347a18f68ec00cd450f`、`c88f3851b2f84fdc80d924f6f2acd3ee`、`cfe286fe176b4e19bbe4a11f8cff5294`。S4 本轮未运行。详情与失败原因见 `docs/progress/PROGRESS_2026-09-28_010_failure-matrix.md`，复用任务见 `docs/scenarios/SCENARIO_SMOKE_MATRIX.md`。
+真实修复草稿 d912ad0a9dc74bbf97023172cd32dec6 → 验证 a4d566c7882d432a8be3908ebc0f5895 succeeded。单次真实模型调用，响应后故障注入并数据库重开，恢复无模型调用。随机数固定区间和求和正常/非法参数的真实程序执行均通过。详细证据与验证数量见进展文档。
 
-系统性修复：保留 Go 关键诊断；测试文件纯格式错误走确定性 gofmt；相同断言连续失败三次停止自动修复；小任务 Planner 控制验收项规模。S5 原测试的负数相邻期望与规格冲突，已用显式测试修订改正；独立探针另找出最大整数 `End+1` 溢出，修复后再次通过。上述测试和修复的历史版本均保留。下一阶段路线不变。先检查 git status 和当前服务版本；不要重复本轮付费 API 测试。
-
-2026-09-28。架构重构与项目工作台已完成，下一步读 PLAN_NEXT_STAGE.md，补浏览器验收后推进 D1/D2 应用运行。
-
-## 已提交增量
-
-- aa89292：保存重构接续点。
-- 5285c19：后端分层、角色契约与项目投影。
-- 365ecf6：React 项目工作台与角色状态测试。
-- 26708b6：空输入测试契约、明确 Tester 字符串格式。
-- 最后文档整理提交见 git log，避免自引用提交号。
-
-## 验证与证据
-
-100 Python 测试、4 前端测试、Vite 构建通过；新版 8765 服务已启动，HTTP 静态资源和项目视图已验证。没有可用浏览器自动化表面，因此尚未视觉/点击验收。
-
-真实 API：失败规划 4d0fdc09079c4762bf80725ebb2f30af、75e0cd413cb54238bc087e5a3ab8f98d 保留；复用 Planner 后方案 40857b31a56d4889ae7bb0750db1e6cb，代码草稿 3594adc774984a2ca1c84bad2ee655fd，发布验证 9f520bd706054ed4995aeb63d0e99f4b succeeded。三项 Go 检查退出码 0。模型未生成入口级测试，后续应改进独立业务验收。
-
-## 下轮注意
-
-密钥已本地持久化，不打印、不提交。旧导入路径已删除，读取 src/masa/interfaces/http/server.py 和 application/console.py。Python venv 无 pip，安装使用 uv。前端构建产物提交在 interfaces/http/static。后台 job 为内存对象，重启不恢复模型调用；图为证据投影，勿声称任意自适应调度已完成。
-
-先 git status，再进行用户当前要求；保留旧证据，不重新运行本轮付费测试。docs/archive 为历史材料，权威入口是 docs/00_INDEX.md。
-
-## 2026-09-28 追加：随机数项目已修复
-
-当前最新成功运行 `4d162e1bf86043b58b4d0364d0fe793b`。之前的模型方案格式失败、测试循环导入、未使用导入、Windows CLI 测试路径错误、无参数行为失败均有独立运行记录。详见 `docs/progress/PROGRESS_2026-09-28_009_random-workflow-fix.md`。
-
-新增有界自动模式、测试修订、前端当前阶段自动定位和单流程角色图。Windows 8765 发现两组服务同时监听，已统一停止并启用独占端口后只启动新版。下次恢复先检查端口服务与 git status，不要重复调用付费 API。`PLAN_NEXT_STAGE.md` 仍以生成应用实际运行入口为主；浏览器视觉验收未完成。新增测试的实际数量和最终提交号以测试命令与 git log 为准。
+保留 .masa 旧快照，不直接改历史代码。密钥本地保存、不打印、不提交。按模块验证后 git commit，核心函数添加中英注释。UI 8765 可能仍运行之前提交版本，新代码需重启加载。没有浏览器视觉验收。不要把局部检查点恢复宣称为完整自适应角色 DAG。
