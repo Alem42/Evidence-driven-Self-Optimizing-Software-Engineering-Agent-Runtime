@@ -44,7 +44,7 @@ func TestEnvironmentDoesNotPassSecretsOrGoFlags(t *testing.T) {
 }
 
 func TestMissingModuleRejected(t *testing.T) {
-	r := Request{1, "r", "go_test", "s", 100, 1024}
+	r := Request{ProtocolVersion: 1, RequestID: "r", Operation: "go_test", SnapshotID: "s", TimeoutMS: 100, MaxOutputBytes: 1024}
 	res := Execute(context.Background(), r, Config{t.TempDir(), filepath.Join(t.TempDir(), "go.exe")})
 	if res.Status != "rejected" {
 		t.Fatal(res)

@@ -112,6 +112,8 @@ def make_server(console, port=8765):
                     result = console.start_autonomous_project_job(body) if body.get('auto_verify') else console.start_project_job(body) if body.get('background') else console.plan_project(body)
                 elif len(parts)==3 and parts[:2]==['api','jobs'] and not write:
                     result = console.project_job(parts[2])
+                elif len(parts)==4 and parts[:2]==['api','jobs'] and parts[3]=='resume' and write:
+                    result = console.start_autonomous_project_job({},resume_job=parts[2])
                 elif path == "/api/runs":
                     result = console.create(body) if write else {"runs": console.list_runs(), "active_run": console.active}
                 elif len(parts) >= 3 and parts[:2] == ["api", "runs"]:
@@ -136,6 +138,12 @@ def make_server(console, port=8765):
                             result = console.approve_project(rid, body)
                         elif action == 'generate-project':
                             result = console.start_project_job(body,rid) if body.get('background') else console.generate_project(rid, body)
+                        elif action == 'resume-project':
+                            result = console.start_project_job({**body,'resume_project':True},rid)
+                        elif action == 'run-application':
+                            result = console.start_application(rid,body)
+                        elif action == 'stop-application':
+                            result = console.stop_application(rid)
                         elif action == 'repair-project':
                             result = console.start_project_job({**body,'repair':True},rid) if body.get('background') else console.repair_project(rid,body)
                         elif action == 'revise-project-tests':

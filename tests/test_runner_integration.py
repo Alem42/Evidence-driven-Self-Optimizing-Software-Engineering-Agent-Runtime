@@ -35,6 +35,30 @@ def alive(pid):
 
 @unittest.skipUnless(os.name == "nt" and RUNNER.exists(), "built Windows runner required")
 class RunnerIntegrationTests(unittest.TestCase):
+    def test_application_timeout_is_not_a_success(self):
+        """应用超时必须返回明确状态而非成功退出。 Application timeout must remain distinct from success."""
+        entry=self.workspace/'cmd/app';entry.mkdir(parents=True)
+        (entry/'main.go').write_text('package main\nimport "time"\nfunc main(){time.Sleep(time.Minute)}\n')
+        result=self.runner.execute(self.request('app_run',timeout=2500),self.workspace,lambda:False)
+        self.assertEqual(result['status'],'timeout',result)
+        self.assertIsNone(result['exit_code'])
+
+    def test_application_argv_exit_and_build_failure(self):
+        """运行固定入口并保留真实退出码，参数不经过 shell。 Execute fixed entrypoint with literal argv and actual exit status."""
+        entry=self.workspace/'cmd/app'
+        entry.mkdir(parents=True)
+        (entry/'main.go').write_text('package main\nimport("fmt";"os")\nfunc main(){fmt.Print(os.Args[1]);os.Exit(2)}\n')
+        request=self.request('app_run');request['argv']=['hello; echo forbidden']
+        result=self.runner.execute(request,self.workspace,lambda:False)
+        self.assertEqual(result['phase'],'run',result)
+        self.assertEqual(result['exit_code'],2,result)
+        self.assertEqual(result['stdout'],'hello; echo forbidden')
+        self.assertFalse((self.workspace/'app.exe').exists())
+        (entry/'main.go').write_text('package main\nfunc main(){missing()}\n')
+        result=self.runner.execute(self.request('app_run'),self.workspace,lambda:False)
+        self.assertEqual(result['phase'],'build',result)
+        self.assertNotEqual(result['exit_code'],0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.workspace = Path(self.temp.name) / "repo"

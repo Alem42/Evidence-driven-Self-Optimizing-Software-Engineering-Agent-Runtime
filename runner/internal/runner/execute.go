@@ -95,6 +95,41 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 	case "go_fmt_check":
 		exe = filepath.Join(filepath.Dir(exe), "gofmt"+filepath.Ext(exe))
 		args = []string{"-l", "."}
+	case "app_run":
+		// 构建产物放在临时目录，不改变批准快照；参数只传给程序。
+		// Build outside the approved snapshot and pass argv only to the executable.
+		dir, err := os.MkdirTemp("", "masa-app-")
+		if err != nil {
+			return Failure(req, "internal_error", err)
+		}
+		defer os.RemoveAll(dir)
+		binary := filepath.Join(dir, "app"+filepath.Ext(exe))
+		build := exec.CommandContext(ctx, exe, "build", "-o", binary, "./cmd/app")
+		build.Dir, build.Env = cfg.Workspace, cleanEnvironment(cfg.GoExecutable)
+		output := &capBuffer{limit: req.MaxOutputBytes}
+		build.Stdout, build.Stderr = output, output
+		build.WaitDelay = 300 * time.Millisecond
+		if err := build.Run(); err != nil {
+			res := Failure(req, "internal_error", err)
+			res.Phase = "build"
+			res.Stderr = output.buf.String()
+			res.Truncated = output.truncated
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				code := exit.ExitCode()
+				res.Status = "completed"
+				res.ExitCode = &code
+			}
+			if ctx.Err() != nil {
+				res.Status = "cancelled"
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					res.Status = "timeout"
+				}
+				res.ExitCode = nil
+			}
+			return res
+		}
+		exe, args = binary, req.Argv
 	}
 	stdout := &capBuffer{limit: (req.MaxOutputBytes + 1) / 2}
 	stderr := &capBuffer{limit: req.MaxOutputBytes / 2}
@@ -105,6 +140,9 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 	cmd.WaitDelay = 300 * time.Millisecond
 	err := cmd.Run()
 	res := Result{ProtocolVersion: 1, RequestID: req.RequestID, SnapshotID: req.SnapshotID, Status: "completed", DurationMS: time.Since(start).Milliseconds(), Stdout: stdout.buf.String(), Stderr: stderr.buf.String(), Truncated: stdout.truncated || stderr.truncated}
+	if req.Operation == "app_run" {
+		res.Phase = "run"
+	}
 	code := 0
 	if err != nil {
 		var exit *exec.ExitError

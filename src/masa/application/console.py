@@ -21,6 +21,8 @@ from masa.infrastructure.workspaces import verify_snapshot
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
+from masa.runtime.roles import RoleRuntime
+from masa.infrastructure.jobs import Jobs
 
 
 def test_revision_needed(evidence, checks=()):
@@ -105,7 +107,9 @@ class Console:
         self.worker = None
         self.errors = {}
         self.closing = False
-        self.jobs = {}
+        self.jobs = Jobs(self.root)
+        self.app_cancel = threading.Event()
+        self.app_run_id = None
         self.job_thread = None
         Store(self.root).close()
 
@@ -116,6 +120,8 @@ class Console:
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
+            "interrupted_jobs": [{'job_id':ident,'run_id':job.get('run_id'),'phase':job.get('phase')}
+                                 for ident,job in self.jobs.items() if job['status']=='interrupted' and job.get('mode')=='auto'],
             "provider": "scripted-v1",
             "capabilities": {
                 "execute": True,
@@ -172,12 +178,14 @@ class Console:
     def detail(self, rid):
         store = Store(self.root)
         try:
+            roles=RoleRuntime(store)
             # A read transaction yields one coherent run/step/event view.
             store.db.execute("BEGIN")
             run = store.run(rid)
             events = store.events(rid)
             return {
                 "run": run,
+                "role_calls": roles.states(rid),
                 "steps": store.steps(rid),
                 "events": events[-500:],
                 "event_count": len(events),
@@ -385,7 +393,7 @@ class Console:
                 self.jobs[ident]['run_id']=run_id
             def work():
                 try:
-                    result=(self.revise_project_tests(rid,body,created) if body.get('test_revision') else self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
+                    result=self.resume_project(rid,body,created) if body.get('resume_project') else (self.revise_project_tests(rid,body,created) if body.get('test_revision') else self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
                     self.jobs[ident].update(status='completed',result=result)
                 except Exception as exc:
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
@@ -393,34 +401,94 @@ class Console:
             self.job_thread.start()
             return {'job_id':ident}
 
-    def start_autonomous_project_job(self, body):
+    def resume_project(self, rid, body, on_created=None):
+        """恢复中断的规划或生成，复用已落盘角色结果。 Resume interrupted planning/generation from persisted role outputs."""
+        with self.lock:
+            self._available()
+            provider=self.settings.provider(body.get('api_profile_id'))
+            store=Store(self.root)
+            try:
+                run=store.run(rid);data=run['data'];plan=data.get('project_plan',{})
+                if plan.get('provider')!=provider.profile:
+                    raise MasaError('select the original API profile to resume')
+                runner=Runner(self.runner_path,self.go_path)
+                if plan.get('kind')=='code':
+                    result=ProjectGeneration(store,runner).generate(data['parent_run_id'],provider,on_created,resume_id=rid)
+                else:
+                    result=ProjectPlanning(store,runner).generate(provider,data['goal'],on_created,resume_id=rid)
+                return {'id':result}
+            finally:store.close()
+
+    def start_application(self,rid,body):
+        """后台运行已验证程序，可停止且不改变 Gate。 Run a verified CLI asynchronously without changing its Gate."""
+        with self.lock:
+            self._available()
+            ident=uuid.uuid4().hex
+            self.app_cancel.clear();self.app_run_id=rid
+            self.jobs[ident]={'status':'running','run_id':rid,'started':time.time(),'phase':'application'}
+            def work():
+                store=Store(self.root)
+                try:
+                    from masa.application.applications import run_application
+                    result=run_application(store,Runner(self.runner_path,self.go_path),rid,body.get('argv',[]),self.app_cancel.is_set)
+                    self.jobs[ident].update(status='completed',result={'id':rid,'app_result':result})
+                except Exception as exc:
+                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'application execution interrupted; inspect saved evidence')
+                finally:
+                    self.app_run_id=None;store.close()
+            self.job_thread=threading.Thread(target=work,daemon=True,name='masa-application')
+            self.job_thread.start()
+            return {'job_id':ident}
+
+    def stop_application(self,rid):
+        """仅取消当前程序，不撤销已有验证。 Cancel the active application without revoking verification."""
+        if self.app_run_id!=rid:raise MasaError('no active application for this run')
+        self.app_cancel.set()
+        return {'id':rid}
+
+    def start_autonomous_project_job(self, body, resume_job=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
             self._available()
+            if resume_job:
+                previous=self.jobs.get(resume_job)
+                if not previous or previous.get('mode')!='auto' or previous['status']!='interrupted':
+                    raise MasaError('only interrupted automatic workflows can resume')
+                if previous.get('phase') in {'repair','test_revision','test_format','planning_retry'}:
+                    raise MasaError('interrupted revision requires inspection of its saved draft; automatic replay is disabled')
+                body=previous['request']
             provider=self.settings.provider(body.get('api_profile_id'))
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
-            ident=uuid.uuid4().hex
-            self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
-                              'mode':'auto','phase':'planning','attempt':0}
+            ident=resume_job or uuid.uuid4().hex
+            if resume_job:self.jobs[ident].update(status='running',note=None)
+            else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
+                              'mode':'auto','phase':'planning','attempt':0,
+                              'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
             def phase(name,rid=None,attempt=None):
                 job=self.jobs[ident]
-                job['phase']=name
-                if rid:job['run_id']=rid
-                if attempt is not None:job['attempt']=attempt
+                update={'phase':name}
+                if rid:update['run_id']=rid
+                if attempt is not None:update['attempt']=attempt
+                job.update(update)
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
                 try:
                     planning=ProjectPlanning(store,runner)
                     generation=ProjectGeneration(store,runner)
+                    checkpoint=self.jobs[ident]
+                    plan=checkpoint.get('plan_id')
                     reuse=None
-                    for retry in range(3):
+                    for retry in range(3 if not plan else 0):
                         try:
-                            plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse)
+                            recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='planning' and retry==0 else None
+                            plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id)
+                            checkpoint['plan_id']=plan
                             break
                         except MasaError:
+                            if recover_id:raise
                             failed_id=self.jobs[ident]['run_id']
                             failed=store.run(failed_id)['data'].get('project_plan',{})
                             if retry==2 or not failed.get('spec_ref'):
@@ -430,14 +498,18 @@ class Console:
                             reuse=failed_id
                             phase('planning_retry',failed_id,retry+1)
                     meta=store.run(plan)['data']['project_plan']
-                    planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
+                    if meta['status']!='approved':planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
                                            'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
                                            'review_mode':'automatic'})
-                    phase('generation',plan)
-                    draft=generation.generate(plan,provider,lambda rid:phase('generation',rid))
+                    draft=checkpoint.get('draft_id')
+                    if not draft:
+                        recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='generation' and checkpoint.get('run_id')!=plan else None
+                        phase('generation',recover_id or plan)
+                        draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
+                        checkpoint['draft_id']=draft
                     prior_assertion=None
                     repeated_assertions=0
-                    for attempt in range(5):
+                    for attempt in range(checkpoint.get('attempt',0),5):
                         meta=store.run(draft)['data']['project_plan']
                         phase('verification',draft,attempt)
                         verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
@@ -477,7 +549,8 @@ class Console:
                                 lambda rid:phase('test_revision',rid,attempt+1))
                         else:
                             phase('repair',verified,attempt+1)
-                            draft=generation.repair(verified,provider,'',lambda rid:phase('repair',rid,attempt+1))
+                            draft=generation.repair(verified,provider,'',lambda rid:phase('repair',rid,attempt+1),use_intelligence=True)
+                        checkpoint.update(draft_id=draft,attempt=attempt+1)
                 except Exception as exc:
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'automatic project job failed')
                 finally:store.close()
@@ -517,6 +590,10 @@ class Console:
             lines.append(f"RUN {rid} | {d['run']['status']} | {d['run']['data']['goal']}")
             for event in d['events']:
                 lines.append(f"{event['created']} {event['type']} {event['payload']}")
+                if event['type']=='app_finished':
+                    store=Store(self.root)
+                    try:lines.append(str(store.read(event['payload']['result_ref'])))
+                    finally:store.close()
             for check in self.results(rid)['checks']:
                 result=check['result']
                 lines.append(f"{check['operation']}: {result}")
@@ -573,7 +650,7 @@ class Console:
             provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created)}
+                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created,use_intelligence=True)}
             finally:store.close()
 
     def revise_project_tests(self, rid, body, on_created=None):
@@ -693,6 +770,7 @@ class Console:
         return {"id": rid, "requested": action}
 
     def close(self):
+        self.app_cancel.set()
         with self.lock:
             self.closing = True
             rid, worker = self.active, self.worker
@@ -707,3 +785,5 @@ class Console:
                 store.close()
         if worker:
             worker.join(timeout=15)
+        if self.app_run_id and self.job_thread:
+            self.job_thread.join(timeout=15)

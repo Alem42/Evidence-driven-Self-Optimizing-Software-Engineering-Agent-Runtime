@@ -11,12 +11,13 @@ import (
 const MaxRequestBytes = 16384
 
 type Request struct {
-	ProtocolVersion int    `json:"protocol_version"`
-	RequestID       string `json:"request_id"`
-	Operation       string `json:"operation"`
-	SnapshotID      string `json:"snapshot_id"`
-	TimeoutMS       int    `json:"timeout_ms"`
-	MaxOutputBytes  int    `json:"max_output_bytes"`
+	ProtocolVersion int      `json:"protocol_version"`
+	RequestID       string   `json:"request_id"`
+	Operation       string   `json:"operation"`
+	SnapshotID      string   `json:"snapshot_id"`
+	TimeoutMS       int      `json:"timeout_ms"`
+	MaxOutputBytes  int      `json:"max_output_bytes"`
+	Argv            []string `json:"argv,omitempty"`
 }
 
 type Result struct {
@@ -30,6 +31,7 @@ type Result struct {
 	Stderr          string `json:"stderr"`
 	Truncated       bool   `json:"truncated"`
 	Error           string `json:"error,omitempty"`
+	Phase           string `json:"phase,omitempty"`
 }
 
 func Decode(data []byte) (Request, error) {
@@ -53,8 +55,16 @@ func (r Request) Validate() error {
 	if r.ProtocolVersion != 1 || r.RequestID == "" || len(r.RequestID) > 128 || r.SnapshotID == "" {
 		return fmt.Errorf("invalid protocol, request ID, or snapshot")
 	}
-	if r.Operation != "go_test" && r.Operation != "go_vet" && r.Operation != "go_fmt_check" && r.Operation != "go_index" {
+	if r.Operation != "go_test" && r.Operation != "go_vet" && r.Operation != "go_fmt_check" && r.Operation != "go_index" && r.Operation != "app_run" {
 		return fmt.Errorf("operation is not allowed")
+	}
+	if len(r.Argv) > 64 || (r.Operation != "app_run" && len(r.Argv) > 0) {
+		return fmt.Errorf("argv outside runner policy")
+	}
+	for _, arg := range r.Argv {
+		if len(arg) > 4096 || bytes.IndexByte([]byte(arg), 0) >= 0 {
+			return fmt.Errorf("invalid application argument")
+		}
 	}
 	if r.TimeoutMS < 1 || r.TimeoutMS > 120000 || r.MaxOutputBytes < 1 || r.MaxOutputBytes > 1048576 {
 		return fmt.Errorf("limits outside runner policy")

@@ -17,6 +17,31 @@ class Crash(BaseException):
 
 
 class RoleRecoveryTests(unittest.TestCase):
+    def test_automatic_job_reopens_and_continues_after_plan_approval(self):
+        """后台任务重启后从已批准规划继续，不重复规划。 Resume the full automatic job from an approved plan checkpoint."""
+        from masa.application.console import Console
+        from masa.infrastructure.jobs import Jobs
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);store=Store(root);provider=CompositeProvider()
+            planner=ProjectPlanning(store,FakeExecutor())
+            plan=planner.generate(provider,'Build CLI');meta=store.run(plan)['data']['project_plan']
+            planner.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
+                'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref'])})
+            Jobs(root)['saved-job']={'status':'running','mode':'auto','phase':'generation',
+                'plan_id':plan,'run_id':plan,'attempt':0,'started':1,'request':{'goal':'Build CLI','api_profile_id':None}}
+            store.close()
+            console=Console(root,'unused','unused',Path.cwd())
+            console.settings.provider=lambda *_:provider
+            self.assertEqual(console.project_job('saved-job')['status'],'interrupted')
+            with patch('masa.application.console.Runner',lambda *args:FakeExecutor()),patch.object(provider,'respond',wraps=provider.respond) as calls:
+                console.start_autonomous_project_job({},resume_job='saved-job')
+                console.job_thread.join(timeout=10)
+                self.assertEqual(calls.call_count,1)
+                self.assertEqual(calls.call_args.args[0]['purpose'],'project_developer')
+            self.assertEqual(console.project_job('saved-job')['status'],'completed')
+            self.assertEqual(Jobs(root)['saved-job']['status'],'completed')
+            console.close()
+
     def test_saved_planner_response_survives_reopen_before_publication(self):
         """响应落盘后发布前崩溃，只补 Tester 调用。 Reopening after response commit does not charge Planner twice."""
         with tempfile.TemporaryDirectory() as temp:

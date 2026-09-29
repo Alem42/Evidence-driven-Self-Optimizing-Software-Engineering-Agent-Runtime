@@ -8,6 +8,7 @@ export async function projectJob(path,body,onProgress) {
     const job={...await api('/jobs/'+job_id),job_id};onProgress(job);
     if(job.status==='completed')return job.result;
     if(job.status==='failed')throw new Error(job.error+(job.run_id?' · 运行记录 '+job.run_id:''));
+    if(job.status==='interrupted')throw new Error('服务已重启，任务已保存；请使用恢复入口继续。');
     await new Promise(resolve=>setTimeout(resolve,800));
   }
 }

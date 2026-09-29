@@ -24,6 +24,21 @@ ROOT = Path(__file__).resolve().parents[1]
     "built Windows runner required",
 )
 class IntelligenceTests(unittest.TestCase):
+    def test_repair_context_omits_unrelated_packages_in_larger_repository(self):
+        """多包仓库保留失败包且排除无关源码。 A larger repository excludes unrelated packages while preserving the failing package."""
+        from masa.intelligence.repair_context import build_repair_context
+        for i in range(16):
+            folder=self.source/f'extra{i}';folder.mkdir()
+            (folder/'unrelated.go').write_text(f'package extra{i}\n// '+('unrelated documentation '*50)+f'\nfunc Auxiliary{i}() int {{return {i}}}\n')
+        rid=self.runtime.create(self.source,'NormalizeTitle',Budget(tool_calls=4))
+        files={p.relative_to(self.source).as_posix():p.read_text(encoding='utf-8') for p in self.source.rglob('*')
+               if p.is_file() and (p.suffix=='.go' or p.name=='go.mod')}
+        chosen,report=build_repair_context(self.store,self.runner,rid,files,
+            [{'diagnostics':['todo/service.go:12: NormalizeTitle returned wrong title']}],'NormalizeTitle')
+        self.assertIn('todo/service.go',chosen)
+        self.assertGreater(len(report['omitted']),0)
+        self.assertLess(report['selected_bytes'],report['original_bytes'])
+
     def test_repair_context_keeps_diagnostic_file_and_audits_selection(self):
         """真实 AST 修复上下文必须保留报错文件和测试。 Real AST repair context retains diagnostics and test contracts."""
         from masa.intelligence.repair_context import build_repair_context
