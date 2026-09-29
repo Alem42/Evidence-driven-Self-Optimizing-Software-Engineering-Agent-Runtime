@@ -90,3 +90,47 @@ class RoleRecoveryTests(unittest.TestCase):
             self.assertEqual(store.run(ids[0])['data']['project_plan']['status'],'awaiting_review')
             self.assertEqual(store.run(ids[0])['model_calls'],1)
             store.close()
+
+    def test_auto_resumes_saved_repair_and_published_generation(self):
+        """覆盖修复与生成发布后的检查点窗口。 Cover saved repair and post-publication checkpoint gaps."""
+        from masa.application.console import Console
+        from masa.infrastructure.jobs import Jobs
+        from masa.runtime.engine import Runtime
+        from test_project_generation import FILES
+        for phase in ('repair','generation','unknown_repair'):
+            with self.subTest(phase=phase),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);store=Store(root);provider=CompositeProvider()
+                p=ProjectPlanning(store,FakeExecutor());plan=p.generate(provider,'Build CLI')
+                meta=store.run(plan)['data']['project_plan']
+                p.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
+                    'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref'])})
+                g=ProjectGeneration(store,FakeExecutor());draft=g.generate(plan,provider)
+                resume=draft;attempt=0
+                if phase in {'repair','unknown_repair'}:
+                    meta=store.run(draft)['data']['project_plan']
+                    failed=g.approve(draft,{'files_ref':meta['files_ref'],'files':FILES})
+                    Runtime(store,FakeExecutor(exit_code=1)).execute(failed)
+                    ids=[]
+                    with patch.object(provider,'respond',side_effect=Crash if phase=='unknown_repair' else None,return_value={'internal/app/app.go':'package app\n\nfunc Value() int { return 43 }\n'}),patch.object(g.planning,'update',side_effect=Crash):
+                        with self.assertRaises(Crash):g.repair(failed,provider,on_created=ids.append)
+                    resume=ids[0];attempt=1
+                Jobs(root)['recovery']={'status':'running','mode':'auto','phase':'repair' if phase=='unknown_repair' else phase,
+                    'plan_id':plan,'run_id':resume,'attempt':attempt,'started':1,
+                    'provider':provider.profile,'request':{'goal':'Build CLI','api_profile_id':None}}
+                store.close();console=Console(root,'unused','unused',Path.cwd())
+                console.settings.provider=lambda *_:provider
+                with patch('masa.application.console.Runner',lambda *args:FakeExecutor()),patch.object(provider,'respond',side_effect=AssertionError('unexpected replay')):
+                    console.start_autonomous_project_job({},resume_job='recovery')
+                    console.job_thread.join(timeout=10)
+                job=console.project_job('recovery')
+                if phase=='unknown_repair':
+                    self.assertEqual(job['status'],'failed',job)
+                    self.assertIn('result unavailable',job['error'])
+                    self.assertEqual(console.detail(resume)['run']['model_calls'],1)
+                    console.close()
+                    continue
+                self.assertEqual(job['status'],'completed',job)
+                self.assertEqual(job['attempt'],attempt)
+                self.assertEqual(console.detail(job['result']['id'])['run']['status'],'succeeded')
+                self.assertFalse(console.detail(resume)['role_active'])
+                console.close()

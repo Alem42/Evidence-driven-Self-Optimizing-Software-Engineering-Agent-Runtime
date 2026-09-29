@@ -186,6 +186,8 @@ class Console:
             return {
                 "run": run,
                 "role_calls": roles.states(rid),
+                "role_active": bool(self.job_thread and self.job_thread.is_alive()) and any(
+                    j.get('status')=='running' and j.get('run_id')==rid for j in self.jobs.values()),
                 "steps": store.steps(rid),
                 "events": events[-500:],
                 "event_count": len(events),
@@ -457,17 +459,19 @@ class Console:
                 previous=self.jobs.get(resume_job)
                 if not previous or previous.get('mode')!='auto' or previous['status']!='interrupted':
                     raise MasaError('only interrupted automatic workflows can resume')
-                if previous.get('phase') in {'repair','test_revision','test_format','planning_retry'}:
+                if previous.get('phase') in {'test_format','planning_retry'}:
                     raise MasaError('interrupted revision requires inspection of its saved draft; automatic replay is disabled')
                 body=previous['request']
             provider=self.settings.provider(body.get('api_profile_id'))
+            if resume_job and previous.get('provider',provider.profile)!=provider.profile:
+                raise MasaError('select the original API profile to resume')
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
-                              'mode':'auto','phase':'planning','attempt':0,
+                              'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,
                               'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
             def phase(name,rid=None,attempt=None):
                 job=self.jobs[ident]
@@ -483,6 +487,12 @@ class Console:
                     generation=ProjectGeneration(store,runner)
                     checkpoint=self.jobs[ident]
                     plan=checkpoint.get('plan_id')
+                    # 发布与后台检查点之间也可能中断；直接复用已发布的同一份方案。
+                    # Publication can precede the job checkpoint: reuse that exact saved plan.
+                    if resume_job and not plan and checkpoint.get('phase')=='planning' and checkpoint.get('run_id'):
+                        saved=store.run(checkpoint['run_id'])['data'].get('project_plan',{})
+                        if saved.get('status') in {'awaiting_review','approved'}:
+                            plan=checkpoint['run_id'];checkpoint['plan_id']=plan
                     reuse=None
                     for retry in range(3 if not plan else 0):
                         try:
@@ -505,13 +515,23 @@ class Console:
                                            'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
                                            'review_mode':'automatic'})
                     draft=checkpoint.get('draft_id')
+                    if resume_job and checkpoint['phase'] in {'repair','test_revision'}:
+                        revision=checkpoint.get('run_id')
+                        # 结果未知时 resume_revision 拒绝重放，保留原始预算与证据。
+                        # Unknown results stop recovery instead of replaying a paid request.
+                        draft=generation.resume_revision(revision,provider)
+                        checkpoint['draft_id']=draft
                     if not draft:
                         recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='generation' and checkpoint.get('run_id')!=plan else None
                         phase('generation',recover_id or plan)
-                        draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
+                        saved=store.run(recover_id)['data'].get('project_plan',{}) if recover_id else {}
+                        if saved.get('status') in {'awaiting_review','approved'}:
+                            draft=recover_id
+                        else:
+                            draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
                         checkpoint['draft_id']=draft
-                    prior_assertion=None
-                    repeated_assertions=0
+                    prior_assertion=checkpoint.get('prior_assertion')
+                    repeated_assertions=checkpoint.get('repeated_assertions',0)
                     for attempt in range(checkpoint.get('attempt',0),5):
                         meta=store.run(draft)['data']['project_plan']
                         phase('verification',draft,attempt)
@@ -533,7 +553,13 @@ class Console:
                         # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
                         # Three identical assertion failures require spec/test review instead of another implementation repair.
                         assertion=repeated_assertion_signature(checks)
-                        repeated_assertions=repeated_assertions+1 if assertion and assertion==prior_assertion else 1
+                        # JSON 标准化使重启前后的元组/列表比较一致，同一验证不重复计数。
+                        # Normalize persisted signatures and count each verification only once.
+                        assertion=json.loads(json.dumps(assertion))
+                        if checkpoint.get('evaluated_verification')!=verified:
+                            repeated_assertions=repeated_assertions+1 if assertion and assertion==prior_assertion else 1
+                            checkpoint.update(prior_assertion=assertion,repeated_assertions=repeated_assertions,
+                                              evaluated_verification=verified)
                         prior_assertion=assertion
                         if assertion and repeated_assertions>=3:
                             self.jobs[ident].update(status='completed',result={'id':verified},

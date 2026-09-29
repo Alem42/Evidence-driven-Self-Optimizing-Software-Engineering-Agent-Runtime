@@ -140,7 +140,7 @@ class ProjectGeneration:
             raise MasaError('resume requires a revision and its original provider')
         if run['cancel_requested'] or time.time()>=run['data']['deadline_at']:
             raise MasaError('role run cancelled or deadline expired')
-        if metadata.get('status')=='awaiting_review':
+        if metadata.get('status') in {'awaiting_review','approved'}:
             return rid
         if metadata.get('status')!='generating':
             raise MasaError('only interrupted revision generation can resume')

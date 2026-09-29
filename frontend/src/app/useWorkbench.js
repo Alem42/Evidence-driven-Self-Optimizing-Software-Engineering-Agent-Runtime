@@ -15,7 +15,7 @@ export function useWorkbench(){
     let stopped=false,timer;
     async function poll(){
       try{
-        const catalog=await api('/projects');
+        const [catalog,currentBoot]=await Promise.all([api('/projects'),api('/bootstrap')]);
         let target=selected;
         if(jobId){
           let j;
@@ -27,7 +27,7 @@ export function useWorkbench(){
         }
         const [d,v]=target?await Promise.all([api('/runs/'+target),api('/projects/'+target)]):[null,null];
         if(stopped)return;
-        setProjects(catalog.projects);setDetail(d);setView(v);setOnline(true);
+        setBoot(currentBoot);setProjects(catalog.projects);setDetail(d);setView(v);setOnline(true);
       }catch(e){if(!stopped){setError(e.message);setOnline(false);}}
       finally{if(!stopped)timer=setTimeout(poll,900);}
     }
@@ -38,5 +38,6 @@ export function useWorkbench(){
     setJob({status:'running',started:Date.now()/1000});setJobId(result.job_id);localStorage.setItem('masa.job',result.job_id);
   }
   return {projects,selected,select,detail,view,profiles,setProfiles,job,track,start,error,setError,online,boot,
-    working:Boolean(jobId)||Boolean(detail?.active)||['planning','generating'].includes(detail?.run.data.project_plan?.status)};
+    // 持久状态不能证明后台线程仍存活。 Persisted phase alone does not imply a live worker.
+    working:Boolean(jobId)||Boolean(detail?.active)||Boolean(detail?.role_active)};
 }
