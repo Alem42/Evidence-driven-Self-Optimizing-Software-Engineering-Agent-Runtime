@@ -56,3 +56,7 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 先读 ../progress/PROGRESS_2026-10-02_006_mutation-probes.md。application/mutation.py + scripts/evaluate_mutations.py 支持显式1..5变异；先基线，再临时副本测试，不改原 Gate。真实随机数 d50899063f04459daf4bfdd0a806f85f：两处业务破坏 killed，种子变化 survived，语法错误 invalid。无新模型调用。
 
 源码报告重载/HTTP/预算已补，取消和浏览器验收仍待。完整133 Python，新增HTTP所在20项通过，前端测试构建通过。下一步独立模型语义评审，仍未实现；随后扩大变异、上下文收益与中型任务。变异暂时脚本入口，非前端功能，也不是自动 AST 变异引擎。
+
+## 最新：2026-10-02 模型语义评审
+
+先读 ../progress/PROGRESS_2026-10-02_007_semantic-review.md 和 ../guides/USER_RUNTIME_STRUCTURE_2026-10-02.md。semantic_review.py/ domain/test_review.py / scripts/review_test_semantics.py 首版完成，只是脚本入口。真实完整计划两次引用失败；显式随机冲突负例真实API成功 43749f5060634e0d8596a70342c878c2。不宣称复杂语义评审已稳定。下一步字段引用协议可靠性和前端恢复，再统一角色状态、上下文收益与中型任务。没有自动调用 Reviewer，没有允许 Reviewer 修改或批准项目。
