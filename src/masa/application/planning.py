@@ -7,6 +7,7 @@ from masa.domain.models import Budget, MasaError, canonical
 from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
+from masa.domain.clarification import validate_question, validate_answers
 
 
 
@@ -40,7 +41,8 @@ class ProjectPlanning:
             seed.mkdir(parents=True)
             (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
             plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400),
+            plan['clarification_enabled']=True
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=3, deadline_seconds=86400),
                                                            graph=harness_policy(), project_plan=plan, parent_run_id=reuse)
         if on_created:
             on_created(rid)
@@ -52,7 +54,22 @@ class ProjectPlanning:
                 spec=self.store.read(old['spec_ref'])
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
             else:
-                spec = self.call(rid, provider, 'project_planner', {'goal':goal})
+                values={'goal':goal}
+                invocation='initial'
+                if plan.get('clarification_enabled'):
+                    values['clarification_allowed']=not bool(plan.get('clarification_answers'))
+                if plan.get('clarification_answers'):
+                    values.update(clarification=plan['clarification'],answers=plan['clarification_answers'])
+                    invocation=plan['clarification_id']
+                spec = RoleRuntime(self.store).call(rid,provider,'project_planner',values,invocation_id=invocation)
+                if isinstance(spec,dict) and spec.get('kind')=='clarification_request':
+                    if plan.get('clarification_answers'):
+                        raise MasaError('clarification round limit reached; refine requirements in a new plan')
+                    validate_question(spec)
+                    plan.update(status='waiting_for_input',clarification=spec,
+                                clarification_id=self.store.put(spec))
+                    self.update(rid,plan,'paused','clarification_requested')
+                    return rid
             validate_spec(spec)
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
@@ -81,6 +98,23 @@ class ProjectPlanning:
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""
         return RoleRuntime(self.store).call(rid,provider,purpose,values)
+
+    def answer(self, rid, question_id, answers):
+        """事务保存回答，重复相同提交幂等，冲突回答拒绝。 Persist answers atomically and reject conflicting retries."""
+        with self.store.transaction():
+            run=self.store.run(rid);plan=run['data'].get('project_plan',{})
+            if run['cancel_requested'] or time.time()>=run['data']['deadline_at']:
+                raise MasaError('clarification cancelled or deadline expired')
+            if question_id!=plan.get('clarification_id') or not question_id:
+                raise MasaError('stale clarification')
+            validate_answers(plan['clarification'],answers)
+            if plan.get('clarification_answers'):
+                if plan['clarification_answers']!=answers:raise MasaError('clarification already answered differently')
+                return rid
+            if plan.get('status')!='waiting_for_input':raise MasaError('not waiting for clarification')
+            plan.update(status='planning',clarification_answers=answers,requirement_revision=1)
+            self.store.save_metadata(rid,'project_plan',plan,'clarification_answered',status='paused',reason='answer saved; resume planning')
+        return rid
 
     def approve(self, rid, body):
         """确认最终可见规格，绑定原提案；批准规划不授权执行空项目。 Approve visible specifications without authorizing execution."""

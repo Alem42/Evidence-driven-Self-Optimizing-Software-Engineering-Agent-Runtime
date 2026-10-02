@@ -140,6 +140,8 @@ def make_server(console, port=8765):
                             result = console.start_project_job(body,rid) if body.get('background') else console.generate_project(rid, body)
                         elif action == 'resume-project':
                             result = console.start_project_job({**body,'resume_project':True},rid)
+                        elif action == 'answer-clarification':
+                            result = console.answer_clarification(rid,body)
                         elif action == 'run-application':
                             result = console.start_application(rid,body)
                         elif action == 'stop-application':

@@ -28,3 +28,9 @@
 role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保留并幂等迁移，新调用标识不能绕过未知结果，预算不重置。详见 ../progress/PROGRESS_2026-10-02_001_role-invocations.md。
 
 下一步实现 Planner clarification_request 协议、持久等待和回答接口；RoleRuntime.call 已支持 invocation_id，但 ProjectPlanning 尚未接入新调用。不要宣称澄清已上线。9 月 29 日真实随机数运行现已过期，本轮复验被 deadline 拒绝，后续不要反复运行旧恢复脚本或偷偷改 deadline。需要新运行验证或显式续期设计。
+
+## 2026-10-02 Planner 澄清已接入首版
+
+最新进展 ../progress/PROGRESS_2026-10-02_002_planner-clarification.md。支持 Planner 单轮结构化问题、工作台选项/文本回答、持久等待、回答后独立调用继续；自动模式暂停并继续原任务。真实运行 3c893f93cafe4d46a94c09921455a3bd 经脚本回答和 DB 重开后进入 awaiting_review，共 3 次调用。125 Python 回归通过，前端测试/构建通过；未浏览器验收。
+
+下一步先补 HTTP 和回答后启动前中断测试、浏览器验收；再做 Tester 澄清和独立测试评审，继续上下文收益评估与中型仓库任务。目前只支持 Planner 一轮，不支持中途变更已批准需求后的下游失效。重启服务加载新版。首次真实失败记录保留，不宣称此次执行了新 Go 项目。

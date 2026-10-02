@@ -457,7 +457,7 @@ class Console:
             self._available()
             if resume_job:
                 previous=self.jobs.get(resume_job)
-                if not previous or previous.get('mode')!='auto' or previous['status']!='interrupted':
+                if not previous or previous.get('mode')!='auto' or previous['status'] not in {'interrupted','waiting_for_input'}:
                     raise MasaError('only interrupted automatic workflows can resume')
                 if previous.get('phase') in {'test_format','planning_retry'}:
                     raise MasaError('interrupted revision requires inspection of its saved draft; automatic replay is disabled')
@@ -495,6 +495,9 @@ class Console:
                         try:
                             recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='planning' and retry==0 else None
                             plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id)
+                            if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
+                                checkpoint.update(status='waiting_for_input',result={'id':plan})
+                                return
                             checkpoint['plan_id']=plan
                             break
                         except MasaError:
@@ -584,6 +587,25 @@ class Console:
             requested=[e for e in detail['events'] if e['type']=='model_requested']
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
         return job
+
+    def answer_clarification(self, rid, body):
+        """先持久回答，再由现有后台入口继续；自动模式保留原任务。 Save answers before resuming the existing workflow."""
+        with self.lock:
+            self._available()
+            store=Store(self.root)
+            try:
+                ProjectPlanning(store,Runner(self.runner_path,self.go_path)).answer(
+                    rid,body.get('question_id'),body.get('answers'))
+                status=store.run(rid)['data']['project_plan']['status']
+            finally:store.close()
+        if status!='planning':
+            ident=uuid.uuid4().hex
+            self.jobs[ident]={'status':'completed','run_id':rid,'result':{'id':rid},'started':time.time()}
+            return {'job_id':ident}
+        for ident,job in self.jobs.items():
+            if job.get('mode')=='auto' and job.get('run_id')==rid and job.get('status')=='waiting_for_input':
+                return self.start_autonomous_project_job({},resume_job=ident)
+        return self.start_project_job({**body,'resume_project':True},rid)
 
     def open_workspace(self, rid):
         """仅打开该运行绑定的目录，不接受任意路径或命令。 Open only the workspace bound to this run."""

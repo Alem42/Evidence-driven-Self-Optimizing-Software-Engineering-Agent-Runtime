@@ -8,12 +8,14 @@ import {WorkflowGraph} from './CheckGraph';
 import {CodeSnapshot} from './CodeSnapshot';
 import {projectJob} from './progress';
 import {ApplicationPanel} from './ApplicationPanel';
+import {ClarificationPanel} from './ClarificationPanel';
 
 // 审核与下一步操作只在当前记录的语义范围内显示。
 // Show review and next actions according to the selected record's actual lifecycle.
 export function ProjectDetails({detail,view,profiles,select,onProgress,working}){
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[log,setLog]=useState(null),[copied,setCopied]=useState(false);
   const data=detail.run.data,plan=data.project_plan;
+  if(plan?.status==='waiting_for_input')return <ClarificationPanel key={plan.clarification_id} detail={detail} profiles={profiles} select={select} onProgress={onProgress}/>;
   async function action(fn){setBusy(true);setError('');try{await fn();}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <>
     {error&&<p className="error" role="alert">{error}</p>}

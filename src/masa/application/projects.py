@@ -58,12 +58,15 @@ class Projects:
                     [('project_developer','Developer')] if plan.get('kind')=='code' else [('project_planner','Planner'),('project_tester','Tester')])
                 for role,label in roles:
                     related=[e for e in events if e['payload'].get('step_id')==role]
-                    started=any(e['type']=='model_requested' for e in related)
-                    done=any(e['type']=='model_completed' for e in related)
-                    failed=any(e['type']=='model_failed' for e in related)
+                    latest=next((e['type'] for e in reversed(related) if e['type'] in {'model_requested','model_completed','model_failed'}),None)
+                    started=latest=='model_requested'
+                    done=latest=='model_completed'
+                    failed=latest=='model_failed'
                     reused=(role=='project_planner' and any(e['type']=='planner_reused' for e in events)) or (
                         role=='project_test_revision' and any(e['type']=='test_format_applied' for e in events))
                     state='succeeded' if done or reused else 'running' if started else 'pending'
+                    if role=='project_planner' and plan.get('status')=='waiting_for_input':
+                        state='blocked';label='Planner · 等待你的回答'
                     if failed or (started and not done and plan['status']=='failed'):state='failed'
                     if run['status']=='cancelled' and state=='running':state='cancelled'
                     result=next((e['payload'].get('response_ref') for e in reversed(related) if e['type']=='model_completed'),None)
