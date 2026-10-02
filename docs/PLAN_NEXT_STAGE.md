@@ -37,3 +37,5 @@
 2026-10-02：Coordinator 自动执行循环已提取；独立测试计划规则首版已接入。详见 [解释指南](guides/USER_COORDINATOR_AND_TEST_REVIEW.md) 与 [004 进展](progress/PROGRESS_2026-10-02_004_coordinator-test-review.md)。下一步语义/测试源码评审，优先真实随机数测试语法与整数区间问题，随后上下文对照及中型任务。
 
 2026-10-02：手动源码语法/空测试检查已加入工作台；真实随机数边界修复通过。见 [005 进展](progress/PROGRESS_2026-10-02_005_source-review-and-range-repair.md)。下一步补该入口 HTTP/预算/重载，推进独立语义评审与最小变异探针。
+
+2026-10-02：最小显式变异评测已完成并在真实随机数项目验证；源码审查 HTTP/预算/重载已补。见 [006](progress/PROGRESS_2026-10-02_006_mutation-probes.md)。下一步独立模型语义评审，再扩大变异和上下文收益评测。

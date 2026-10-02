@@ -50,3 +50,9 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 先读 ../progress/PROGRESS_2026-10-02_005_source-review-and-range-repair.md。源码语法/空测试检查可在待审代码页面手动运行，临时目录 AST，不执行项目，不等于类型或语义审查。预算和报告写入事件；自动 Coordinator 尚未接入此步骤。
 
 最新真实随机数成功运行 d50899063f04459daf4bfdd0a806f85f；实现修复草稿 cab4f9e5940e4ca4aa25655738644992。MaxInt64 宽度溢出已修，完整区间、退化区间、非法区间应用探针通过。本轮4次真实调用，失败与拒绝记录保留。下一步源码 HTTP/预算/重载与独立语义评审，再做变异测试、上下文收益和中型任务。132 Python/Go/前端测试通过，未浏览器验收。服务需重启，runner 已构建。
+
+## 2026-10-02 最新：最小变异评测
+
+先读 ../progress/PROGRESS_2026-10-02_006_mutation-probes.md。application/mutation.py + scripts/evaluate_mutations.py 支持显式1..5变异；先基线，再临时副本测试，不改原 Gate。真实随机数 d50899063f04459daf4bfdd0a806f85f：两处业务破坏 killed，种子变化 survived，语法错误 invalid。无新模型调用。
+
+源码报告重载/HTTP/预算已补，取消和浏览器验收仍待。完整133 Python，新增HTTP所在20项通过，前端测试构建通过。下一步独立模型语义评审，仍未实现；随后扩大变异、上下文收益与中型任务。变异暂时脚本入口，非前端功能，也不是自动 AST 变异引擎。

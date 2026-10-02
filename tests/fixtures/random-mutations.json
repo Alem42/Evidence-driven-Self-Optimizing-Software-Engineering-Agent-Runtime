@@ -1,0 +1,6 @@
+[
+  {"name":"equal-bound-zero","path":"internal/randnum/randnum.go","before":"return min, nil","after":"return 0, nil"},
+  {"name":"reverse-range-validation","path":"internal/randnum/randnum.go","before":"if min > max {","after":"if min < max {"},
+  {"name":"changed-seed","path":"internal/randnum/randnum.go","before":"rand.NewPCG(1, 2)","after":"rand.NewPCG(3, 4)"},
+  {"name":"invalid-syntax","path":"internal/randnum/randnum.go","before":"return min, nil","after":"return ???"}
+]
