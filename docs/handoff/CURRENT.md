@@ -60,3 +60,7 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 ## 最新：2026-10-02 模型语义评审
 
 先读 ../progress/PROGRESS_2026-10-02_007_semantic-review.md 和 ../guides/USER_RUNTIME_STRUCTURE_2026-10-02.md。semantic_review.py/ domain/test_review.py / scripts/review_test_semantics.py 首版完成，只是脚本入口。真实完整计划两次引用失败；显式随机冲突负例真实API成功 43749f5060634e0d8596a70342c878c2。不宣称复杂语义评审已稳定。下一步字段引用协议可靠性和前端恢复，再统一角色状态、上下文收益与中型任务。没有自动调用 Reviewer，没有允许 Reviewer 修改或批准项目。
+
+## 最新 2026-10-02：语义引用字段
+
+见 ../progress/PROGRESS_2026-10-02_008_review-field-references.md。evidence_field 已支持 Runtime 抽取原文，旧文本引用兼容。真实复杂随机数计划2次调用仍因验收/用例索引失败，别宣称已稳定，别继续盲重试。下一步扁平 source_id 查表协议，固定真实输入验证后再接前端。相关3+11测试通过；本轮无完整回归重跑。

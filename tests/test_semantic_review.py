@@ -35,3 +35,16 @@ class SemanticReviewTests(unittest.TestCase):
             self.assertEqual(s.run(parent)['data']['project_plan']['status'],'awaiting_review')
             self.assertEqual(s.run(result['review_id'])['model_calls'],1)
             s.close()
+
+    def test_field_reference_resolves_original_and_rejects_conflicts(self):
+        """字段引用提取原文，冲突和越界字段拒绝。 Resolve source text and reject conflicting references."""
+        finding={'severity':'warning','acceptance_index':0,'check_index':None,'case_index':None,
+                 'evidence_field':'acceptance','explanation':'issue','suggestion':'fix'}
+        report={'summary':'review','findings':[finding]}
+        validate_semantic_review(report,SPEC,CHECKS)
+        self.assertEqual(finding['evidence'],SPEC['acceptance'][0])
+        validate_semantic_review(report,SPEC,CHECKS)
+        finding['evidence']='invented'
+        with self.assertRaises(MasaError):validate_semantic_review(report,SPEC,CHECKS)
+        finding.pop('evidence');finding['evidence_field']='expected'
+        with self.assertRaises(MasaError):validate_semantic_review(report,SPEC,CHECKS)
