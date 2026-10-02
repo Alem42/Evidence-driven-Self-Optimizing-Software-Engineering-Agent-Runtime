@@ -55,6 +55,7 @@ def main():
     parser=argparse.ArgumentParser();group=parser.add_mutually_exclusive_group()
     group.add_argument('--run');group.add_argument('--repair-tests',help='explicit new test revision of a failed verification; calls the real API')
     group.add_argument('--plan',help='explicit fresh automatic generation from an existing approved plan; calls the real API')
+    parser.add_argument('--profile',help='explicit fixed local/cloud profile ID; does not change the default')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1];state=root/'.masa'
     runner=Runner(root/'.tools/bin/masa-runner.exe',root/'.tools/go/bin/go.exe')
@@ -97,7 +98,7 @@ def main():
     elif not rid:
         console=Console(state,runner.executable,runner.go_executable,root)
         goal=(root/'docs/scenarios/SCENARIO_SEEDED_RANDOM.md').read_text(encoding='utf-8')
-        ident=console.start_autonomous_project_job({'goal':goal})['job_id']
+        ident=console.start_autonomous_project_job({'goal':goal,'api_profile_id':args.profile})['job_id']
         print('JOB',ident,flush=True);last=None
         while console.job_thread.is_alive():
             job=dict(console.jobs[ident]);progress=(job.get('phase'),job.get('run_id'),job.get('attempt'))

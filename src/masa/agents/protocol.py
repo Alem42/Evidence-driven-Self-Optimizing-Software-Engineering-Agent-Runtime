@@ -50,6 +50,9 @@ def instruction_for(context):
                     '"options":[{"id":"default","label":"suggested choice"}],"allow_text":true}]}. '
                     'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal spec. ')
             instruction = common + ('You are Planner. Explain a small practical architecture matching the goal. '
+                'The top-level JSON MUST be {"summary":"design rationale","module":"example.com/task",'
+                '"entrypoint":"cmd/app/main.go","files":[{"path":"go.mod","purpose":"module"}],"acceptance":["criterion"]}. '
+                'Do not wrap it in spec, project, result or type. Populate files with at least 3 entries. '
                 'Return exactly summary (brief design rationale and tradeoffs), module (e.g. example.com/task), '
                 'entrypoint (exactly cmd/app/main.go), files (3..20 objects with path and purpose), '
                 'acceptance (prefer 4..8 concise, concrete requirements; never exceed 12 for a small task). '

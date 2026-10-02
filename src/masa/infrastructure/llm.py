@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from masa.domain.models import MasaError, canonical
 from masa.agents.protocol import instruction_for, validate_response
+from masa.agents.schemas import response_schema
 
 
 def validate_config(config):
@@ -138,7 +139,7 @@ class ChatProvider:
         if self.config['protocol']=='ollama':
             # 原生端点明确限制上下文/输出并关闭流，仍复用同一角色契约。
             # Native options bound context/output without streaming; role contracts remain shared.
-            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json','stream':False,
+            payload={'model':self.config['model'],'messages':payload['messages'],'format':response_schema(context),'stream':False,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
