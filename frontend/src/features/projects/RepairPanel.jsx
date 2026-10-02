@@ -1,3 +1,4 @@
+import {profileReady,profileLabel} from '../settings/profiles';
 import React,{useState} from 'react';
 import {projectJob,ProjectProgress} from './progress';
 import {api} from '../../api/client';
@@ -19,8 +20,8 @@ export function RepairPanel({detail,profiles,select,onProgress}) {
   return <section className="panel repair-panel"><h3>验证失败 · 下一步修复</h3><p>选择修改实现，或在测试本身无法编译时创建单独的测试修订；每次修订都形成新版本并重新验证。</p>
     {advice&&<p className={cycle?'error':'notice'}>{advice.message}</p>}
     <label>补充说明（可选）<textarea rows={2} maxLength={4000} value={feedback} disabled={busy} onChange={e=>setFeedback(e.target.value)} placeholder="例如：保留现有接口，修复编译错误，不更改测试预期。"/></label>
-    <label>修复使用的 API<select disabled={busy} value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择已配置密钥的 API</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label>
-    {busy&&<ProjectProgress job={job}/>}<div className="action-bar">{formatOnly&&<button className="primary" disabled={busy} onClick={formatTests}>格式化测试文件（无模型调用）</button>}<button className={!cycle?'primary':''} disabled={busy||!advice||cycle||!profiles?.profiles?.some(p=>p.key_configured)} onClick={repair}>{busy?'正在生成草稿…':'修复实现（冻结测试）'}</button><button className={cycle&&!formatOnly?'primary':''} disabled={busy||!profiles?.profiles?.some(p=>p.key_configured)} onClick={reviseTests}>修订测试（新版本）</button></div>
+    <label>修复使用的模型<select disabled={busy} value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择可用模型</option>{profiles?.profiles?.filter(profileReady).map(p=><option key={p.id} value={p.id}>{profileLabel(p)}</option>)}</select></label>
+    {busy&&<ProjectProgress job={job}/>}<div className="action-bar">{formatOnly&&<button className="primary" disabled={busy} onClick={formatTests}>格式化测试文件（无模型调用）</button>}<button className={!cycle?'primary':''} disabled={busy||!advice||cycle||!profiles?.profiles?.some(profileReady)} onClick={repair}>{busy?'正在生成草稿…':'修复实现（冻结测试）'}</button><button className={cycle&&!formatOnly?'primary':''} disabled={busy||!profiles?.profiles?.some(profileReady)} onClick={reviseTests}>修订测试（新版本）</button></div>
     {error&&<p className="error" role="alert">{error}</p>}
   </section>;
 }

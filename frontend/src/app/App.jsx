@@ -1,3 +1,4 @@
+import {profileReady,profileLabel} from '../features/settings/profiles';
 import React,{useState} from 'react';
 import {useWorkbench} from './useWorkbench';
 import {SettingsDialog} from '../features/settings/SettingsDialog';
@@ -12,7 +13,7 @@ import {api} from '../api/client';
 export default function App(){
   const w=useWorkbench();
   const [goal,setGoal]=useState(''),[model,setModel]=useState(''),[settings,setSettings]=useState(false),[starting,setStarting]=useState(false),[automatic,setAutomatic]=useState(false),[search,setSearch]=useState('');
-  const ready=w.profiles?.profiles?.filter(p=>p.key_configured)||[];
+  const ready=w.profiles?.profiles?.filter(profileReady)||[];
   const profile=ready.find(p=>p.id===model)?.id||ready.find(p=>p.id===w.profiles?.active_id)?.id||ready[0]?.id||'';
   const profiles=w.profiles?{...w.profiles,active_id:profile}:null;
   const newProject=!w.selected&&!w.working;
@@ -30,7 +31,7 @@ export default function App(){
       {!w.working&&w.boot?.interrupted_jobs?.length>0&&<details className="recovery-list"><summary>{w.boot.interrupted_jobs.length} 个任务可检查恢复</summary>{w.boot.interrupted_jobs.map(j=><div className="action-bar" key={j.job_id}><code>{j.job_id.slice(0,8)}</code><span>{j.phase}</span><button onClick={()=>resume(j.job_id)}>恢复</button>{j.run_id&&<button onClick={()=>w.select(j.run_id)}>查看</button>}</div>)}</details>}
       {newProject?<div className="new-project"><span className="eyebrow">START A PROJECT</span><h2>描述需求，得到可验证的代码。</h2><p>目前支持 Go 标准库命令行项目。写清输入、输出和错误处理，系统会规划、生成并执行真实检查。</p>
         <form onSubmit={start}><label>项目需求<textarea rows={9} required maxLength={16000} value={goal} onChange={e=>setGoal(e.target.value)} placeholder="例如：生成一个随机整数 CLI，支持范围、数量和可选种子；无效参数返回错误，不输出结果。"/></label>
-          <div className="field-pair"><label>使用模型<select required value={profile} onChange={e=>setModel(e.target.value)}><option value="">请选择已配置的模型</option>{ready.map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><label>执行方式<select value={automatic?'automatic':'review'} onChange={e=>setAutomatic(e.target.value==='automatic')}><option value="review">逐步确认方案与代码</option><option value="automatic">自动生成、验证与有界修复</option></select></label></div>
+          <div className="field-pair"><label>使用模型<select required value={profile} onChange={e=>setModel(e.target.value)}><option value="">请选择已配置的模型</option>{ready.map(p=><option key={p.id} value={p.id}>{profileLabel(p)}</option>)}</select></label><label>执行方式<select value={automatic?'automatic':'review'} onChange={e=>setAutomatic(e.target.value==='automatic')}><option value="review">逐步确认方案与代码</option><option value="automatic">自动生成、验证与有界修复</option></select></label></div>
           <div className="start-footer"><span className="hint">{automatic?'自动采用有效草稿，真实检查失败最多修复四轮。':'在发布和执行前，分别确认方案与代码。'} 会调用配置的 API。</span><button className="primary" disabled={starting||!ready.length||!w.boot?.runner_ready||!goal.trim()}>{starting?'正在启动…':'开始项目 →'}</button></div>
           {!ready.length&&<p className="notice">先添加模型配置。<button type="button" onClick={()=>setSettings(true)}>配置 API</button></p>}{w.boot&&!w.boot.runner_ready&&<p className="error">Go runner 尚未就绪，请先按环境指南构建。</p>}
         </form></div>:<div className="project-layout"><div className="project-content">{w.detail&&w.view?<ProjectDetails key={w.selected} detail={w.detail} view={w.view} profiles={profiles} select={w.select} onProgress={w.track} working={w.working}/>:w.working?<ProjectProgress job={w.job}/>:<div className="empty-document" role="status">正在读取保存的项目…</div>}</div>{w.detail&&w.view&&<RuntimeRail detail={w.detail} view={w.view} select={w.select}/>}</div>}

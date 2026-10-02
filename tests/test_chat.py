@@ -22,6 +22,7 @@ class ChatTests(unittest.TestCase):
         self.status = 200
         self.finish = "stop"
         self.requests = []
+        self.request_metadata = []
         self.envelope = None
         self.dynamic = False
         outer = self
@@ -35,6 +36,7 @@ class ChatTests(unittest.TestCase):
                     self.rfile.read(int(self.headers["Content-Length"]))
                 )
                 outer.requests.append(payload)
+                outer.request_metadata.append((self.path, self.headers.get('Authorization')))
                 action = outer.action
                 context = json.loads(payload["messages"][1]["content"])
                 if outer.dynamic and context.get("tool_results"):
@@ -179,6 +181,7 @@ class ChatTests(unittest.TestCase):
         self.assertFalse(self.requests[0]['stream']);self.assertEqual(self.requests[0]['format'],'json')
         self.assertEqual(self.requests[0]['options']['num_ctx'],8192)
         self.assertFalse(self.requests[0]['think'])
+        self.assertEqual(self.request_metadata, [('/api/chat', None)])
 
     def test_received_invalid_json_has_safe_diagnostic_without_retry(self):
         """已收坏 JSON 保留用量，只报告位置，不回显内容或重试。 Keep usage and safe locations without exposing content or retrying."""

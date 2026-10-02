@@ -1,3 +1,4 @@
+import {profileReady,profileLabel} from '../settings/profiles';
 import React, {useEffect,useState} from 'react';
 import {api} from '../../api/client';
 import {projectJob,ProjectProgress} from './progress';
@@ -20,7 +21,7 @@ export function ProjectPlanReview({detail,profiles,select,onProgress,working}) {
   async function approve(andGenerate=false){setBusy(true);setError('');try{await api('/runs/'+detail.run.id+'/approve-project',{spec,checks,spec_ref:plan.spec_ref,checks_ref:plan.checks_ref});setSaved(true);if(andGenerate){const r=await projectJob('/runs/'+detail.run.id+'/generate-project',{api_profile_id:profile||profiles?.active_id},j=>{setJob(j);onProgress?.(j);});select(r.id);}}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <section className="panel code-review">
     {(busy||(detail.role_active&&plan.status==='planning'))&&<ProjectProgress job={job||{stage:detail.events.filter(e=>e.type==='model_requested').at(-1)?.payload.step_id,started:detail.run.data.created_at}}/>}
-    {(plan.status==='approved'||saved)&&plan.review_mode!=='automatic'&&<div><label>生成代码使用的 API<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(p=>p.key_configured).map(p=><option key={p.id} value={p.id}>{p.name||p.model}</option>)}</select></label><button className="primary" disabled={busy||working||!profiles?.profiles?.some(p=>p.key_configured)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；生成后审核代码，再自动验证。</p></div>}
+    {(plan.status==='approved'||saved)&&plan.review_mode!=='automatic'&&<div><label>生成代码使用的模型<select value={profile||profiles?.active_id||''} onChange={e=>setProfile(e.target.value)}><option value="">选择配置</option>{profiles?.profiles?.filter(profileReady).map(p=><option key={p.id} value={p.id}>{profileLabel(p)}</option>)}</select></label><button className="primary" disabled={busy||working||!profiles?.profiles?.some(profileReady)} onClick={generate}>{busy?'Developer 正在生成文件…':'根据已确认方案生成代码'}</button><p className="hint">一次真实模型调用；生成后审核代码，再自动验证。</p></div>}
     {plan.coverage_warning&&<p className="notice">{plan.coverage_warning}</p>}
     {plan.test_review?.findings?.length>0&&<div className="notice"><strong>独立测试计划评审</strong><ul>{plan.test_review.findings.map((f,i)=><li key={i}>{f.severity==='blocking'?'需修正':'建议检查'}：{f.message}</li>)}</ul><p>规则评审发现潜在问题；它不能证明测试正确或代码通过。</p></div>}
     {plan.status==='failed'&&plan.spec_ref&&<button disabled={busy} onClick={retry}>保留架构，仅重试验证方案</button>}
