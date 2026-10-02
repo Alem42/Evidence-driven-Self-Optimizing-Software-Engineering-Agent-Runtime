@@ -17,6 +17,24 @@ class Crash(BaseException):
 
 
 class RoleRecoveryTests(unittest.TestCase):
+    def test_frozen_snapshot_survives_restart_and_rejects_changed_metadata(self):
+        """快照随首次意图落盘，新角色不能暗改配置。 Persist snapshots with intent and reject silent changes for new roles."""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);store=Store(root);provider=CompositeProvider();ids=[]
+            provider.snapshot={'version':1,'mode':'fixed','profile_id':'test','config':{'model':'original'}}
+            with patch.object(ProjectPlanning,'update',side_effect=Crash):
+                with self.assertRaises(Crash):ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',ids.append)
+            rid=ids[0];ref=store.run(rid)['data']['model_snapshot_ref']
+            store.close();store=Store(root)
+            self.assertEqual(store.read(ref),provider.snapshot)
+            provider.snapshot={**provider.snapshot,'config':{'model':'changed'}}
+            with patch.object(provider,'respond') as call:
+                with self.assertRaisesRegex(MasaError,'configuration changed'):
+                    RoleRuntime(store).call(rid,provider,'project_tester',{})
+                call.assert_not_called()
+            self.assertEqual(store.run(rid)['model_calls'],1)
+            store.close()
+
     def test_automatic_job_reopens_and_continues_after_plan_approval(self):
         """后台任务重启后从已批准规划继续，不重复规划。 Resume the full automatic job from an approved plan checkpoint."""
         from masa.application.console import Console

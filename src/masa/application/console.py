@@ -349,10 +349,11 @@ class Console:
         """恢复中断的规划或生成，复用已落盘角色结果。 Resume interrupted planning/generation from persisted role outputs."""
         with self.lock:
             self._available()
-            provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
                 run=store.run(rid);data=run['data'];plan=data.get('project_plan',{})
+                snapshot=store.read(data['model_snapshot_ref']) if data.get('model_snapshot_ref') else None
+                provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
                 if plan.get('provider')!=provider.profile:
                     raise MasaError('select the original API profile to resume')
                 runner=Runner(self.runner_path,self.go_path)
@@ -411,7 +412,8 @@ class Console:
                             raise MasaError('answer the pending clarification before resuming')
                     finally:store.close()
                 body=previous['request']
-            provider=self.settings.provider(body.get('api_profile_id'))
+            snapshot=previous.get('model_snapshot') if resume_job else None
+            provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
             if resume_job and previous.get('provider',provider.profile)!=provider.profile:
                 raise MasaError('select the original API profile to resume')
             goal=body.get('goal')
@@ -420,7 +422,7 @@ class Console:
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
-                              'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,
+                              'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,'model_snapshot':getattr(provider,'snapshot',None),
                               'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
             from masa.application.coordinator import WorkflowCoordinator
             def work():

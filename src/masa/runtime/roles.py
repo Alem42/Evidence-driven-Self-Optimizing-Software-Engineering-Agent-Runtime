@@ -58,11 +58,20 @@ class RoleRuntime:
             attempt_no=previous['attempt_no']+1 if previous else 1
             if not previous and any(e['type']=='model_requested'  and e['payload'].get('step_id')==purpose for e in self.store.events(rid)):
                 raise MasaError('legacy role request has no durable checkpoint; create an explicit revision')
+            # 首次角色调用记录无密钥配置，沿用现有 artifact 与事务。
+            # Persist secret-free configuration using existing artifacts and transaction boundaries.
+            snapshot=getattr(provider,'snapshot',None)
+            snapshot_ref=self.store.put(snapshot) if snapshot is not None else None
+            frozen=run['data'].get('model_snapshot_ref')
+            if frozen and frozen!=snapshot_ref:
+                raise MasaError('task model configuration changed; restore its snapshot')
             # 意图、预算和开始事件原子提交，崩溃不能绕过预算。
             # Commit intent and budget together before any network request.
             with self.store.transaction():
                 if run['model_calls'] >= run['data']['budget']['model_calls']:
                     raise MasaError('model_call_budget_exhausted')
+                if snapshot_ref and not frozen:
+                    self.store.save_metadata(rid,'model_snapshot_ref',snapshot_ref,'model_configuration_frozen')
                 self.store.db.execute('UPDATE runs SET model_calls=model_calls+1 WHERE id=?',(rid,))
                 self.store.db.execute('INSERT INTO role_invocations VALUES(?,?,?,?,?,?,?,?,?,?)',
                     (rid,purpose,invocation_id,attempt_no,context_ref,route_ref,'running',None,time.time(),None))

@@ -9,6 +9,33 @@ from masa.agents.protocol import validate_response
 
 
 class ModelProfileTests(unittest.TestCase):
+    def test_snapshot_restores_options_without_moving_credentials(self):
+        """冻结参数可恢复，删除/禁用/换地址不能带走凭据。 Restore frozen options without moving credentials."""
+        with tempfile.TemporaryDirectory() as tmp:
+            settings=Settings(Path(tmp))
+            result=settings.save({'new':True,'base_url':'https://example.com/v1','model':'old','api_key':'synthetic'})
+            ident=result['active_id'];original=settings.provider(ident);snapshot=original.snapshot
+            self.assertNotIn('api_key',snapshot['config'])
+            settings.save({'id':ident,'model':'new','level':5,'max_output_tokens':4096})
+            restored=settings.provider(snapshot=snapshot,expected=original.profile)
+            self.assertEqual(restored.config['model'],'old')
+            self.assertEqual(restored.config['level'],2)
+            self.assertEqual(restored.key,'synthetic')
+            settings.save({'id':ident,'base_url':'https://other.example/v1'})
+            with self.assertRaisesRegex(MasaError,'destination unavailable'):settings.provider(snapshot=snapshot)
+
+    def test_snapshot_respects_disable_delete_and_schema(self):
+        """恢复不绕过显式禁用、删除或版本校验。 Recovery respects explicit disable/delete and schema checks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            settings=Settings(Path(tmp))
+            result=settings.save({'new':True,'model_type':'local','base_url':'http://localhost:11434','model':'m'})
+            ident=result['active_id'];snapshot=settings.provider(ident).snapshot
+            settings.save({'id':ident,'enabled':False})
+            with self.assertRaises(MasaError):settings.provider(snapshot=snapshot)
+            settings.save({'action':'delete','id':ident})
+            with self.assertRaises(MasaError):settings.provider(snapshot=snapshot)
+            with self.assertRaises(MasaError):settings.provider(snapshot={'version':2})
+
     def test_legacy_cloud_profile_identity_and_secret_requirement(self):
         provider=ChatProvider({'base_url':'https://example.com/v1','model':'m'},'synthetic')
         self.assertEqual(provider.config['model_type'],'cloud')

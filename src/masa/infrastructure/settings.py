@@ -157,9 +157,26 @@ class Settings:
             )
             return self.public()
 
-    def provider(self, ident=None, expected=None):
+    def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""
         with self.lock:
+            if snapshot is not None:
+                # 配置来自任务快照；凭据仍必须绑定同一个存活的目的地址。
+                # Restore frozen options, but obtain credentials only from the same live destination.
+                if (not isinstance(snapshot,dict) or type(snapshot.get('version')) is not int
+                    or snapshot['version']!=1 or snapshot.get('mode')!='fixed'
+                    or not isinstance(snapshot.get('profile_id'),str) or not isinstance(snapshot.get('config'),dict)):
+                    raise MasaError('unsupported model snapshot')
+                ident=snapshot.get('profile_id')
+                config=validate_config(snapshot.get('config',{}))
+                current=self.profiles.get(ident)
+                if not current or not current['enabled'] or current['base_url']!=config['base_url'] or current['model_type']!=config['model_type']:
+                    raise MasaError('snapshot destination unavailable or disabled; restore the original profile')
+                provider=ChatProvider(config,self.keys.get(ident,''))
+                if expected is not None and provider.profile!=expected:
+                    raise MasaError('snapshot provider identity mismatch')
+                provider.snapshot=snapshot
+                return provider
             candidates = (
                 [ident or self.active_id] if expected is None else list(self.profiles)
             )
@@ -168,6 +185,7 @@ class Settings:
                     continue
                 provider = ChatProvider(self.profiles[ident], self.keys.get(ident,''))
                 if expected is None or provider.profile == expected:
+                    provider.snapshot={'version':1,'mode':'fixed','profile_id':ident,'config':dict(provider.config)}
                     return provider
         raise MasaError(
             "matching API configuration/key unavailable; configure it in API settings"
