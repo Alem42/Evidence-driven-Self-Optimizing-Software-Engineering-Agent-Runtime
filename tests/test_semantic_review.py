@@ -48,3 +48,27 @@ class SemanticReviewTests(unittest.TestCase):
         with self.assertRaises(MasaError):validate_semantic_review(report,SPEC,CHECKS)
         finding.pop('evidence');finding['evidence_field']='expected'
         with self.assertRaises(MasaError):validate_semantic_review(report,SPEC,CHECKS)
+
+    def test_source_ids_and_business_failure_are_persisted(self):
+        """来源解析幂等，失败状态持久化且不重放。 Resolve IDs idempotently and persist terminal failures."""
+        from masa.domain.test_review import review_sources
+        finding={'severity':'warning','source_id':'acceptance:0','explanation':'issue','suggestion':'fix'}
+        report={'summary':'review','findings':[finding]}
+        validate_semantic_review(report,SPEC,CHECKS);validate_semantic_review(report,SPEC,CHECKS)
+        self.assertEqual(finding['evidence'],review_sources(SPEC,CHECKS)['acceptance:0'])
+        with tempfile.TemporaryDirectory() as temp:
+            s=Store(Path(temp));provider=PlannerProvider();parent=ProjectPlanning(s,FakeExecutor()).generate(provider,'Build CLI');ids=[]
+            with patch.object(provider,'respond',side_effect=MasaError('invalid response')):
+                with self.assertRaisesRegex(MasaError,'semantic review failed'):
+                    review_test_semantics(s,FakeExecutor(),provider,parent,SPEC,CHECKS,on_created=ids.append)
+            rid=ids[0];self.assertEqual(s.run(rid)['status'],'failed')
+            self.assertEqual(s.run(rid)['data']['semantic_review']['status'],'failed')
+            self.assertTrue(any(e['type']=='semantic_review_failed' for e in s.events(rid)))
+            s.close();s=Store(Path(temp))
+            with patch.object(provider,'respond') as call:
+                with self.assertRaisesRegex(MasaError,'explicit new review'):
+                    review_test_semantics(s,FakeExecutor(),provider,parent,SPEC,CHECKS,resume_id=rid)
+                call.assert_not_called()
+            s.close()
+        finding['source_id']='unknown'
+        with self.assertRaises(MasaError):validate_semantic_review(report,SPEC,CHECKS)

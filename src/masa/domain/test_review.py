@@ -3,12 +3,34 @@ from masa.domain.models import MasaError
 from masa.domain.proposals import text
 
 
+def review_sources(spec, checks):
+    """分配确定性引用标识，模型无需计算数组索引。 Assign deterministic source IDs instead of model-computed indices."""
+    sources={f'acceptance:{i}':value for i,value in enumerate(spec['acceptance'])}
+    for ci,check in enumerate(checks):
+        sources[f'check:{ci}:purpose']=check['purpose']
+        for ti,case in enumerate(check.get('cases',[])):
+            for field,value in case.items():
+                if value:sources[f'case:{ci}:{ti}:{field}']=value
+    return sources
+
+
 def validate_semantic_review(value, spec, checks):
     """要求意见引用输入事实，不能把无出处意见当作证据。 Require findings to cite actual supplied text."""
     if not isinstance(value,dict) or set(value)!={'summary','findings'}:raise MasaError('invalid semantic review fields')
     text(value['summary'],2000)
     if not isinstance(value['findings'],list) or len(value['findings'])>12:raise MasaError('invalid semantic review findings')
     for f in value['findings']:
+        if isinstance(f,dict) and 'source_id' in f:
+            required={'severity','source_id','explanation','suggestion'}
+            if set(f) not in (required,required|{'evidence'}):raise MasaError('invalid source review finding')
+            if f['severity'] not in {'warning','blocking'} or not isinstance(f['source_id'],str):raise MasaError('invalid source review fields')
+            sources=review_sources(spec,checks)
+            if f['source_id'] not in sources:raise MasaError('unknown review source id')
+            resolved=sources[f['source_id']]
+            if 'evidence' in f and f['evidence']!=resolved:raise MasaError('resolved review evidence mismatch')
+            for field in ('explanation','suggestion'):text(f[field],2000)
+            f['evidence']=resolved
+            continue
         common={'severity','acceptance_index','check_index','case_index','explanation','suggestion'}
         if not isinstance(f,dict) or set(f) not in (common|{'evidence'},common|{'evidence_field'},common|{'evidence_field','evidence'}):
             raise MasaError('invalid semantic review finding')
