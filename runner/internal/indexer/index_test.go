@@ -64,3 +64,15 @@ func TestPartialAndLimits(t *testing.T) {
 		t.Fatal("cancel ignored")
 	}
 }
+
+// TestEmptyTestFinding 验证只有确切空测试被标记。 TestEmptyTestFinding checks exact empty test detection.
+func TestEmptyTestFinding(t *testing.T) {
+	empty := Parse("demo_test.go", []byte("package demo\nimport \"testing\"\nfunc TestEmpty(t *testing.T) {}\nfunc helper() {}\n"))
+	if len(empty.TestFindings) != 1 || empty.TestFindings[0].Code != "empty_test" || empty.TestFindings[0].Line != 3 {
+		t.Fatalf("unexpected findings: %+v", empty.TestFindings)
+	}
+	nonempty := Parse("demo_test.go", []byte("package demo\nimport \"testing\"\nfunc TestReal(t *testing.T) { t.Fatal(\"failure\") }\n"))
+	if len(nonempty.TestFindings) != 0 {
+		t.Fatalf("nonempty test flagged: %+v", nonempty.TestFindings)
+	}
+}

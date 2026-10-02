@@ -142,6 +142,8 @@ def make_server(console, port=8765):
                             result = console.start_project_job({**body,'resume_project':True},rid)
                         elif action == 'answer-clarification':
                             result = console.answer_clarification(rid,body)
+                        elif action == 'review-project-sources':
+                            result = console.review_project_sources(rid,body)
                         elif action == 'run-application':
                             result = console.start_application(rid,body)
                         elif action == 'stop-application':

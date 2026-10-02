@@ -446,6 +446,15 @@ class Console:
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
         return job
 
+    def review_project_sources(self, rid, body):
+        """解析可见草稿，结果只用于审查而不替代 Gate。 Parse the visible draft without replacing Gate verification."""
+        from masa.application.source_review import review_sources
+        with self.lock:
+            self._available()
+            store=Store(self.root)
+            try:return review_sources(store,Runner(self.runner_path,self.go_path),rid,body)
+            finally:store.close()
+
     def answer_clarification(self, rid, body):
         """先持久回答，再由现有后台入口继续；自动模式保留原任务。 Save answers before resuming the existing workflow."""
         with self.lock:

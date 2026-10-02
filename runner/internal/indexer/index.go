@@ -41,15 +41,23 @@ type Call struct {
 	Resolution string `json:"resolution"`
 }
 type File struct {
-	Path           string   `json:"path"`
-	Hash           string   `json:"hash"`
-	Package        string   `json:"package"`
-	Imports        []Import `json:"imports"`
-	Symbols        []Symbol `json:"symbols"`
-	Calls          []Call   `json:"calls"`
-	Diagnostics    []string `json:"diagnostics"`
-	BuildInclusion string   `json:"build_inclusion"`
-	Generated      bool     `json:"generated"`
+	Path           string        `json:"path"`
+	Hash           string        `json:"hash"`
+	Package        string        `json:"package"`
+	Imports        []Import      `json:"imports"`
+	Symbols        []Symbol      `json:"symbols"`
+	Calls          []Call        `json:"calls"`
+	Diagnostics    []string      `json:"diagnostics"`
+	BuildInclusion string        `json:"build_inclusion"`
+	Generated      bool          `json:"generated"`
+	TestFindings   []TestFinding `json:"test_findings"`
+}
+
+// TestFinding 保存测试结构问题，不把语法检查当作覆盖证明。 TestFinding records structural issues, not coverage proof.
+type TestFinding struct {
+	Code    string `json:"code"`
+	Line    int    `json:"line"`
+	Message string `json:"message"`
 }
 type Index struct {
 	Schema      int      `json:"schema"`
@@ -109,6 +117,11 @@ func Parse(path string, raw []byte) File {
 				kind = "method"
 			}
 			add(node, node.Name.Name, kind, receiver, text(set, node.Type))
+			// 仅检测确切空测试函数；不根据函数名推断断言充分性。
+			// Detect exactly empty test functions without guessing assertion sufficiency.
+			if strings.HasSuffix(path, "_test.go") && strings.HasPrefix(node.Name.Name, "Test") && node.Body != nil && len(node.Body.List) == 0 {
+				result.TestFindings = append(result.TestFindings, TestFinding{"empty_test", set.Position(node.Pos()).Line, "test function has an empty body"})
+			}
 		case *ast.GenDecl:
 			for _, spec := range node.Specs {
 				switch value := spec.(type) {
