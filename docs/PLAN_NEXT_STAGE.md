@@ -35,3 +35,5 @@
 2026-10-02 补充：澄清 HTTP 流程和回答保存后重启恢复已验证，见 [003](progress/PROGRESS_2026-10-02_003_clarification-recovery.md)。下一增量优先 Coordinator 与独立测试评审；浏览器验收仍待完成。
 
 2026-10-02：Coordinator 自动执行循环已提取；独立测试计划规则首版已接入。详见 [解释指南](guides/USER_COORDINATOR_AND_TEST_REVIEW.md) 与 [004 进展](progress/PROGRESS_2026-10-02_004_coordinator-test-review.md)。下一步语义/测试源码评审，优先真实随机数测试语法与整数区间问题，随后上下文对照及中型任务。
+
+2026-10-02：手动源码语法/空测试检查已加入工作台；真实随机数边界修复通过。见 [005 进展](progress/PROGRESS_2026-10-02_005_source-review-and-range-repair.md)。下一步补该入口 HTTP/预算/重载，推进独立语义评审与最小变异探针。

@@ -44,3 +44,9 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 先读 ../progress/PROGRESS_2026-10-02_004_coordinator-test-review.md 和 ../guides/USER_COORDINATOR_AND_TEST_REVIEW.md。自动循环已全部移入 application/coordinator.py，不再扩张 Console 工作线程内部业务。分类在 check_policy.py（Console 保留兼容导入）。独立测试计划规则已接入规划/批准，前端显示。
 
 131 Python、前端 4 项与构建通过；后续局部 8 项通过。真实新增随机数生成与测试修订均失败，最新 be93db921bb342f489c545341ddec58f：main_test.go:110 语法错误，以及极大整数区间 Int63n panic。保留证据，下轮不能把该记录当成功。下一步独立语义/源码审查与上述边界问题，再推进上下文对照和中型任务。模型 reviewer 尚未实现，当前报告只是规则审查。
+
+## 2026-10-02 最新：源码入口与随机数修复成功
+
+先读 ../progress/PROGRESS_2026-10-02_005_source-review-and-range-repair.md。源码语法/空测试检查可在待审代码页面手动运行，临时目录 AST，不执行项目，不等于类型或语义审查。预算和报告写入事件；自动 Coordinator 尚未接入此步骤。
+
+最新真实随机数成功运行 d50899063f04459daf4bfdd0a806f85f；实现修复草稿 cab4f9e5940e4ca4aa25655738644992。MaxInt64 宽度溢出已修，完整区间、退化区间、非法区间应用探针通过。本轮4次真实调用，失败与拒绝记录保留。下一步源码 HTTP/预算/重载与独立语义评审，再做变异测试、上下文收益和中型任务。132 Python/Go/前端测试通过，未浏览器验收。服务需重启，runner 已构建。
