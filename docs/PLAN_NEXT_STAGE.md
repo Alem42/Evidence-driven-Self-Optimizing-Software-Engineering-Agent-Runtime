@@ -31,3 +31,5 @@
 实施契约见 [Runtime 主动澄清](PLAN_RUNTIME_CLARIFICATION.md)。先统一角色调用标识，再支持 Planner 等待用户回答；原独立测试评审、上下文收益评估和中型任务保持推进。检查点规则已拆到 application/workflow.py，完整 Coordinator 待继续提取。
 
 2026-10-02：Planner 单轮澄清首版已实现，下一步 HTTP/中断/浏览器验收，再推进 Tester 澄清与独立测试评审，随后上下文收益评估和中型任务。见 [最新进展](progress/PROGRESS_2026-10-02_002_planner-clarification.md)。
+
+2026-10-02 补充：澄清 HTTP 流程和回答保存后重启恢复已验证，见 [003](progress/PROGRESS_2026-10-02_003_clarification-recovery.md)。下一增量优先 Coordinator 与独立测试评审；浏览器验收仍待完成。

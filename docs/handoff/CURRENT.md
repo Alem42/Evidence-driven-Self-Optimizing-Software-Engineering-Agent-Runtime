@@ -34,3 +34,7 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 最新进展 ../progress/PROGRESS_2026-10-02_002_planner-clarification.md。支持 Planner 单轮结构化问题、工作台选项/文本回答、持久等待、回答后独立调用继续；自动模式暂停并继续原任务。真实运行 3c893f93cafe4d46a94c09921455a3bd 经脚本回答和 DB 重开后进入 awaiting_review，共 3 次调用。125 Python 回归通过，前端测试/构建通过；未浏览器验收。
 
 下一步先补 HTTP 和回答后启动前中断测试、浏览器验收；再做 Tester 澄清和独立测试评审，继续上下文收益评估与中型仓库任务。目前只支持 Planner 一轮，不支持中途变更已批准需求后的下游失效。重启服务加载新版。首次真实失败记录保留，不宣称此次执行了新 Go 项目。
+
+## 2026-10-02 澄清恢复补充
+
+最新见 ../progress/PROGRESS_2026-10-02_003_clarification-recovery.md。回答保存后启动前中断已补齐：start_project_job 的恢复入口会查持久 auto job 并回到原自动任务。未回答不能恢复但保留等待。HTTP 全流程和重复回答验证已补，使用确定性 provider；本轮没有新付费测试。下一步 Coordinator/独立测试评审，再推进上下文收益与中型任务。不要重复开发本轮恢复分支。

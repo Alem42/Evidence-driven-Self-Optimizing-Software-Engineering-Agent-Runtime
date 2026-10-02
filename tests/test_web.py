@@ -61,6 +61,32 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertIn('cmd/app/main.go',artifact['artifact']['files'])
 
+    def test_http_clarification_wait_answer_and_duplicate(self):
+        """HTTP 问答保留自动任务，重复提交不增加调用。 HTTP answers preserve the job and duplicate answers do not call models."""
+        from test_clarification import AskingProvider, ANSWER
+        with patch.object(self.console.settings,'provider',return_value=AskingProvider()),patch('masa.application.console.Runner',return_value=FakeExecutor()):
+            status,started=self.request('/api/projects/plan',{'goal':'Build CLI','auto_verify':True})
+            self.assertEqual(status,200)
+            self.console.job_thread.join(10)
+            _,job=self.request('/api/jobs/'+started['job_id'])
+            self.assertEqual(job['status'],'waiting_for_input')
+            rid=job['run_id'];_,detail=self.request('/api/runs/'+rid)
+            plan=detail['run']['data']['project_plan']
+            path='/api/runs/'+rid+'/answer-clarification'
+            status,_=self.request(path,{'question_id':'stale','answers':ANSWER})
+            self.assertNotEqual(status,200)
+            body={'question_id':plan['clarification_id'],'answers':ANSWER}
+            status,resumed=self.request(path,body)
+            self.assertEqual(status,200,resumed)
+            self.assertEqual(resumed['job_id'],started['job_id'])
+            self.console.job_thread.join(10)
+            _,job=self.request('/api/jobs/'+started['job_id'])
+            self.assertEqual(job['status'],'completed',job)
+            status,_=self.request(path,body)
+            self.assertEqual(status,200)
+            _,detail=self.request('/api/runs/'+rid)
+            self.assertEqual(detail['run']['model_calls'],3)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

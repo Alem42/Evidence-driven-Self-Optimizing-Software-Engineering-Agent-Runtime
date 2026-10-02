@@ -387,6 +387,12 @@ class Console:
 
     def start_project_job(self, body, rid=None):
         """快速返回任务标识，让浏览器轮询真实阶段。 Return a job ID immediately for polling actual stages."""
+        # 回答落盘后启动前崩溃，通用恢复入口必须保留原自动流程。
+        # Preserve the automatic workflow when recovery follows a saved answer.
+        if body.get('resume_project') and rid:
+            for ident,job in self.jobs.items():
+                if job.get('mode')=='auto' and job.get('run_id')==rid and job.get('status') in {'waiting_for_input','interrupted'}:
+                    return self.start_autonomous_project_job({},resume_job=ident)
         with self.lock:
             self._available()
             ident=uuid.uuid4().hex
@@ -461,6 +467,13 @@ class Console:
                     raise MasaError('only interrupted automatic workflows can resume')
                 if previous.get('phase') in {'test_format','planning_retry'}:
                     raise MasaError('interrupted revision requires inspection of its saved draft; automatic replay is disabled')
+                if previous.get('run_id'):
+                    store=Store(self.root)
+                    try:
+                        plan=store.run(previous['run_id'])['data'].get('project_plan',{})
+                        if plan.get('status')=='waiting_for_input':
+                            raise MasaError('answer the pending clarification before resuming')
+                    finally:store.close()
                 body=previous['request']
             provider=self.settings.provider(body.get('api_profile_id'))
             if resume_job and previous.get('provider',provider.profile)!=provider.profile:

@@ -47,3 +47,34 @@ class ClarificationTests(unittest.TestCase):
                 c.job_thread.join(10)
                 self.assertEqual(c.project_job(ident)['status'],'completed',c.project_job(ident))
             c.close()
+
+    def test_saved_answer_recovers_original_auto_job_after_restart(self):
+        """回答已保存但线程未启动时，重启仍继续原自动任务。 Resume the original job after the answer/start crash gap."""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);c=Console(root,'unused','unused',Path.cwd());c.settings.provider=lambda *_:AskingProvider()
+            with patch('masa.application.console.Runner',lambda *args:FakeExecutor()):
+                ident=c.start_autonomous_project_job({'goal':'Build CLI'})['job_id'];c.job_thread.join(10)
+                rid=c.project_job(ident)['run_id']
+                with self.assertRaisesRegex(MasaError,'answer the pending'):
+                    c.start_autonomous_project_job({},resume_job=ident)
+                self.assertEqual(c.project_job(ident)['status'],'waiting_for_input')
+                s=Store(root);p=ProjectPlanning(s,FakeExecutor());plan=s.run(rid)['data']['project_plan']
+                p.answer(rid,plan['clarification_id'],ANSWER);s.close();c.close()
+                c=Console(root,'unused','unused',Path.cwd());c.settings.provider=lambda *_:AskingProvider()
+                result=c.start_project_job({'resume_project':True},rid)
+                self.assertEqual(result['job_id'],ident)
+                c.job_thread.join(10)
+                self.assertEqual(c.project_job(ident)['status'],'completed')
+                self.assertEqual(c.detail(rid)['run']['model_calls'],3)
+                c.close()
+
+    def test_invalid_answers_leave_question_pending(self):
+        """非法或不完整回答不得消费待答问题。 Invalid answers must not consume pending questions."""
+        with tempfile.TemporaryDirectory() as temp:
+            s=Store(Path(temp));p=ProjectPlanning(s,FakeExecutor());rid=p.generate(AskingProvider(),'Build CLI')
+            plan=s.run(rid)['data']['project_plan']
+            for answers in ({},{'range':{'option_id':'unknown'}},{'range':{'text':' '}},{'range':{'option_id':'small','text':'both'}}):
+                with self.subTest(answers=answers),self.assertRaises(MasaError):p.answer(rid,plan['clarification_id'],answers)
+                self.assertEqual(s.run(rid)['data']['project_plan']['status'],'waiting_for_input')
+                self.assertEqual(s.run(rid)['model_calls'],1)
+            s.close()
