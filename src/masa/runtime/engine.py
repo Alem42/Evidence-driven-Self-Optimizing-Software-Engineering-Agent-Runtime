@@ -124,12 +124,6 @@ class Runtime:
                             for name, content in approved['files'].items()}
                 if self.store.read(run['data']['manifest_ref']) != expected:
                     raise MasaError('project snapshot does not match approved files')
-            if run['data'].get('semantic_review'):
-                raise MasaError('semantic review is advisory; tool execution is not authorized')
-            if run['data'].get('project_plan'):
-                # 规划通过不等于代码存在，CLI 也不能执行占位项目。
-                # Approved planning is not generated code; block placeholder execution through CLI too.
-                raise MasaError('project plan only: code generation is not implemented yet')
             if generation:
                 # 人工批准与对应补丁缺一不可，CLI 恢复也不能绕过审核。
                 # Both human approval and its exact patch are mandatory, including CLI resumes.

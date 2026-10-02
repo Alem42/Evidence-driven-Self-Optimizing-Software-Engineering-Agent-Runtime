@@ -168,6 +168,16 @@ class ChatTests(unittest.TestCase):
             with self.assertRaises(MasaError):
                 self.provider.respond(self.context)
 
+    def test_received_invalid_json_has_safe_diagnostic_without_retry(self):
+        """已收坏 JSON 保留用量，只报告位置，不回显内容或重试。 Keep usage and safe locations without exposing content or retrying."""
+        self.envelope={'choices':[{'finish_reason':'stop','message':{'content':'{"private": bad}'}}],
+                       'usage':{'prompt_tokens':4,'completion_tokens':3,'total_tokens':7}}
+        with self.assertRaisesRegex(MasaError,'JSON invalid at line 1, column') as caught:
+            self.provider.respond(self.context)
+        self.assertNotIn('private',str(caught.exception))
+        self.assertEqual(len(self.requests),1)
+        self.assertEqual(self.provider.usage['total_tokens'],7)
+
     def test_truncation_errors_and_redirects_never_retry(self):
         """错误与重定向不产生隐式额外请求。 Errors and redirects never cause implicit requests."""
         self.finish = "length"

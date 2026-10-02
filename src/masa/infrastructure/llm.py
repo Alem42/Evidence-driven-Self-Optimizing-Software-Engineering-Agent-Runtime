@@ -160,7 +160,12 @@ class ChatProvider:
             content = choice["message"]["content"]
             if not isinstance(content, str):
                 raise MasaError("model content must be text JSON")
-            action = json.loads(content.replace(self.key, "[REDACTED]"))
+            try:
+                action = json.loads(content.replace(self.key, "[REDACTED]"))
+            except json.JSONDecodeError as exc:
+                # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
+                # Distinguish a received invalid response from uncertain transport, without exposing content.
+                raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
         return validate_response(context, action, self.key)

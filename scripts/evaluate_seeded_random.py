@@ -31,6 +31,7 @@ def verify(store, runner, rid):
         results.append({'args':args,'exit_code':code,'stdout':stdout,'stderr':stderr})
         return stdout
     probe([])
+    probe(['-count','1'])
     probe(['-min','-20','-max','-1','-count','100'],count=100,bounds=(-20,-1))
     probe(['-min','-7','-max','-7','-count','100'],count=100,bounds=(-7,-7))
     probe(['-min','-1000000','-max','1000000','-count','100'],count=100,bounds=(-1000000,1000000))
@@ -38,8 +39,13 @@ def verify(store, runner, rid):
     assert probe(seeded,count=100)==probe(seeded,count=100),'fixed seed is not reproducible'
     zero=['-seed','0','-count','10']
     assert probe(zero,count=10)==probe(zero,count=10),'explicit zero seed was treated as omitted'
+    negative=['-seed','-17','-count','10']
+    assert probe(negative,count=10)==probe(negative,count=10),'negative seed is not reproducible'
+    for bound in ('-1000000','1000000'):
+        probe(['-min',bound,'-max',bound],bounds=(int(bound),int(bound)))
     for args in (['-min','2','-max','1'],['-count','0'],['-count','101'],['-min','-1000001'],
-                 ['-max','1000001'],['-min','bad'],['-max','bad'],['-count','bad'],['-seed','bad'],['-count']):
+                 ['-max','1000001'],['-min','1000001'],['-max','-1000001'],
+                 ['-min','bad'],['-max','bad'],['-count','bad'],['-seed','bad'],['-count']):
         probe(args,2)
     return results
 
@@ -48,6 +54,7 @@ def main():
     """保存任务身份和完整验收结果，打印进度但不打印配置密钥。 Persist job identity and acceptance results without exposing credentials."""
     parser=argparse.ArgumentParser();group=parser.add_mutually_exclusive_group()
     group.add_argument('--run');group.add_argument('--repair-tests',help='explicit new test revision of a failed verification; calls the real API')
+    group.add_argument('--plan',help='explicit fresh automatic generation from an existing approved plan; calls the real API')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1];state=root/'.masa'
     runner=Runner(root/'.tools/bin/masa-runner.exe',root/'.tools/go/bin/go.exe')
@@ -67,6 +74,25 @@ def main():
             result=Runtime(store,runner).execute(rid)
             print('GATE',result['status'],flush=True)
             if result['status']!='succeeded':raise RuntimeError('revised tests still fail; inspect evidence')
+        finally:store.close()
+    elif args.plan:
+        import uuid
+        from masa.application.coordinator import WorkflowCoordinator
+        from masa.infrastructure.jobs import Jobs
+        from masa.infrastructure.settings import Settings
+        store=Store(state);jobs=Jobs(state);ident=uuid.uuid4().hex
+        try:
+            parent=store.run(args.plan)
+            provider=Settings(state).provider()
+            jobs[ident]={'status':'running','mode':'auto','phase':'generation','attempt':0,
+                'started':time.time(),'plan_id':args.plan,'run_id':args.plan,'provider':provider.profile,
+                'request':{'goal':parent['data']['goal']}}
+            print('EXPLICIT_NEW_JOB',ident,'PLAN',args.plan,flush=True)
+            try:WorkflowCoordinator(store,runner,provider,jobs[ident]).run()
+            except Exception:
+                jobs[ident].update(status='failed');raise
+            job=dict(jobs[ident]);rid=job['run_id']
+            print('RESULT',job['status'],rid,flush=True)
         finally:store.close()
     elif not rid:
         console=Console(state,runner.executable,runner.go_executable,root)
