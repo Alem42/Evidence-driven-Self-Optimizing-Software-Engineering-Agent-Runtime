@@ -1,19 +1,11 @@
-﻿# 当前接续点
+# 当前接续点
 
-更新：2026-10-02。先git status，再读 ../STATUS_PROJECT.md、../PLAN_NEXT_STAGE.md 和 ../progress/PROGRESS_2026-10-02_009_review-stabilization.md。
+更新：2026-10-02。先 git status，读 STATUS_PROJECT、PLAN_NEXT_STAGE 和 progress/PROGRESS_2026-10-02_012_simplification-acceptance.md。
 
-## 本轮
+本轮已执行减法：run_kind / 入口隔离、一次迁移、旧副本备份移出、删除前端检查图、中央代码与底部需求框。底层工具图保留。旧 demo / 单文件兼容保留，不继续扩展。
 
-语义失败现在事务写Run与业务failed、事件；失败恢复拒绝隐式重发，完成恢复检查取消/过期。sources-v1使用Runtime生成source_id字典，旧协议可读。复杂真实评审0562797c4dba44caab2d7182f4f435c7成功，7条引用有效但建议有误，不能自动采用。HTTP400失败480f43966c694a5ea909ea5163ef2243已保存，提示缺JSON已修。
+真实验收最终成功版本：77604ca3e7184958938a421da76c4978；工作区同名目录。方案927c665630ee42379b67b83705f02f34；自动任务6969089b1dab47c59a8ed8d85cd3cba3。一轮测试修订后 Gate 通过，独立25项 CLI 探针通过，含零/负种子。旧失败不可覆盖；不确定请求禁止重放。
 
-## 直接下一步
+下一步：浏览器实际点击（本轮浏览器工具无可用会话），然后路由 R0/R1，按 PLAN_MODEL_ROUTING_AND_WORKBENCH 实施。不要直接做升级前重置预算、任意动态图或并发 Agent。路由和真实流式代码尚未实现。
 
-接入语义评审HTTP/前端后台入口和恢复；核对历史方案时间seed与随机数实现固定seed冲突，使用新版本修复；再统一角色状态、浏览器验收、上下文收益、中型任务。语义review仍只脚本，勿宣称已自动接入。对负数/极大整数等有效边界不删测试。
-
-## 工作约定
-
-按模块验证后commit，中英函数/核心注释。不要打印/提交本地密钥，不编辑历史快照。未跟踪src/masa/domain.py、runtime.py、workflow.py在本轮开始前已有，保留勿随意纳入提交。服务需重启加载新版。源码/变异/语义功能的实现范围见STATUS，历史细节见progress，不继续把CURRENT写成长历史。
-
-架构审视更新：先读../PLAN_ARCHITECTURE_SIMPLIFICATION.md，待用户审核减法方案。已降级检查图为验证技术详情，角色调用key含invocation。大范围删除未执行。最新进展010_architecture-review.md。
-
-最新界面增量011_runtime-ui-state.md：活动任务不显示恢复按钮，无worker不显示规划/生成进度；前端4测试构建通过。架构减法待审核。
+复验：`.venv/Scripts/python.exe scripts/evaluate_seeded_random.py --run 77604ca3e7184958938a421da76c4978` 不调用模型。默认脚本会调用真实 API；--plan 是显式新自动任务，不重放原失败请求。密钥只读本地 Settings，不打印。每部分验证后 commit，中英函数注释，结束更新三个状态入口和进展。启动8765服务前关闭旧进程再重启。

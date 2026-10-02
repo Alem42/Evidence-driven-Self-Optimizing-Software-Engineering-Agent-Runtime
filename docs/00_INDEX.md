@@ -1,19 +1,15 @@
 # MASA 文档入口
 
-当前版本：2026-09-28，项目工作台与分层目录重构。
+更新：2026-10-02。
 
-| 读者 / 用途 | 权威文档 |
+| 用途 | 阅读 |
 |---|---|
-| 使用项目 | [工作台指南](guides/USER_WORKBENCH.md) |
-| 理解架构 | [系统架构](design/DESIGN_SYSTEM_ARCHITECTURE.md) |
-| 当前完成情况 | [项目状态](STATUS_PROJECT.md) |
-| 下一步开发 | [下一阶段](PLAN_NEXT_STAGE.md)、[长期路线](PLAN_PRIORITY_ROADMAP.md) |
-| LLM 接续 | [实施入口](LLM_IMPLEMENTATION_GUIDE.md)、[当前交接](handoff/CURRENT.md)、[长期约定](MEMORY_PROJECT.md) |
-| 开发环境 | [本机环境](guides/ENV_LOCAL_SETUP.md) |
-| Go 原理与手动验证 | [环境、harness 与已修复项目](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) |
+| 使用 | [工作台](guides/USER_WORKBENCH.md)、[Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) |
+| 当前事实 | [STATUS](STATUS_PROJECT.md) |
+| 下一步 | [PLAN](PLAN_NEXT_STAGE.md) |
+| 开发接续 | [CURRENT](handoff/CURRENT.md)、[长期约定](MEMORY_PROJECT.md)、[实施入口](LLM_IMPLEMENTATION_GUIDE.md) |
+| 架构 | [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md)、[减法执行范围](PLAN_ARCHITECTURE_SIMPLIFICATION.md) |
+| 愿景 | [模型路由与 IDE 工作台](PLAN_MODEL_ROUTING_AND_WORKBENCH.md) |
+| 验收需求 | [明确种子的随机数 CLI](scenarios/SCENARIO_SEEDED_RANDOM.md) |
 
-`progress/` 保存每次验收报告；`handoff/` 保存中断接续；`templates/` 保存报告模板；`scenarios/` 保存业务验收需求。过期设计与旧界面指南已移至 `archive/design/` 和 `archive/guides/`，仅供历史查询，不是当前开发指令。
-
-- [主动需求澄清设计（待实现）](PLAN_RUNTIME_CLARIFICATION.md)：角色主动提问、持久等待、用户回答与恢复，及与原路线合并的优先级。
-
-- [Coordinator 与独立测试评审详解](guides/USER_COORDINATOR_AND_TEST_REVIEW.md)
+progress 是历史验收记录，archive 是过期方案。它们不覆盖 STATUS / PLAN / CURRENT。详细技术讲解按需阅读 guides；不要把旧进展中的待实现描述当成当前事实。
