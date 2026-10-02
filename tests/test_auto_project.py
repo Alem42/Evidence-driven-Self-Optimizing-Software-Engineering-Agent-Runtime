@@ -69,6 +69,8 @@ class AutomaticProjectTests(unittest.TestCase):
     def test_failed_test_source_requires_test_revision(self):
         """冻结测试导致的编译错误不能反复交给实现修复。 A frozen test compile error cannot be fixed by implementation-only repair."""
         self.assertTrue(test_revision_needed('random_test.go:7:2: "os" imported and not used'))
+        self.assertTrue(test_revision_needed('cmd/app/main_test.go:22:1: missing return'))
+        self.assertFalse(test_revision_needed('cmd/app/main.go:22:1: missing return'))
         self.assertTrue(test_revision_needed('import cycle not allowed in test'))
         self.assertTrue(test_revision_needed('random_test.go:174: exec: executable file not found in %PATH%'))
         self.assertFalse(test_revision_needed('random.go:7:2: "os" imported and not used'))

@@ -25,71 +25,7 @@ from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 
 
-def test_revision_needed(evidence, checks=()):
-    """按诊断行定位测试错误，避免把实现报错误配给另一行测试。 Match test diagnostics locally, not across unrelated output lines."""
-    lines=[]
-    for line in evidence.splitlines():
-        try:
-            frame=json.loads(line)
-            output=frame.get('Output','') if isinstance(frame,dict) else line
-        except (ValueError,TypeError):
-            output=line
-        lines.extend(str(output).splitlines())
-    if 'import cycle not allowed in test' in evidence:return True
-    markers=('imported and not used','declared and not used','undefined:',
-             'syntax error','overflows int','executable file not found in %PATH%')
-    if any(re.search(r'_test\.go:\d+:',line) and
-           (any(marker in line for marker in markers) or re.search(r'_test\.go:\d+:\d+: expected ',line))
-           for line in lines):return True
-    # 测试内构建选错目录属于测试准备错误；不能让 Developer 修改冻结测试。
-    # Building an empty package from a test is a test-setup failure, not an implementation repair.
-    if any('no Go files in ' in line for line in lines) and any(re.search(r'_test\.go:\d+:',line) for line in lines):
-        return True
-    for operation,result in checks:
-        if operation!='go_fmt_check' or result.get('exit_code')==0:continue
-        paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
-        if paths and all(p.endswith('_test.go') for p in paths):return True
-    return False
-
-
-def repair_advice(checks):
-    """前端与自动流程复用同一修复分类。 Share evidence-based repair routing with the manual interface."""
-    if test_format_only(checks):
-        return {'action':'format_tests','message':'只有测试文件格式不合格，可直接格式化并重新验证，无需模型调用。'}
-    evidence='\n'.join(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')) for _,r in checks)
-    if test_revision_needed(evidence,checks):
-        return {'action':'revise_tests','message':'检测到测试源码或测试准备错误（如构建目录、常量溢出、导入）。请修订测试并保留行为断言。'}
-    return {'action':'repair','message':'未识别到明确的测试准备错误；请结合失败证据检查实现，也可手动选择测试修订。'}
-
-
-def test_format_only(checks):
-    """只有测试文件格式不合格时可无模型修订。 Detect the exact deterministic test-format-only case."""
-    failures=[(op,result) for op,result in checks if result.get('status')!='completed' or result.get('exit_code')!=0]
-    if len(failures)!=1 or failures[0][0]!='go_fmt_check':return False
-    result=failures[0][1]
-    if result.get('status')!='completed':return False
-    paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
-    return bool(paths) and all(p.endswith('_test.go') for p in paths)
-
-
-def repeated_assertion_signature(checks):
-    """提取失败测试的断言指纹，避免同一矛盾反复消耗修复调用。 / Fingerprint failing assertions to stop repeated ineffective repairs."""
-    for operation, result in checks:
-        if operation != 'go_test' or result.get('exit_code') == 0:
-            continue
-        assertions = []
-        for line in result.get('stdout', '').splitlines():
-            try:
-                frame = json.loads(line)
-                output = frame.get('Output', '') if isinstance(frame, dict) else line
-            except (ValueError, TypeError):
-                output = line
-            for item in str(output).splitlines():
-                if re.search(r'_test\.go:\d+:', item) and re.search(r'\b(?:want|expected|got)\b', item, re.I):
-                    assertions.append(re.sub(r'_test\.go:\d+:', '_test.go:', item.strip()))
-        if assertions:
-            return tuple(sorted(set(assertions)))
-    return ()
+from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, repeated_assertion_signature
 
 
 class Console:
@@ -486,103 +422,12 @@ class Console:
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
                               'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,
                               'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
-            from masa.application.workflow import WorkflowCheckpoint
-            workflow=WorkflowCheckpoint(self.jobs[ident])
-            phase=workflow.phase
+            from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
                 try:
-                    planning=ProjectPlanning(store,runner)
-                    generation=ProjectGeneration(store,runner)
-                    checkpoint=self.jobs[ident]
-                    plan=checkpoint.get('plan_id')
-                    # 发布与后台检查点之间也可能中断；直接复用已发布的同一份方案。
-                    # Publication can precede the job checkpoint: reuse that exact saved plan.
-                    if resume_job and not plan and checkpoint.get('phase')=='planning' and checkpoint.get('run_id'):
-                        saved=store.run(checkpoint['run_id'])['data'].get('project_plan',{})
-                        if saved.get('status') in {'awaiting_review','approved'}:
-                            plan=checkpoint['run_id'];checkpoint['plan_id']=plan
-                    reuse=None
-                    for retry in range(3 if not plan else 0):
-                        try:
-                            recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='planning' and retry==0 else None
-                            plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id)
-                            if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
-                                checkpoint.update(status='waiting_for_input',result={'id':plan})
-                                return
-                            checkpoint['plan_id']=plan
-                            break
-                        except MasaError:
-                            if recover_id:raise
-                            failed_id=self.jobs[ident]['run_id']
-                            failed=store.run(failed_id)['data'].get('project_plan',{})
-                            if retry==2 or not failed.get('spec_ref'):
-                                raise
-                            # 仅复用已校验 Planner 结果，Tester 最多额外调用两次。
-                            # Reuse validated Planner output and retry Tester at most twice.
-                            reuse=failed_id
-                            phase('planning_retry',failed_id,retry+1)
-                    meta=store.run(plan)['data']['project_plan']
-                    if meta['status']!='approved':planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
-                                           'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
-                                           'review_mode':'automatic'})
-                    draft=checkpoint.get('draft_id')
-                    if resume_job and checkpoint['phase'] in {'repair','test_revision'}:
-                        revision=checkpoint.get('run_id')
-                        # 结果未知时 resume_revision 拒绝重放，保留原始预算与证据。
-                        # Unknown results stop recovery instead of replaying a paid request.
-                        draft=generation.resume_revision(revision,provider)
-                        checkpoint['draft_id']=draft
-                    if not draft:
-                        recover_id=checkpoint.get('run_id') if resume_job and checkpoint['phase']=='generation' and checkpoint.get('run_id')!=plan else None
-                        phase('generation',recover_id or plan)
-                        saved=store.run(recover_id)['data'].get('project_plan',{}) if recover_id else {}
-                        if saved.get('status') in {'awaiting_review','approved'}:
-                            draft=recover_id
-                        else:
-                            draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
-                        checkpoint['draft_id']=draft
-                    for attempt in range(checkpoint.get('attempt',0),5):
-                        meta=store.run(draft)['data']['project_plan']
-                        phase('verification',draft,attempt)
-                        verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
-                                                           'review_mode':'automatic'})
-                        phase('verification',verified,attempt)
-                        result=Runtime(store,runner).execute(verified)
-                        if result['status']=='succeeded':
-                            self.jobs[ident].update(status='completed',result={'id':verified})
-                            return
-                        if attempt==4:
-                            self.jobs[ident].update(status='completed',result={'id':verified},
-                                                    note='automatic repair limit reached; inspect failed checks')
-                            return
-                        # 失败中含测试包循环导入时，必须新建测试修订；普通修复不能改变冻结测试。
-                        # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
-                        checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
-                                for t in store.tools(verified) if t['result_ref']]
-                        # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
-                        # Three identical assertion failures require spec/test review instead of another implementation repair.
-                        assertion=repeated_assertion_signature(checks)
-                        if workflow.record_assertion(verified,assertion):
-                            self.jobs[ident].update(status='completed',result={'id':verified},
-                                note='same test assertion failed three times; inspect specification and test expectation before further repair')
-                            return
-                        outputs=[result for _,result in checks]
-                        evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
-                        if test_format_only(checks):
-                            phase('test_format',verified,attempt+1)
-                            draft=generation.format_test_files(verified,
-                                lambda rid:phase('test_format',rid,attempt+1))
-                        elif test_revision_needed(evidence,checks):
-                            phase('test_revision',verified,attempt+1)
-                            draft=generation.revise_tests(verified,provider,
-                                'Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.',
-                                lambda rid:phase('test_revision',rid,attempt+1))
-                        else:
-                            phase('repair',verified,attempt+1)
-                            draft=generation.repair(verified,provider,'',lambda rid:phase('repair',rid,attempt+1),use_intelligence=True)
-                        checkpoint.update(draft_id=draft,attempt=attempt+1)
+                    WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job)).run()
                 except Exception as exc:
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'automatic project job failed')
                 finally:store.close()
