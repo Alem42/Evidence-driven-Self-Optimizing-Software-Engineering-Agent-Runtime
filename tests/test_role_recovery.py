@@ -134,3 +134,37 @@ class RoleRecoveryTests(unittest.TestCase):
                 self.assertEqual(console.detail(job['result']['id'])['run']['status'],'succeeded')
                 self.assertFalse(console.detail(resume)['role_active'])
                 console.close()
+
+    def test_continuation_has_separate_identity_and_reuses_saved_output(self):
+        """续行保留旧证据，每个调用只计费一次。 Continuation preserves evidence and charges once per invocation."""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);store=Store(root);provider=CompositeProvider();ids=[]
+            with patch.object(ProjectPlanning,'update',side_effect=Crash):
+                with self.assertRaises(Crash):ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',ids.append)
+            rid=ids[0];roles=RoleRuntime(store)
+            with patch.object(provider,'respond',return_value={'answer':'accepted'}) as call:
+                result=roles.call(rid,provider,'project_planner',{'answer':'range 0 to 99'},invocation_id='answer-1')
+                self.assertEqual(result,{'answer':'accepted'})
+                self.assertEqual(call.call_count,1)
+            store.close();store=Store(root);roles=RoleRuntime(store)
+            with patch.object(provider,'respond') as call:
+                self.assertEqual(roles.call(rid,provider,'project_planner',{'answer':'range 0 to 99'},invocation_id='answer-1'),result)
+                call.assert_not_called()
+                with self.assertRaisesRegex(MasaError,'input or provider changed'):
+                    roles.call(rid,provider,'project_planner',{'answer':'different'},invocation_id='answer-1')
+            self.assertEqual([r['attempt_no'] for r in roles.states(rid)],[1,2])
+            self.assertEqual(store.run(rid)['model_calls'],2)
+            store.close()
+
+    def test_new_identity_cannot_bypass_unknown_response(self):
+        """未知网络结果也阻止新调用标识绕过限制。 Unknown results block new invocation identifiers too."""
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp));provider=CompositeProvider();ids=[]
+            with patch.object(provider,'respond',side_effect=Crash):
+                with self.assertRaises(Crash):ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',ids.append)
+            with patch.object(provider,'respond') as call:
+                with self.assertRaisesRegex(MasaError,'cannot bypass'):
+                    RoleRuntime(store).call(ids[0],provider,'project_planner',{},invocation_id='answer-1')
+                call.assert_not_called()
+            self.assertEqual(store.run(ids[0])['model_calls'],1)
+            store.close()

@@ -22,3 +22,9 @@
 本轮完成 WorkflowCheckpoint 拆分，121 Python 测试通过，真实历史随机数自动恢复复验通过（无新模型调用）。先读 ../progress/PROGRESS_2026-09-29_004_checkpoint-and-clarification.md 和 ../PLAN_RUNTIME_CLARIFICATION.md。
 
 下一步统一角色 Step/Attempt 与 invocation_id，兼容已有 (run_id,purpose) 缓存；随后实现 Planner 问题/回答闭环。澄清目前仅设计，未上线。完整 Coordinator 尚未提取。原定独立测试评审、上下文收益评估和中型仓库任务必须继续，不能被新需求替代。
+
+## 2026-10-02 最新接续
+
+role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保留并幂等迁移，新调用标识不能绕过未知结果，预算不重置。详见 ../progress/PROGRESS_2026-10-02_001_role-invocations.md。
+
+下一步实现 Planner clarification_request 协议、持久等待和回答接口；RoleRuntime.call 已支持 invocation_id，但 ProjectPlanning 尚未接入新调用。不要宣称澄清已上线。9 月 29 日真实随机数运行现已过期，本轮复验被 deadline 拒绝，后续不要反复运行旧恢复脚本或偷偷改 deadline。需要新运行验证或显式续期设计。
