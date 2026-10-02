@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultPanel,taskSummary,currentStage,pollTarget,codeReference} from './workspaceState.js';
+import {defaultPanel,taskSummary,currentStage,pollTarget,codeReference,displayStatus} from './workspaceState.js';
 const detail=(status,data={})=>({run:{status,data}});
 test('successful verification opens code; drafts and failures remain actionable',()=>{
   assert.equal(defaultPanel(detail('succeeded',{project_bundle:{approval_ref:'saved'}})),'code');
@@ -29,4 +29,9 @@ test('approved plans cannot be mistaken for files, while draft and published bun
   assert.equal(codeReference({project_plan:{approval_ref:'spec'}}),null);
   assert.equal(codeReference({project_plan:{kind:'code',files_ref:'draft'}}),'draft');
   assert.equal(codeReference({project_bundle:{approval_ref:'snapshot'}}),'snapshot');
+});
+test('business waits and model-stage failures are not mislabeled as tool failures',()=>{
+  assert.equal(displayStatus(detail('paused',{project_plan:{status:'waiting_for_input'}})),'等待回答');
+  assert.equal(displayStatus(detail('paused',{project_plan:{kind:'code',status:'awaiting_review'}})),'等待确认代码');
+  assert.equal(taskSummary(detail('failed',{project_plan:{kind:'code',status:'failed'}})).title,'模型阶段未完成');
 });

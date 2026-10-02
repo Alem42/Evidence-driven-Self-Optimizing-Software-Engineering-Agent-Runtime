@@ -14,6 +14,7 @@ export function taskSummary(detail,working=false){
   if(plan?.status==='waiting_for_input')return {title:'需要你补充需求',text:'回答下面的问题后，继续原来的任务。'};
   if(working)return {title:'任务正在执行',text:'角色响应和真实工具结果会自动更新，不需要反复点击。'};
   if(run.status==='cancelled')return {title:'任务已取消',text:'已有代码与执行证据仍保留在版本记录中。'};
+  if(plan&&run.status==='failed')return {title:'模型阶段未完成',text:'检查日志中的响应或契约错误；这个草稿尚未执行 Go 工具验证。'};
   if(run.status==='failed'||run.status==='needs_attention')return {title:'需要处理失败',text:'查看验证或日志，按真实证据修复；旧版本不会被覆盖。'};
   if(plan?.status==='awaiting_review')return {title:plan.kind==='code'?'确认生成的代码':'确认项目方案',text:plan.kind==='code'?'检查文件后批准，再执行真实 Go 验证。':'确认结构和验收标准，再生成代码与测试。'};
   if(plan?.status==='approved')return {title:plan.kind==='code'?'代码已批准':'方案已确认',text:'继续当前任务，系统会复用已保存的审批内容。'};
@@ -38,4 +39,16 @@ export function codeReference(data){
   // 方案审批也有 approval_ref，但它不是源码引用。
   // Planning approvals also have references, but they must never be rendered as source files.
   return data?.project_bundle?.approval_ref||(data?.project_plan?.kind==='code'?(data.project_plan.approval_ref||data.project_plan.files_ref):null);
+}
+
+export function displayStatus(detail){
+  // 用业务等待类型解释暂停，避免把待审批误标成执行中断。
+  // Explain business waits so pending approval is not mistaken for interrupted execution.
+  const run=detail.run,plan=run.data.project_plan;
+  if(['failed','cancelled','needs_attention'].includes(run.status))return statusLabel[run.status];
+  if(plan?.status==='waiting_for_input')return '等待回答';
+  if(plan?.status==='awaiting_review')return plan.kind==='code'?'等待确认代码':'等待确认方案';
+  if(detail.active||detail.role_active)return '执行中';
+  if(plan?.status==='approved')return '已确认';
+  return statusLabel[run.status]||run.status;
 }

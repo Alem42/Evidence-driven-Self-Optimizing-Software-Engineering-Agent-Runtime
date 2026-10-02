@@ -80,6 +80,11 @@ textarea { resize:vertical; line-height:1.7; }
 textarea:read-only { background:#f7f9fc; }
 .check { display:flex; align-items:center; gap:10px; }
 .check input { width:16px; margin:0; }
+label:has(> input[type="radio"]) { display:flex; align-items:center; gap:10px; }
+input[type="radio"] { display:inline-block; width:16px; margin:0; padding:0; }
+.background-job { padding:8px 20px; background:#eef3fc; font-size:12px; border-bottom:1px solid #dfe5ee; }
+.background-job button { margin-left:12px; font-size:11px; }
+.api-list .run-item.current { background:#edf2fa; border-color:#aac1e6; }
 .field-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .panel { background:white; border:1px solid #e0e6ee; border-radius:8px; padding:20px; margin:18px 0; }
 .code-review { border:0; padding:0; }
