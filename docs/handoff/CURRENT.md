@@ -15,3 +15,5 @@
 按模块验证后commit，中英函数/核心注释。不要打印/提交本地密钥，不编辑历史快照。未跟踪src/masa/domain.py、runtime.py、workflow.py在本轮开始前已有，保留勿随意纳入提交。服务需重启加载新版。源码/变异/语义功能的实现范围见STATUS，历史细节见progress，不继续把CURRENT写成长历史。
 
 架构审视更新：先读../PLAN_ARCHITECTURE_SIMPLIFICATION.md，待用户审核减法方案。已降级检查图为验证技术详情，角色调用key含invocation。大范围删除未执行。最新进展010_architecture-review.md。
+
+最新界面增量011_runtime-ui-state.md：活动任务不显示恢复按钮，无worker不显示规划/生成进度；前端4测试构建通过。架构减法待审核。

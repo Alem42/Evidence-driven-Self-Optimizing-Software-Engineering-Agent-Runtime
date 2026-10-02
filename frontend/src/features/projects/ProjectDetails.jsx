@@ -19,7 +19,7 @@ export function ProjectDetails({detail,view,profiles,select,onProgress,working})
   async function action(fn){setBusy(true);setError('');try{await fn();}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <>
     {error&&<p className="error" role="alert">{error}</p>}
-    {plan&&['planning','generating'].includes(plan.status)&&<section className="panel"><p>若服务已重启，可恢复已保存的角色结果。未收到结果的模型请求不会自动重放。</p><button disabled={busy} onClick={()=>action(async()=>{const r=await projectJob('/runs/'+detail.run.id+'/resume-project',{api_profile_id:profiles?.active_id},onProgress);select(r.id);})}>恢复中断的角色流程</button></section>}
+    {plan&&!working&&['planning','generating'].includes(plan.status)&&<section className="panel"><p>当前没有后台任务执行，可从保存记录恢复。未收到结果的模型请求不会自动重放。</p><button disabled={busy} onClick={()=>action(async()=>{const r=await projectJob('/runs/'+detail.run.id+'/resume-project',{api_profile_id:profiles?.active_id},onProgress);select(r.id);})}>恢复中断的角色流程</button></section>}
     {plan?(plan.kind==='code'?<ProjectCodeReview detail={detail} select={select} working={working}/>:<ProjectPlanReview detail={detail} profiles={profiles} select={select} onProgress={onProgress} working={working}/>):<>
       <div className="panel action-bar"><button disabled={busy||working} onClick={()=>action(()=>api('/runs/'+detail.run.id+'/open-workspace',{}))}>打开代码文件夹 ↗</button>
         <button disabled={busy||working||!['succeeded','failed','needs_attention'].includes(detail.run.status)} onClick={()=>action(async()=>select((await api('/runs/'+detail.run.id+'/rerun',{})).id))}>重新验证</button>

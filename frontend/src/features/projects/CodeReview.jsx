@@ -25,7 +25,7 @@ export function ProjectCodeReview({detail,select,working}) {
   const locked=Boolean(plan.repair_of)&&(plan.revision_scope==='tests'?!path.endsWith('_test.go'):path==='go.mod'||path.endsWith('_test.go'));
   return <section className="panel code-review"><h3>{plan.revision_scope==='tests'?'Tester · 测试修订审核':plan.repair_of?'Developer · 修复版本审核':'Developer · 多文件代码审核'}</h3><p>查看当前代码和测试。批准后创建新项目版本并运行检查；Gate 根据实际退出码判断结果。</p>
     {plan.repair_of&&<div className="notice"><span>本次改动：{plan.changed_files?.join(', ')||'生成中'}。{plan.revision_scope==='tests'?'仅测试文件可修改，务必确认断言没有被削弱。':'测试和模块只读。'}</span><button onClick={()=>select(plan.repair_of)}>查看失败版本与日志</button></div>}
-    {plan.status==='generating'&&<ProjectProgress job={{stage:'project_developer',started:detail.run.data.created_at}}/>}
+    {detail.role_active&&plan.status==='generating'&&<ProjectProgress job={{stage:'project_developer',started:detail.run.data.created_at}}/>}
     {(error||plan.error)&&<p className="error">{error||plan.error}</p>}{files&&<><label>项目文件<select value={path} onChange={e=>setPath(e.target.value)}>{Object.keys(files).map(n=><option key={n}>{n}</option>)}</select></label>
     {pending&&<button disabled={busy||working} onClick={reviewSources}>{busy?'正在处理…':'检查源码语法与空测试'}</button>}
     {review&&<div className="notice"><strong>{review.findings.length?'源码检查发现问题':'源码解析完成'}</strong>{review.findings.map((f,i)=><p key={i}>{f.path}{f.line?':'+f.line:''} · {f.message}</p>)}<p>只检查语法和空测试；导入、类型、业务断言仍需后续验证。</p></div>}
