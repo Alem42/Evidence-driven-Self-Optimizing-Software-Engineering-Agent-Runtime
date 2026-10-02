@@ -38,3 +38,9 @@ role_invocations 已实现，默认 initial 兼容旧调用；旧 role_calls 保
 ## 2026-10-02 澄清恢复补充
 
 最新见 ../progress/PROGRESS_2026-10-02_003_clarification-recovery.md。回答保存后启动前中断已补齐：start_project_job 的恢复入口会查持久 auto job 并回到原自动任务。未回答不能恢复但保留等待。HTTP 全流程和重复回答验证已补，使用确定性 provider；本轮没有新付费测试。下一步 Coordinator/独立测试评审，再推进上下文收益与中型任务。不要重复开发本轮恢复分支。
+
+## 2026-10-02 最新：Coordinator 与测试计划规则
+
+先读 ../progress/PROGRESS_2026-10-02_004_coordinator-test-review.md 和 ../guides/USER_COORDINATOR_AND_TEST_REVIEW.md。自动循环已全部移入 application/coordinator.py，不再扩张 Console 工作线程内部业务。分类在 check_policy.py（Console 保留兼容导入）。独立测试计划规则已接入规划/批准，前端显示。
+
+131 Python、前端 4 项与构建通过；后续局部 8 项通过。真实新增随机数生成与测试修订均失败，最新 be93db921bb342f489c545341ddec58f：main_test.go:110 语法错误，以及极大整数区间 Int63n panic。保留证据，下轮不能把该记录当成功。下一步独立语义/源码审查与上述边界问题，再推进上下文对照和中型任务。模型 reviewer 尚未实现，当前报告只是规则审查。

@@ -8,6 +8,7 @@ from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
 from masa.domain.clarification import validate_question, validate_answers
+from masa.application.test_review import review_test_plan
 
 
 
@@ -75,6 +76,9 @@ class ProjectPlanning:
             self.update(rid, plan, 'created', 'planner_proposed')
             checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
             validate_checks(checks,spec,require_coverage=False)
+            # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
+            # Review the original plan before coverage supplementation hides omissions.
+            plan['test_review']=review_test_plan(spec,checks)
             covered={i for c in checks for i in c['acceptance_indices']}
             missing=sorted(set(range(len(spec['acceptance'])))-covered)
             if missing:
@@ -130,6 +134,10 @@ class ProjectPlanning:
             spec = validate_spec(body.get('spec'))
             checks = body.get('checks')
             graph = Runtime.compile_project_checks(spec, checks)
+            review=review_test_plan(spec,checks)
+            if review['status']=='blocked':
+                raise MasaError('test plan review blocked: '+next(f['message'] for f in review['findings'] if f['severity']=='blocking'))
+            plan['test_review']=review
             approval = {'spec':spec, 'checks':checks, 'graph':graph.to_dict()}
             plan.update(status='approved', approval_ref=self.store.put(approval))
             if body.get('review_mode')=='automatic':plan['review_mode']='automatic'
