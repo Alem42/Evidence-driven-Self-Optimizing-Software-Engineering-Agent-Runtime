@@ -168,6 +168,18 @@ class ChatTests(unittest.TestCase):
             with self.assertRaises(MasaError):
                 self.provider.respond(self.context)
 
+    def test_ollama_native_uses_no_auth_and_normalizes_actual_usage(self):
+        """原生本地请求真实走HTTP，保持JSON和用量契约。 Exercise native HTTP without auth while preserving JSON/usage contracts."""
+        self.envelope={'done':True,'done_reason':'stop','message':{'content':'{"type":"final","summary":"local result"}','thinking':'PRIVATE'},
+                       'prompt_eval_count':12,'eval_count':8}
+        provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama','timeout_seconds':180})
+        result=provider.respond(self.context)
+        self.assertEqual(result['summary'],'local result')
+        self.assertEqual(provider.usage['total_tokens'],20)
+        self.assertFalse(self.requests[0]['stream']);self.assertEqual(self.requests[0]['format'],'json')
+        self.assertEqual(self.requests[0]['options']['num_ctx'],8192)
+        self.assertFalse(self.requests[0]['think'])
+
     def test_received_invalid_json_has_safe_diagnostic_without_retry(self):
         """已收坏 JSON 保留用量，只报告位置，不回显内容或重试。 Keep usage and safe locations without exposing content or retrying."""
         self.envelope={'choices':[{'finish_reason':'stop','message':{'content':'{"private": bad}'}}],

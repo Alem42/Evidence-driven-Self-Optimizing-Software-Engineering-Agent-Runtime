@@ -125,7 +125,7 @@ def validate_response(context, action, key):
     if context.get('purpose')=='project_test_reviewer':
         from masa.domain.test_review import validate_semantic_review
         def redact_review(v):
-            if isinstance(v,str):return v.replace(key,'[REDACTED]')
+            if isinstance(v,str):return v.replace(key,'[REDACTED]') if key else v
             if isinstance(v,list):return [redact_review(x) for x in v]
             if isinstance(v,dict):return {k:redact_review(x) for k,x in v.items()}
             return v
@@ -136,7 +136,7 @@ def validate_response(context, action, key):
         # Redact decoded strings recursively, including Unicode-escaped credentials.
         def redact(value):
             if isinstance(value, str):
-                return value.replace(key, '[REDACTED]')
+                return value.replace(key, '[REDACTED]') if key else value
             if isinstance(value, list):
                 return [redact(v) for v in value]
             if isinstance(value, dict):
@@ -174,7 +174,7 @@ def validate_response(context, action, key):
                 or not isinstance(action.get('content'), str) or not action['content'].strip()
                 or len(action['content'].encode()) > 60000 or '\x00' in action['content']):
             raise MasaError('invalid code proposal; try a smaller requirement or larger output limit')
-        return {k: v.replace(key, '[REDACTED]') for k,v in action.items()}
+        return {k: v.replace(key, '[REDACTED]') if key else v for k,v in action.items()}
     if action.get("type") == "tool_call":
         if (
             set(action) != {"type", "operation", "arguments"}
@@ -191,7 +191,7 @@ def validate_response(context, action, key):
             raise MasaError("invalid final model schema")
         # JSON 转义必须解码后再次脱敏，防止秘密以 Unicode 转义形式绕过过滤。
         # Redact again after JSON decoding to cover Unicode-escaped credential echoes.
-        action['summary'] = action['summary'].replace(key, '[REDACTED]')
+        action['summary'] = action['summary'].replace(key, '[REDACTED]') if key else action['summary']
     else:
         raise MasaError("unknown model action")
     return action

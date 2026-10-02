@@ -56,9 +56,10 @@ class Settings:
                     **p,
                     "id": i,
                     "key_configured": bool(self.keys.get(i)),
+                    "ready": p['enabled'] and (p['model_type']=='local' or bool(self.keys.get(i))),
                     "last_test": self.tests.get(i),
                 }
-                for i, p in self.profiles.items()
+                for i, p in sorted(self.profiles.items(),key=lambda item:(item[1]['level'],item[1]['priority'],item[0]))
             ]
             active = next(
                 (p for p in profiles if p["id"] == self.active_id), validate_config({})
@@ -163,9 +164,9 @@ class Settings:
                 [ident or self.active_id] if expected is None else list(self.profiles)
             )
             for ident in candidates:
-                if ident not in self.profiles or not self.keys.get(ident):
+                if ident not in self.profiles or not self.profiles[ident]['enabled'] or (self.profiles[ident]['model_type']=='cloud' and not self.keys.get(ident)):
                     continue
-                provider = ChatProvider(self.profiles[ident], self.keys[ident])
+                provider = ChatProvider(self.profiles[ident], self.keys.get(ident,''))
                 if expected is None or provider.profile == expected:
                     return provider
         raise MasaError(
@@ -205,7 +206,7 @@ class Settings:
             if (
                 ident in self.profiles
                 and self.profiles[ident] == provider.config
-                and self.keys.get(ident) == provider.key
+                and self.keys.get(ident,'') == provider.key
             ):
                 self.tests[ident] = outcome
         return outcome
