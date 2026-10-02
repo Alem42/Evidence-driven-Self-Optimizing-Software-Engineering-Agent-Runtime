@@ -34,9 +34,9 @@ export function ProjectDetails({detail,view,profiles,select,onProgress,working})
     <details className="panel diagnostics"><summary>版本记录与执行日志</summary><div className="action-bar"><button onClick={()=>action(async()=>{setLog((await api('/runs/'+detail.run.id+'/logs')).text);setCopied(false);})}>读取整体日志</button>{log&&<button onClick={()=>action(async()=>{await navigator.clipboard.writeText(log);setCopied(true);})}>{copied?'已复制':'复制日志'}</button>}</div>
       {log&&<pre className="log-output">{log}</pre>}
       <div className="version-list">{[...view.versions].reverse().map(v=><button key={v.run_id} className={v.run_id===detail.run.id?'current':''} onClick={()=>select(v.run_id)}><span>{v.kind==='plan'?'项目方案':v.kind==='code'?'代码版本':'验证运行'}</span><code>{v.run_id.slice(0,8)}</code><span>{v.status}</span></button>)}</div>
-      <h4>当前版本的检查依赖图</h4><WorkflowGraph detail={detail} selected="" onSelect={()=>{}}/>
+      {!plan&&<details><summary>技术详情：验证检查之间的依赖</summary><p className="muted">此图展示本版本选定的工具检查如何汇总到 Gate。它不是 Planner、Tester、Developer 的项目流程；重新运行同一验证配置时结构保持一致。</p><WorkflowGraph detail={detail} selected="" onSelect={()=>{}}/></details>}
       <p className="muted">运行 ID：{detail.run.id} · 证据事件：{detail.event_count}</p>
-      {detail.role_calls?.length>0&&<div><h4>持久角色调用</h4>{detail.role_calls.map(r=><p key={r.purpose}>{r.purpose} · {r.status} · {r.output_ref?'结果已保存':'结果未保存'}</p>)}</div>}
+      {detail.role_calls?.length>0&&<div><h4>持久角色调用</h4>{detail.role_calls.map(r=><p key={r.purpose+':'+r.invocation_id}>{r.purpose} · 第 {r.attempt_no||1} 次 · {r.status} · {r.output_ref?'结果已保存':'结果未保存'}</p>)}</div>}
     </details>
   </>;
 }

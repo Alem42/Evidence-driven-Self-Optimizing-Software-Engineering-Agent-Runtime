@@ -14,3 +14,5 @@
 | 4 | 中型Go任务 | 跨包修改、多文件接口回归与真实工具评测 |
 
 不优先增加角色数量、框架或任意并发图。每个增量测试后commit，记录进展与可恢复接续点。真实API有授权，但失败不能靠无限调用掩盖。
+
+架构减法方案待审核：[PLAN_ARCHITECTURE_SIMPLIFICATION](PLAN_ARCHITECTURE_SIMPLIFICATION.md)。当前优先收敛UI阶段与run_kind，不再新增图/角色层。检查依赖图已降为验证技术详情；大范围删除未执行。
