@@ -32,4 +32,8 @@ class SourceReviewTests(unittest.TestCase):
             self.assertEqual(s.read(m['files_ref'])['internal/app/app_test.go'],original_test)
             with self.assertRaisesRegex(MasaError,'stale'):review_sources(s,runner,draft,{'files_ref':'stale','files':files})
             self.assertEqual(s.run(draft)['tool_calls'],2)
+            review_sources(s,runner,draft,{'files_ref':m['files_ref'],'files':files})
+            with self.assertRaisesRegex(MasaError,'budget exhausted'):
+                review_sources(s,runner,draft,{'files_ref':m['files_ref'],'files':files})
+            self.assertEqual(s.run(draft)['tool_calls'],3)
             s.close()

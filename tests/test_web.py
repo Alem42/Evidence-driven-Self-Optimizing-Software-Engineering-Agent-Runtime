@@ -87,6 +87,35 @@ class WebTests(unittest.TestCase):
             _,detail=self.request('/api/runs/'+rid)
             self.assertEqual(detail['run']['model_calls'],3)
 
+    def test_http_source_review_preserves_draft_and_enforces_budget(self):
+        """HTTP 源码解析保持草稿状态，超预算拒绝。 HTTP parsing preserves drafts and enforces tool limits."""
+        from masa.application.planning import ProjectPlanning
+        from masa.application.generation import ProjectGeneration
+        from masa.infrastructure.runner import Runner
+        from test_project_plan import PlannerProvider,SPEC,CHECKS
+        from test_project_generation import DeveloperProvider
+        store=Store(self.root/'state')
+        try:
+            p=ProjectPlanning(store,FakeExecutor());plan=p.generate(PlannerProvider(),'Build CLI');m=store.run(plan)['data']['project_plan']
+            p.approve(plan,{'spec_ref':m['spec_ref'],'checks_ref':m['checks_ref'],'spec':SPEC,'checks':CHECKS})
+            draft=ProjectGeneration(store,FakeExecutor()).generate(plan,DeveloperProvider());m=store.run(draft)['data']['project_plan'];files=store.read(m['files_ref'])
+        finally:store.close()
+        root=Path.cwd();runner=Runner(root/'.tools/bin/masa-runner.exe',root/'.tools/go/bin/go.exe')
+        with patch('masa.application.console.Runner',return_value=runner):
+            for _ in range(3):
+                status,report=self.request('/api/runs/'+draft+'/review-project-sources',{'files_ref':m['files_ref'],'files':files})
+                self.assertEqual(status,200,report)
+                self.assertEqual(report['status'],'parsed')
+            status,_=self.request('/api/runs/'+draft+'/review-project-sources',{'files_ref':m['files_ref'],'files':files})
+            self.assertNotEqual(status,200)
+        _,detail=self.request('/api/runs/'+draft)
+        self.assertEqual(detail['run']['data']['project_plan']['status'],'awaiting_review')
+        self.assertEqual(detail['run']['tool_calls'],3)
+        event=next(e for e in reversed(detail['events']) if e['type']=='source_review_report')
+        status,artifact=self.request('/api/runs/'+draft+'/artifacts/'+event['payload']['report_ref'])
+        self.assertEqual(status,200)
+        self.assertEqual(artifact['artifact']['input_ref'],m['files_ref'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

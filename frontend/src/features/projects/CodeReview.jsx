@@ -8,6 +8,11 @@ export function ProjectCodeReview({detail,select,working}) {
   const [files,setFiles]=useState(null),[path,setPath]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [base,setBase]=useState(null);
   const [review,setReview]=useState(null);
+  // 只重载与当前保存文件一致的报告，避免展示旧编辑版本结果。
+  // Reload reports only when they match the current saved file bundle.
+  useEffect(()=>{let stopped=false;setReview(null);const event=detail.events.filter(e=>e.type==='source_review_report'&&e.payload.input_ref===plan.files_ref).at(-1);
+    if(event)api('/runs/'+detail.run.id+'/artifacts/'+event.payload.report_ref).then(r=>{if(!stopped)setReview(r.artifact);}).catch(e=>{if(!stopped)setError(e.message);});
+    return()=>{stopped=true;};},[detail.run.id,plan.files_ref]);
   async function reviewSources(){setBusy(true);setError('');try{setReview(await api('/runs/'+detail.run.id+'/review-project-sources',{files_ref:plan.files_ref,files}));}catch(e){setError(e.message);}finally{setBusy(false);}}
   useEffect(()=>{let stopped=false;setBase(null);if(plan.base_approval_ref)api('/runs/'+detail.run.id+'/artifacts/'+plan.base_approval_ref).then(r=>{if(!stopped)setBase(r.artifact.files);}).catch(e=>{if(!stopped)setError(e.message);});return()=>{stopped=true;};},[detail.run.id,plan.base_approval_ref]);
   useEffect(()=>{let stopped=false;setFiles(null);setError('');if(!plan.files_ref)return;
