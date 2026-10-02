@@ -1,15 +1,15 @@
 # 当前接续点
 
-2026-10-03。先 git status，读 MEMORY、STATUS、PLAN_NEXT_STAGE、PLAN_MULTI_MODEL。
+2026-10-03。读 MEMORY、STATUS、PLAN_NEXT_STAGE、PLAN_MULTI_MODEL 和最新进展003。
 
-R0 已完成：Settings/ChatProvider 支持本地与云端元数据、Ollama 原生 JSON、无密钥、角色/禁用限制、实际用量；旧云端 fingerprint 保持不变。前端固定选择与模型管理支持本地。提交 ed160cf 后端、3d620ef 前端。
+本轮提交73ae3bb：固定模式配置快照/恢复；44365ce：Ollama项目结构约束和验收脚本 --profile。Settings.provider(snapshot=...) 使用冻结配置、原 profile/原地址凭据；自动job保存 model_snapshot，RoleRuntime首次请求事务保存 model_snapshot_ref artifact。旧无快照兼容；删除/禁用/换地址明确拒绝。不放宽provider/input一致性。
 
-验证：Python146项、前端10项、构建通过。真实 gemma4:12b：连接一次 + 工具 Runtime 两次模型调用，run a905b1f960d147f88d54e634a46c2b23，Go 检查与 Gate 成功。证据 .masa/local-model-acceptance.json；无云端调用。此烟测不是项目 Planner/Tester/Developer 完整生成，不可扩大结论。scripts/smoke_local_model.py 可重测，会真实调用本地模型。
+Python151项全量通过，最后快照schema细化后6项配置测试再次通过。本轮未改前端；上一轮前端10项与构建通过，视觉仍待验收。
 
-本地配置现为输出4096、context8192、timeout180、thinking disabled；烟测时输出512，随后调整。旧恢复仍依赖原 fingerprint。脚本注册保留原默认云端选择；密钥不打印。HTTP服务可访问，PATH未找到命令不影响当前调用。
+真实固定DeepSeek随机数：job14a60d2152454121973d3e7f3e2e2d26，最终run e5e7cbd1fad041cea3bbe5ee32807da4，三轮修订后Go/Gate和25项CLI探针通过；6次云模型调用、43484实际tokens、费用未知。缺time导入、测试缺strconv导入、格式问题均沿现有分类修复。证据 .masa/model-project-comparison.json 与 seeded-random-acceptance.json。
 
-下一步：真实本地明确种子的随机数项目验收，保存失败分类；实施 R1 路由配置 artifact/恢复一致性/上下文准入，然后 R3 总预算，再 R2 升级。num_ctx 不是输入准入，单价尚未计费。不要在快照与预算完成前自动换模型。
+真实本地gemma4:12b完整规划尝试失败：c1cf5651e9d64934985ecd8a515e3947字段错误；6411f45003eb4fd993c4dcc7534b0f96得到规格但Tester越界；d53ac61e78c64f8c9f56f8dd6c5fcf95重复检查。不能声称本地完整生成通过或自动升级已实现。无盲目无限重试，未削弱验证。早先本地工具烟测通过a905b1f960d147f88d54e634a46c2b23。
 
-浏览器视觉/点击尚未验收，服务重启后看新版。既有成功随机数版本77604ca3e7184958938a421da76c4978可用 evaluate_seeded_random.py --run ID 无模型复验。
+下一步加速补R1本地digest/上下文准入，然后R3跨规划/生成/修复总预算；再R2本地优先升级。自动任务快照已有版本化配置，但未冻结同名本地模型权重；没有token预检和总费用预算。未知请求不重放，冻结测试不放松，旧账本不覆盖。
 
-验证后及时 commit；中英功能/核心注释；密钥和 .masa/.tools 不入 Git。保留冻结测试、未知请求不重放、快照/审批和 Gate，不新增并发 Agent 或重复状态。
+服务需重启。密钥只读忽略文件，不打印/提交；每验证完一个部分及时commit，中英核心注释，更新简短状态。不要引入并发Agent或第二套状态体系。
