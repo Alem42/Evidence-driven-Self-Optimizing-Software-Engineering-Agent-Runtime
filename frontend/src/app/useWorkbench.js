@@ -42,5 +42,5 @@ export function useWorkbench(){
   }
   return {projects,selected,select,detail,view,profiles,setProfiles,job,track,start,error,setError,online,boot,following,
     // 持久状态不能证明后台线程仍存活。 Persisted phase alone does not imply a live worker.
-    working:Boolean(jobId)||Boolean(detail?.active)||Boolean(detail?.role_active)};
+    working:Boolean(jobId)||Boolean(boot?.active_run)||Boolean(detail?.active)||Boolean(detail?.role_active)};
 }

@@ -26,6 +26,7 @@ export default function App(){
     <main className="workspace"><header className="workspace-header"><div><span className="eyebrow">PROJECT WORKBENCH</span><h1 title={w.view?.title}>{w.view?.title||'新建项目'}</h1></div><button onClick={()=>setSettings(true)}>模型设置</button></header>
       {w.error&&<div className="error global-error" role="alert">{w.error}<button onClick={()=>w.setError('')}>关闭</button></div>}
       {w.job?.status==='running'&&!w.following&&<div className="background-job">后台任务仍在继续。<button onClick={()=>w.track(w.job)}>返回执行中的项目</button></div>}
+      {w.boot?.active_run&&w.boot.active_run!==w.selected&&<div className="background-job">另一个版本正在运行工具检查。<button onClick={()=>w.select(w.boot.active_run)}>查看当前验证</button></div>}
       {!w.working&&w.boot?.interrupted_jobs?.length>0&&<details className="recovery-list"><summary>{w.boot.interrupted_jobs.length} 个任务可检查恢复</summary>{w.boot.interrupted_jobs.map(j=><div className="action-bar" key={j.job_id}><code>{j.job_id.slice(0,8)}</code><span>{j.phase}</span><button onClick={()=>resume(j.job_id)}>恢复</button>{j.run_id&&<button onClick={()=>w.select(j.run_id)}>查看</button>}</div>)}</details>}
       {newProject?<div className="new-project"><span className="eyebrow">START A PROJECT</span><h2>描述需求，得到可验证的代码。</h2><p>目前支持 Go 标准库命令行项目。写清输入、输出和错误处理，系统会规划、生成并执行真实检查。</p>
         <form onSubmit={start}><label>项目需求<textarea rows={9} required maxLength={16000} value={goal} onChange={e=>setGoal(e.target.value)} placeholder="例如：生成一个随机整数 CLI，支持范围、数量和可选种子；无效参数返回错误，不输出结果。"/></label>
