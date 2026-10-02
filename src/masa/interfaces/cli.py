@@ -38,7 +38,7 @@ def parser():
     run.add_argument("--pause-after", type=int, default=0)
     run.add_argument("--patch", type=Path, help="apply a controlled JSON patch before verification")
     run.add_argument("--intelligence", action="store_true", help="include versioned Go evidence in each model context")
-    run.add_argument('--collaboration', action='store_true', help='read-only scripted four-role protocol demo; needs at least 5 model calls')
+    run.add_argument('--collaboration', action='store_true', help='LEGACY demo: read-only scripted four-role protocol; not project generation')
     inspect = sub.add_parser("inspect", help="inspect Go syntax evidence and role context")
     inspect.add_argument("run_id")
     inspect.add_argument("--query", default="")

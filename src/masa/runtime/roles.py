@@ -19,11 +19,16 @@ class RoleRuntime:
             input_ref TEXT NOT NULL, route_ref TEXT NOT NULL, status TEXT NOT NULL,
             output_ref TEXT, started REAL NOT NULL, finished REAL,
             PRIMARY KEY(run_id,purpose,invocation_id), UNIQUE(run_id,purpose,attempt_no))''')
-        # 保留旧表并幂等迁移，旧运行继续复用原有响应。
-        # Preserve legacy rows and migrate idempotently without replaying model calls.
-        store.db.execute("""INSERT OR IGNORE INTO role_invocations
-            SELECT run_id,purpose,'initial',1,input_ref,route_ref,status,output_ref,started,finished FROM role_calls""")
         store.db.commit()
+        store.db.execute('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)')
+        store.db.commit()
+        # 同一事务记录迁移完成；后续初始化不再扫描旧调用表。
+        # Record migration atomically; future initializations never rescan legacy calls.
+        with store.transaction():
+            if not store.db.execute("SELECT 1 FROM schema_migrations WHERE name='role_invocations_v1'").fetchone():
+                store.db.execute("""INSERT OR IGNORE INTO role_invocations
+                    SELECT run_id,purpose,'initial',1,input_ref,route_ref,status,output_ref,started,finished FROM role_calls""")
+                store.db.execute("INSERT INTO schema_migrations VALUES('role_invocations_v1')")
 
     def call(self, rid, provider, purpose, values, *, invocation_id="initial"):
         """完成的调用不再付费重放；未知调用要求显式处理。 Reuse completed calls; never silently replay uncertain requests."""

@@ -11,6 +11,7 @@ import time
 import uuid
 
 from masa.domain.models import MasaError, canonical
+from masa.domain.run_kind import run_kind
 
 
 class Store:
@@ -129,6 +130,9 @@ class Store:
             raise MasaError(f"unknown run: {run_id}")
         value = dict(row)
         value["data"] = json.loads(value["data"])
+        # 仅补读取视图，不修改旧 artifact 或数据库历史。
+        # Add legacy metadata only to the read view, preserving historical evidence.
+        value['data']['run_kind'] = run_kind(value['data'])
         return value
 
     def steps(self, run_id: str) -> list[dict]:

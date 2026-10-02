@@ -73,6 +73,8 @@ class AutomaticProjectTests(unittest.TestCase):
         self.assertFalse(test_revision_needed('cmd/app/main.go:22:1: missing return'))
         self.assertTrue(test_revision_needed('import cycle not allowed in test'))
         self.assertTrue(test_revision_needed('random_test.go:174: exec: executable file not found in %PATH%'))
+        self.assertTrue(test_revision_needed('main_test.go:153: failed to run binary: exec: "randint-test.exe": cannot run executable found relative to current directory'))
+        self.assertFalse(test_revision_needed('main.go:153: exec: cannot run executable found relative to current directory'))
         self.assertFalse(test_revision_needed('random.go:7:2: "os" imported and not used'))
         self.assertTrue(test_revision_needed('',[('go_fmt_check',{'exit_code':1,'stdout':'cmd\\app\\main_test.go\n'})]))
         self.assertFalse(test_revision_needed('',[('go_fmt_check',{'exit_code':1,'stdout':'cmd\\app\\main.go\ncmd\\app\\main_test.go\n'})]))

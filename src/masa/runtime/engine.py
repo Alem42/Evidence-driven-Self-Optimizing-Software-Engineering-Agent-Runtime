@@ -15,6 +15,7 @@ from masa.runtime.tools import Tools
 from masa.runtime.graph import default_policy, ready_nodes, validate
 from masa.infrastructure.workspaces import copy_snapshot, verify_snapshot
 from masa.agents.handoffs import ANALYSIS_ROLES, validate_role_result, receive_handoffs
+from masa.domain.run_kind import run_kind
 
 
 class Runtime:
@@ -80,6 +81,7 @@ class Runtime:
                 data['model_profile'] = self.provider.profile
             if parent_run_id:
                 data["parent_run_id"] = parent_run_id
+            data['run_kind'] = run_kind(data)
             self.store.create(run_id, data)
             if parent_run_id:
                 self.store.event(run_id, "human_request_revised", {"parent_run_id": parent_run_id,
@@ -106,6 +108,11 @@ class Runtime:
         """持锁恢复并调度图，依据证据结束。 Recover and schedule under lock, then finalize from evidence."""
         with owner_lock(self.store.root / "runtime.lock"):
             run = self.store.run(run_id)
+            # 用途在终态检查之前验证，评审或草稿不能冒充工具验收。
+            # Validate purpose before terminal returns; reviews and drafts are never tool verification.
+            kind = run_kind(run['data'])
+            if kind in {'semantic_review', 'project_planning', 'project_draft'}:
+                raise MasaError(f'{kind}: tool execution is not authorized')
             if run["status"] in {"succeeded", "failed", "cancelled", "needs_attention"}:
                 return run
             generation = run['data'].get('codegen')
