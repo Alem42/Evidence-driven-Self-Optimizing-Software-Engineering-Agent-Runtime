@@ -29,7 +29,7 @@ class ServerLifecycleTests(unittest.TestCase):
                  redirect_stdout(io.StringIO()):
                 server.serve(root, 'runner', 'go', root)
                 construct.assert_called_once()
-                bind.assert_called_once_with(console, 8765)
+                bind.assert_called_once_with(console, 8765, server.DEFAULT_ORIGINS)
             listener.server_close.assert_called_once()
             console.close.assert_called_once()
 
