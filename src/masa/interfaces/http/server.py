@@ -235,8 +235,7 @@ def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS):
         try:
             server = make_server(console, port, origins)
             url = f"http://127.0.0.1:{server.server_port}"
-            print(f"MASA API: {url}
-Allowed frontend origins: {', '.join(sorted(origins))}", flush=True)
+            print(f"MASA API: {url}\nAllowed frontend origins: {', '.join(sorted(origins))}", flush=True)
             print("Local-only. Start the frontend separately: cd frontend && npm run dev. Ctrl+C stops the API and cancels its active run.", flush=True)
             server.serve_forever(poll_interval=0.2)
         except KeyboardInterrupt:
