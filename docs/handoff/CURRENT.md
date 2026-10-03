@@ -1,19 +1,17 @@
 # 当前接续点
 
-2026-10-03。先git status，读MEMORY/STATUS/PLAN_NEXT_STAGE和进展004。最新用户优先级是纯本地GLM与Ollama控制，API/复杂路由暂缓，不自动云端回退。
+2026-10-03。先 git status，读 MEMORY/STATUS/PLAN_NEXT_STAGE 和 [进展005](../progress/PROGRESS_2026-10-03_005_local-recovery.md)。代码讲解在 guides/USER_LOCAL_RUNTIME_AND_RECOVERY。
 
-本轮实现infrastructure/ollama.py固定本地API控制；Console/HTTP暴露 /api/ollama 和 /api/ollama/action，复用单worker与Jobs。支持列表/详情/默认切换/加载/释放/一次测速，无shell、下载/删除。OllamaPanel和LiveStatus增加入口与常驻阶段/模型/时间/最近实际速率。后端已保存verbose同源metrics，job.run_status与后台完成独立。
+本轮修复模型快照标量事件破坏 Projects.view/Console.artifact；新事件为对象，旧证据兼容读取。用户原任务 9620c8ba3e5946b3b53ab28666e5cd84 实际 waiting_for_input，14.61秒生成问题，真实 HTTP 已恢复读取，未代答。
 
-当前默认本地profile9225807dc987489e8ce482aa6fcaae12，glm-4.7-flash:latest，上下文16384、输出8192、超时600、thinking disabled。Ollama0.35.0，磁盘17.7GiB，一次ps观测显存13.68GiB。安装4个模型，PATH已能找到ollama。本轮未调用云端。
+console.lock 在构造 Console/Jobs 前取得，保护整个服务生命周期；bootstrap.active_job 反映真实 worker；独立轮询保留跟踪。取消不等待模型锁，已收响应保存后拒绝应用，迟到状态不能覆盖 cancelled。故障日志忽略的 service-errors.jsonl；GET /api/diagnostics 和 /api/hardware 接入折叠控制页。
 
-原生Tester对象按go_test/go_vet/go_fmt_check键组织，归一化后仍走domain验证。tuple schema在本机不兼容，已删除；Developer用普通JSON与literal go.mod提示，保持路径/模块检查。源码结构grammar可能重复输出，增大输出不保证解决。
+新原生本地生成 files-v1：固定 go.mod，实现先于测试，initial/file:2 等持久调用，gen_progress/partial_files_ref。单文件与修复 schema 限定路径，Domain 再核对；CLI entrypoint package main 前置检查。旧无 generation_mode 草稿仍 bulk；未知请求不重放。
 
-真实GLM Clamp：首次bec9cac2c51843afbdf6aeb94696eb86编译错误，依据证据一次明确修复后ed43f7e3bfc14753af577a0fa3f2148f通过Go/Gate；实际54.87 tokens/s，669输入/216输出，总4.45秒。证据 .masa/glm-clamp-acceptance.json，源码在对应workspace/solution.go。
+真实测试发现 _test.go 私有包导入及 cannot use/invalid operation 类型错误误走实现修复，已补分类和反例回归；语义断言不因此自动修测试。多文件质量仍需提升，worker completed 不能当 Gate succeeded。
 
-多文件未稳定：随机数方案9050c4a449d747de89c987d61023f9e2获批准，但源码重复/截断；整数求和复用方案a2a0eed13e8745b2b5f8ed5ee0a68ff2，最终766363c9e25942978e6f11062e452788的Gate仍失败（测试语法、未使用变量/导入）。script accept_local_project.py --plan ID --profile ID --sum-probes仅允许本地并保存证据，不将worker结束当Gate成功。
+默认 profile 9225807dc987489e8ce482aa6fcaae12，GLM，上下文16384、输出8192、600秒、thinking disabled。另有 Qwen 本地比较配置，默认仍GLM。安装tag必须实时读取，不能猜。全部本轮推理本地，无 API 回退。
 
-156项Python、10项前端、构建通过。浏览器工具无可用会话，视觉/点击未验收。服务需重启。硬件监控只做方案，无需提权，见design/DESIGN_OPTIONAL_HARDWARE_MONITOR。
+Qwen uppercase 明确测试修订最终 dd9ea5f962dc437bb523a34a79c44423：Go/Gate、五项独立 CLI 探针通过；证据 .masa/local-qwen-reviewed-acceptance.json。GLM sum fc668a... 经澄清规划成功，但生成/测试修订仍失败，最终思考调用98aa6c...输出不完整；失败全保留。下一步先提高本地测试质量和准确失败分类，再 digest/上下文/总预算，不扩大复杂路由。
 
-下一步优先分小文件/阶段输出与语法预检、真实纯本地项目回归；保留已有快照、审批、冻结测试、未知请求不重放、Gate。避免继续盲目重试同一大生成。budget/digest/上下文准入仍待做，复杂路由暂缓。
-
-注意：Jobs初始化会将running标中断，跨进程观察在跑的任务时用只读SQL/既有HTTP，不要仅为了查询再初始化Jobs或Console。每部分验证后commit，密钥与 .masa/.tools忽略，中英核心注释，文档保持简短。
+Python186、前端13/构建、Go runner测试通过；视觉未验收。服务启动用新版，读取正在执行的任务用既有 HTTP 或只读 SQLite，别为查询初始化 Jobs/Console（会恢复任务）。每部分验证后提交，密钥/.masa/.tools 不入 Git，核心函数中英文注释。
