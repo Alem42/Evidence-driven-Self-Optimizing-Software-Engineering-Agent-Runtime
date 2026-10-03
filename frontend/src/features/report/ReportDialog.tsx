@@ -61,7 +61,7 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
                 <span><strong>{CHAIN_TEXT[d.chain] ?? d.chain}</strong> <span className="muted">· {step(d.role)}</span></span>
                 <span className="mono">{d.action === 'stop' ? '停止' : `L${d.level} ${d.model}`}</span>
               </div>
-              <div className="muted">{d.escalated && <strong>升级 · </strong>}{REASON_TEXT[d.reason] ?? d.reason}</div>
+              <div className="muted">{d.escalated && <strong>升级 · </strong>}{REASON_TEXT[d.reason] ?? d.reason}{d.detail ? ' · ' + d.detail : ''}</div>
             </div>
           </li>
         ))}

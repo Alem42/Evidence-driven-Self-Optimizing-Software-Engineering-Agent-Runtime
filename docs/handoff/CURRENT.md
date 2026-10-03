@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-04 M0.5 前两项完成**：硬上下文拦截（domain/tokens.py、llm.py）、崩溃恢复演练（tests/test_recovery_drill.py，真硬杀子进程）、真实升级验证；共修 4 个缺陷（被中断验证、澄清后重规划、规划重试挤占修复轮次、准入过严）。恢复语义：已完成调用不重复；结果未知的请求明确停下不重放；被中断的验证新建验证 run。下一步：M0.5 剩余项，再 M1（首项：幂等分级——免费本地调用结果未知时自动重试，演练场景 B/C 目前需人工）。显卡归用户，跑完本地模型要卸载（keep_alive 0）。
+
 **2026-10-03 M0 完成**：分支 feature/multi-model 已实现任务级预算与路由（routing.py 纯策略、router.py、coordinator 全部模型调用经路由器、报告 routing 区块、前端策略/预算/报告）。下一步 M0.5（杀进程恢复演练、提供方硬上下文拦截、同级轮换、按角色起始等级、可编辑预算）再 M1（Diagnoser、声明式图、worker 租约）。详见进展008 §5。注意：真实本地→云升级端到端未验证；用户需要 GPU 时不要跑本地模型。
 
 **2026-10-03 深夜**：git 已修复（main 原为无关历史的 Initial commit，现已并入 develop 并快进，二者同为 f5fd53d）；新分支 `feature/multi-model`，下一步按 PLAN_MULTI_MODEL_RUNTIME 做 M0（任务级预算 + RoutingSnapshot + route() + 修复升级阶梯）。

@@ -77,7 +77,9 @@ class ProjectPlanning:
                     values['clarification_allowed']=not bool(plan.get('clarification_answers'))
                 if plan.get('clarification_answers'):
                     values.update(clarification=plan['clarification'],answers=plan['clarification_answers'])
-                    invocation=plan['clarification_id']
+                    # 重规划是新 run：它的第一次调用必须是 initial（答案已在上下文里）；只有在原 run 内续跑才用澄清编号。
+                    # A re-plan is a NEW run: its first call must be 'initial' (the answers are already in the context).
+                    invocation='initial' if retry_of else plan['clarification_id']
                 spec = RoleRuntime(self.store).call(rid,provider,'project_planner',values,invocation_id=invocation)
                 if isinstance(spec,dict) and spec.get('kind')=='clarification_request':
                     if plan.get('clarification_answers'):

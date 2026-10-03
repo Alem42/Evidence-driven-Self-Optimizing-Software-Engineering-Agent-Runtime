@@ -8,7 +8,8 @@
 - 测试私有包导入及编译器类型错误正确走测试修订；普通断言失败不因此自动修测试，实现修复仍冻结测试。
 - 前端 v3（2026-10-03）：与后端彻底分离，TypeScript 重写；后端 `masa serve` 只提供 API。任务历史、顶栏真实状态、可展开的执行图（含版本分支）、对话·决策流、CodeMirror 代码页（出错行标红）、验证、日志、独立设置中心。详见 [PLAN_FRONTEND_REDESIGN](PLAN_FRONTEND_REDESIGN.md)。
 - 任务报告（2026-10-03）：`GET /api/projects/:id/report` 汇总 token/耗时/工具调用，前端顶栏常驻并在任务终态自动弹窗；自动流程新增 gofmt 规范化、带原因的契约重试、测试-规格仲裁、Go 预检。详见 [进展007](progress/PROGRESS_2026-10-03_007_usage-report-and-auto-fixes.md)。
-- M0 路由与预算（2026-10-03）：新建任务可选「本地优先 · 有界升级」（自动执行）：任务级预算（调用/API token/时间/费用）、等级阶梯、上下文准入、本地权重摘要校验、路由快照；固定模型仍是默认且行为不变。报告新增“路由与预算”。真实本地→云升级端到端未验证。见 [进展008](progress/PROGRESS_2026-10-03_008_m0-routing-and-budget.md)、[使用说明](guides/USER_ROUTING_AND_BUDGET.md)。
+- M0 路由与预算（2026-10-03）：新建任务可选「本地优先 · 有界升级」（自动执行）：任务级预算（调用/API token/时间/费用）、等级阶梯、上下文准入、本地权重摘要校验、路由快照；固定模型仍是默认且行为不变。报告新增“路由与预算”。已用真实 GLM→DeepSeek 验证升级。见 [进展008](progress/PROGRESS_2026-10-03_008_m0-routing-and-budget.md)、[使用说明](guides/USER_ROUTING_AND_BUDGET.md)。
+- M0.5（2026-10-04）：本地模型硬上下文拦截（Ollama 超窗口会静默截断，已实测）；崩溃恢复演练（硬杀子进程再恢复，3 个场景）；真实本地→云升级验证。共修复 4 个缺陷。见 [进展009](progress/PROGRESS_2026-10-04_001_m05-context-guard-and-recovery-drill.md)。
 - 前端常驻阶段/时间/最近实际速率/文件进度，明确待答、待审、取消收尾和失败。Ollama 控制页已有硬件与后台诊断折叠面板。硬件只读有界缓存、不提权；故障日志不保存请求正文或密钥。
 - 已有标准库 Go CLI 规划、单轮澄清、审批、发布快照、真实检查、独立 Gate、运行与关联修订。Coordinator 串行，RoleRuntime/Jobs 持久化；没有任意动态图或并行决策 Agent。
 
@@ -16,4 +17,4 @@
 
 默认仍为 glm-4.7-flash:latest，Qwen 比较配置可另选。固定配置快照已实现；本地权重 digest、上下文准入、跨阶段总预算、自动升级和辅助路由待做。当前非流式；速率来自已完成请求。不是完整安全沙箱，不自动安装第三方依赖。
 
-Python 210 项、前端 vitest 24 项、tsc 与前端构建、Go runner 测试通过；新前端已用真实状态拷贝在浏览器实测（未调用模型，生成中的实时跟随未实机观察）。启动方式见 [工作台](guides/USER_WORKBENCH.md)。
+Python 222 项、前端 vitest 24 项、tsc 与前端构建、Go runner 测试通过；新前端已用真实状态拷贝在浏览器实测（未调用模型，生成中的实时跟随未实机观察）。启动方式见 [工作台](guides/USER_WORKBENCH.md)。

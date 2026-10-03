@@ -309,3 +309,57 @@ class OverflowRoutingTests(unittest.TestCase):
 
         with self.assertRaises(ContextOverflow):
             self.run_with(TooSmall('small', lambda: None), None, mode='fixed')
+
+
+class RealRunRegressionTests(unittest.TestCase):
+    """真实本地→云运行中发现的问题。 Issues found by the real local→cloud run."""
+
+    def test_skipped_candidates_are_explained_in_the_decision(self):
+        d = decide([], need=14_000)  # 本地窗口 16384：14000 + 预期输出 2048 放得下 / fits with the expected output
+        self.assertEqual(d.candidate, 'local')
+        d = decide([], need=15_000)  # 15000 + 2048 > 16384
+        self.assertEqual(d.candidate, 'cloud')
+        self.assertIn('small', d.detail)
+        self.assertIn('上下文窗口', d.detail)
+
+    def test_admission_reserves_the_expected_output_not_the_whole_ceiling(self):
+        # 窗口 16384、max_output 8192（真实 GLM 配置）：输入 9000 token 仍应放得下本地。 The real GLM profile: 9k input must fit.
+        glm = Candidate('glm', 1, 0, 'local', 'glm', context_limit=16384, max_output=8192)
+        d = decide([], (glm, CLOUD), need=9000)
+        self.assertEqual(d.candidate, 'glm')
+        d = decide([], (glm, CLOUD), need=13_000)  # 13000 + 4096 > 16384
+        self.assertEqual(d.candidate, 'cloud')
+
+    def test_planner_retries_do_not_consume_repair_rounds(self):
+        """规划重试曾把 job.attempt 抬高，导致修复只剩 2 轮就“达到上限”。 Planning retries once shrank the repair budget to 2 rounds."""
+        from test_auto_project import CompositeProvider
+
+        class FlakyTester(CompositeProvider):
+            def __init__(self):
+                self.testers = 0
+                self.repairs = 0
+
+            def respond(self, context):
+                if context['purpose'] == 'project_tester':
+                    self.testers += 1
+                    if self.testers < 3:
+                        return [{'invalid': 'shape'}]
+                if context['purpose'] == 'project_repair':
+                    self.repairs += 1
+                    return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // try {self.repairs}\n'}
+                return super().respond(context)
+
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                provider = FlakyTester()
+                jobs = Jobs(Path(temp))
+                jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0,
+                               'request': {'goal': 'Build a CLI'}}
+                with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+                    WorkflowCoordinator(store, FakeExecutor(exit_code=1), provider, jobs['job']).run()
+                self.assertEqual(provider.testers, 3)  # 两次规划重试 / two planning retries happened
+                self.assertEqual(provider.repairs, 4)  # 修复仍有完整的 4 轮 / all four repair rounds remain
+                self.assertIn('repair limit', jobs['job']['note'])
+            finally:
+                store.close()

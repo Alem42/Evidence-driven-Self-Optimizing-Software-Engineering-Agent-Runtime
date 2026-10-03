@@ -183,7 +183,7 @@ class WorkflowCoordinator:
                     if not reason:raise
                     self._fail('planning',decision)
                     planner_feedback=reason;retry_of=failed_id
-                    phase('planning_retry',failed_id,retry+1)
+                    phase('planning_retry',failed_id)
                     continue
                 if retry==2:
                     raise
@@ -191,7 +191,7 @@ class WorkflowCoordinator:
                 # Reuse validated Planner output and retry Tester at most twice.
                 self._fail('planning',decision)
                 reuse=failed_id
-                phase('planning_retry',failed_id,retry+1)
+                phase('planning_retry',failed_id)
         meta=store.run(plan)['data']['project_plan']
         if meta['status']!='approved':planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
                                'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),

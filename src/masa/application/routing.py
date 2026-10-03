@@ -13,6 +13,10 @@ from dataclasses import dataclass
 
 from masa.domain.tokens import estimate_tokens  # noqa: F401  (re-exported; coefficients are fitted on real calls)
 
+# 上下文准入只为“预期输出”预留窗口：整个 max_output 往往是上限而不是常态（真实修复输出约 1–3k token）。预算预留仍按完整 max_output。
+# Context admission reserves room for the EXPECTED output; max_output is usually a ceiling. Budget reservations still use the full max_output.
+CONTEXT_OUTPUT_RESERVE = 4096
+
 DEFAULT_POLICY = {
     'attempts_per_level': {'planning': 2, 'generation': 2, 'fix': 1},  # 初次 + 自修；fix 链的“初次”已是前面的生成 / initial + self-repair
     'max_escalations': 2,
@@ -113,7 +117,7 @@ def spend_from_report(report: dict, prices: dict | None = None) -> dict:
 
 def _blocked(c: Candidate, need_tokens: int, spend: dict, budget: dict) -> str | None:
     """候选被上下文或预算挡住的原因；None 表示可用。 Why a candidate cannot be used now (None = usable)."""
-    if need_tokens + c.max_output > c.context_limit:
+    if need_tokens + min(c.max_output, CONTEXT_OUTPUT_RESERVE) > c.context_limit:
         return 'context'
     limit = budget.get('max_model_calls')
     if limit is not None and spend.get('calls', 0) + 1 > limit:
@@ -150,6 +154,8 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
     escalations = len(set(used_levels)) - 1 if used_levels else 0
     current = used_levels[-1] if used_levels else None
 
+    skipped: list[str] = []
+
     def pick(level_ok) -> tuple[Candidate | None, str | None]:
         first_block = None
         for c in allowed:
@@ -158,13 +164,18 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
             why = _blocked(c, need_tokens, spend, budget)
             if why is None:
                 return c, None
+            skipped.append(f'{c.model}（{SKIP_TEXT.get(why, why)}）')
             first_block = first_block or why
         return None, first_block
+
+    def note() -> str:
+        # 被跳过的候选要写进决策，否则看起来像“凭空升级”。 Skipped candidates must be visible in the decision.
+        return ('跳过：' + '；'.join(skipped)) if skipped else ''
 
     if current is None:
         c, why = pick(lambda lv: True)
         if c:
-            return Decision('use', c.id, c.level, 'start_lowest_eligible')
+            return Decision('use', c.id, c.level, 'start_lowest_eligible', detail=note())
         return Decision('stop', reason=why or 'no_candidate', detail='没有满足上下文/预算的候选')
 
     failed_here = sum(1 for lv in used_levels if lv == current)
@@ -172,7 +183,7 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
     if current == top or failed_here < per_level:
         c, why = pick(lambda lv: lv == current)
         if c:
-            return Decision('use', c.id, c.level, 'top_level' if current == top else 'retry_same_level')
+            return Decision('use', c.id, c.level, 'top_level' if current == top else 'retry_same_level', detail=note())
         if current == top:
             return Decision('stop', reason=why or 'no_candidate', detail='最高等级无法继续')
         # 本级被上下文/预算挡住：直接尝试升级，而不是原地空转。 Blocked on this level: escalate instead of spinning.
@@ -183,7 +194,7 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
         return Decision('stop', reason='no_higher_level', detail='没有更高等级的模型可用')
     c, why = pick(lambda lv: lv > current)
     if c:
-        return Decision('use', c.id, c.level, 'escalate', escalated=True)
+        return Decision('use', c.id, c.level, 'escalate', detail=note(), escalated=True)
     return Decision('stop', reason=why or 'no_higher_level', detail='更高等级的模型被上下文或预算挡住')
 
 
@@ -197,4 +208,15 @@ STOP_TEXT = {
     'budget_cost': '费用预算已用完',
     'price_unknown': '设置了费用预算但候选模型缺少价格，无法保证上限',
     'context': '输入超过所有候选模型的上下文上限',
+}
+
+# 单个候选被跳过的原因（与 STOP_TEXT 不同：这里只是“这个模型不行”，不是“整个任务停止”）。
+# Why ONE candidate was skipped (unlike STOP_TEXT, which explains why the whole task stops).
+SKIP_TEXT = {
+    'context': '输入放不进它的上下文窗口',
+    'budget_calls': '调用次数预算用完',
+    'budget_time': '运行时间预算用完',
+    'budget_cloud_tokens': 'API token 预算不够',
+    'budget_cost': '费用预算不够',
+    'price_unknown': '缺少价格',
 }
