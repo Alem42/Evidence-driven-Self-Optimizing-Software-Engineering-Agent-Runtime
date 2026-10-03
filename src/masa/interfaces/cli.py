@@ -24,9 +24,9 @@ def parser():
     p.add_argument("--runner", type=Path, default=PROJECT / ".tools/bin/masa-runner.exe")
     p.add_argument("--go", type=Path, default=PROJECT / ".tools/go/bin/go.exe")
     sub = p.add_subparsers(dest="command", required=True)
-    ui = sub.add_parser("ui", help="launch the local browser console")
+    ui = sub.add_parser("serve", aliases=["ui"], help="launch the local API server (frontend runs separately)")
     ui.add_argument("--port", type=int, default=8765)
-    ui.add_argument("--open", action="store_true", help="open the console in your default browser")
+    ui.add_argument("--origin", action="append", default=None, help="allowed frontend origin (repeatable); default: local Vite dev/preview ports")
     run = sub.add_parser("run")
     run.add_argument("--repo", required=True, type=Path)
     run.add_argument("--goal", default="Verify the selected Go check; do not modify source.")
@@ -57,9 +57,9 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     store = None
     try:
-        if args.command == "ui":
-            from masa.interfaces.http.server import serve
-            serve(args.state_dir, args.runner, args.go, PROJECT, args.port, args.open)
+        if args.command in ("serve", "ui"):
+            from masa.interfaces.http.server import serve, DEFAULT_ORIGINS
+            serve(args.state_dir, args.runner, args.go, PROJECT, args.port, tuple(args.origin) if args.origin else DEFAULT_ORIGINS)
             return 0
         store = Store(args.state_dir)
         if args.command == 'inspect':

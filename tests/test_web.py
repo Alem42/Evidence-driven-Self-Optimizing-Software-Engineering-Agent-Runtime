@@ -244,9 +244,9 @@ class WebTests(unittest.TestCase):
         self.server = make_server(self.console, 0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        status, html = self.request('/')
+        status, session = self.request('/api/session', headers={'Origin': 'http://localhost:5173'})
         self.assertEqual(status, 200)
-        self.token = re.search(r'name="masa-token" content="([^"]+)"', html).group(1)
+        self.token = session['token']
 
     def tearDown(self):
         self.server.shutdown()
@@ -344,8 +344,12 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.request('/api/runs', headers=headers)[0], 403)
         self.assertEqual(self.request('/api/runs')[0], 200)
         self.assertEqual(self.request('/api/jobs/missing-job')[0],404)
-        self.assertEqual(self.request('/app.js')[0], 200)
-        self.assertEqual(self.request('/style.css')[0], 200)
+        # 后端不再托管前端；令牌只发给白名单来源。 API-only: no static files; token only for allowed origins.
+        self.assertEqual(self.request('/')[0], 404)
+        self.assertEqual(self.request('/app.js')[0], 404)
+        self.assertEqual(self.request('/api/session')[0], 403)
+        self.assertEqual(self.request('/api/session', headers={'Origin': 'https://evil.example'})[0], 403)
+        self.assertEqual(self.request('/api/runs', headers={'Origin': 'http://localhost:5173'})[0], 200)
         self.assertEqual(self.request('/../provider.json')[0], 404)
         self.assertEqual(self.request('/api/runs', [1])[0], 400)
 

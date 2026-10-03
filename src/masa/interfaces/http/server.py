@@ -8,14 +8,15 @@ import sqlite3
 import socket
 import os
 from urllib.parse import urlsplit
-import webbrowser
 
 from masa.domain.models import MasaError
 from masa.application.console import Console
 from masa.infrastructure.locking import owner_lock
 
 
-STATIC = Path(__file__).parent / "static"
+# 前端独立部署（Vite dev/preview 或任意静态服务器），后端只提供 API；默认放行本机 Vite 端口。
+# The frontend is a separate app; this server is API-only and allows loopback dev origins by default.
+DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173")
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
@@ -29,8 +30,9 @@ class LocalHTTPServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def make_server(console, port=8765):
+def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
     token = secrets.token_urlsafe(32)
+    allowed_origins = frozenset(o.rstrip("/") for o in origins)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MASA"
@@ -47,6 +49,10 @@ def make_server(console, port=8765):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(raw)))
+            origin = self.headers.get("Origin")
+            if origin in allowed_origins:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
@@ -61,11 +67,26 @@ def make_server(console, port=8765):
             if host not in allowed:
                 return False
             origin = self.headers.get("Origin")
-            if origin and origin != f"http://{host}":
+            if origin and origin != f"http://{host}" and origin not in allowed_origins:
                 return False
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 return False
             return not api or secrets.compare_digest(self.headers.get("X-MASA-Token", "").encode(), token.encode())
+
+        def do_OPTIONS(self):
+            """CORS 预检：只对白名单来源放行。 CORS preflight, allowed origins only."""
+            origin = self.headers.get("Origin")
+            if origin not in allowed_origins or not self.check_access(False):
+                self.send(403, {"error": "origin not allowed"})
+                return
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "X-MASA-Token, Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Vary", "Origin")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_GET(self):
             self.dispatch(False)
@@ -75,15 +96,17 @@ def make_server(console, port=8765):
 
         def dispatch(self, write):
             path = urlsplit(self.path).path
-            if not self.check_access(path.startswith("/api/")):
+            if not self.check_access(path.startswith("/api/") and path != "/api/session"):
                 self.send(403, {"error": "local session access denied"})
                 return
             try:
-                if not write and path in {"/", "/app.js", "/style.css"}:
-                    name, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-                                  "/style.css": ("style.css", "text/css")}[path]
-                    data = (STATIC / name).read_bytes().replace(b"__SESSION_TOKEN__", token.encode())
-                    self.send(200, data, mime + "; charset=utf-8")
+                if path == "/api/session" and not write:
+                    # 令牌只发给白名单来源的前端页面，其他来源即使 Host 正确也拿不到。
+                    # Only allow-listed frontend origins can obtain the session token.
+                    if self.headers.get("Origin") not in allowed_origins:
+                        self.send(403, {"error": "origin not allowed"})
+                        return
+                    self.send(200, {"token": token, "version": "api-v1"})
                     return
                 body = {}
                 if write:
@@ -198,12 +221,10 @@ def make_server(console, port=8765):
     return LocalHTTPServer(("127.0.0.1", port), Handler)
 
 
-def serve(state_dir, runner, go, project, port=8765, open_browser=False):
+def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS):
     """先取得状态目录独占权再恢复任务，失败启动也释放资源。 Own state before recovery and clean up failed starts."""
     if not 0 <= port <= 65535:
         raise MasaError("port must be 0..65535")
-    if not all((STATIC / name).is_file() for name in ("index.html", "app.js", "style.css")):
-        raise MasaError("frontend missing: run scripts/build-ui.ps1 first")
     # Console 初始化会恢复 Jobs；第二个服务必须在触碰任务状态之前被拒绝。
     # Console initialization recovers Jobs; reject another server before it mutates jobs.
     # 独立锁不与 Runtime 的短期工具锁混用，所有端口共享同一目录独占权。
@@ -212,11 +233,11 @@ def serve(state_dir, runner, go, project, port=8765, open_browser=False):
         console = Console(state_dir, runner, go, project)
         server = None
         try:
-            server = make_server(console, port)
+            server = make_server(console, port, origins)
             url = f"http://127.0.0.1:{server.server_port}"
-            print(f"MASA console: {url}\nLocal-only; Ctrl+C stops the console and cancels its active run.", flush=True)
-            if open_browser:
-                webbrowser.open(url)
+            print(f"MASA API: {url}
+Allowed frontend origins: {', '.join(sorted(origins))}", flush=True)
+            print("Local-only. Start the frontend separately: cd frontend && npm run dev. Ctrl+C stops the API and cancels its active run.", flush=True)
             server.serve_forever(poll_interval=0.2)
         except KeyboardInterrupt:
             pass

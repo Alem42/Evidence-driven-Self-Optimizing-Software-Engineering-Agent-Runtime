@@ -15,6 +15,8 @@ from masa.domain.run_kind import run_kind
 
 
 class Store:
+    _ready: set[str] = set()
+
     def __init__(self, root: Path):
         """打开独立连接并补齐兼容表。 Open an independent connection and add compatible tables."""
         self.root = root.resolve()
@@ -24,6 +26,11 @@ class Store:
         self.db = sqlite3.connect(self.root / "runtime.sqlite3", timeout=10)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
+        # 每个进程只初始化一次表结构；之后的读取连接不再抢写锁。
+        # Initialise the schema once per process so read-only requests never contend for the write lock.
+        key = str(self.root / "runtime.sqlite3")
+        if key in Store._ready:
+            return
         self.db.execute("PRAGMA journal_mode=WAL")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, 1):
@@ -67,6 +74,7 @@ class Store:
               PRIMARY KEY(run_id,sender,receiver,graph_version,snapshot_id));
             PRAGMA user_version=1;
         """)
+        Store._ready.add(key)
 
     def close(self):
         self.db.close()
