@@ -145,7 +145,7 @@ class ScriptedProvider:
             self.repairs += 1
             self.on_repair()
             return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // by {self.profile["model"]} #{self.repairs}\n'}
-        return {'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
 
 
 class EscalationIntegrationTests(unittest.TestCase):

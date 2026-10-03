@@ -2,10 +2,11 @@
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.workflow import WorkflowCheckpoint
-from masa.application.check_policy import format_only, test_revision_needed, repeated_assertion_signature
+from masa.application.check_policy import failure_signature, format_only, test_revision_needed, repeated_assertion_signature
 from masa.application.router import Router, RoutingStop
+from masa.application.triage import assess
 from masa.runtime.engine import Runtime
-from masa.domain.models import ContextOverflow, MasaError
+from masa.domain.models import ContextOverflow, MasaError, TransportFailure
 import time
 
 
@@ -25,10 +26,10 @@ class WorkflowCoordinator:
     def _ladder(self):
         return self.router.mode=='ladder'
 
-    def _emit(self, kind, payload, anchor=None):
-        """写入路由事件；任务的第一个 run 出现之前先缓存。只在 ladder 模式记录，固定模式不产生额外事件。
-        Record routing events; buffered until the task's first run exists. Fixed mode adds no events."""
-        if not self._ladder:return
+    def _emit(self, kind, payload, anchor=None, always=False):
+        """写入路由事件；任务的第一个 run 出现之前先缓存。只在 ladder 模式记录，固定模式不产生额外事件（always=True 除外）。
+        Record routing events; buffered until the task's first run exists. Fixed mode adds none unless always=True."""
+        if not self._ladder and not always:return
         self._deferred.append((kind,payload,anchor))
         self._flush()
 
@@ -88,6 +89,22 @@ class WorkflowCoordinator:
         received = last['type'] == 'model_completed' or bool(last['payload'].get('contract_diagnostic'))
         return (plan.get('error') or 'response rejected by validation') if received else None
 
+    def _wait_for_server(self, provider, used):
+        """本地服务暂时不可达（被杀、重启中）：等它恢复再重试，不计入失败链，也不触发升级。云端没有这个概念。
+        A local server is temporarily unreachable: wait for it and retry, without counting a failure or escalating. Local only."""
+        policy=self.router.policy
+        if not self._ladder or used>=int(policy.get('transport_retries',0)):return False
+        wait=getattr(provider,'wait_until_reachable',None)
+        if wait is None or (getattr(provider,'config',None) or {}).get('model_type')!='local':return False
+        self._emit('transport_retry',{'attempt':used+1,'max':int(policy['transport_retries']),'wait_seconds':int(policy.get('transport_wait_seconds',900))})
+        return bool(wait(int(policy.get('transport_wait_seconds',900))))
+
+    def _strongest_tried(self):
+        """修复链里是否已经用过最高等级（固定模式没有更强的模型，视为已用过）。 Has the fix chain already used the top level?"""
+        if not self._ladder:return True
+        top=max(c.level for c in self.router.candidates)
+        return any(h['level']==top for h in self._history('fix'))
+
     def _attempts_allowed(self, chain):
         """一个阶段内最多尝试几次（含升级后的尝试）。固定模式保持原来的“初次 + 重试一次”。
         Total attempts within one stage, including after escalation; fixed mode keeps 'first try + one retry'."""
@@ -99,11 +116,23 @@ class WorkflowCoordinator:
         """call(provider, feedback)；响应被校验拒绝时带原因重试，重复失败由路由器决定是否升级。
         Retry a rejected stage with its reason; repeated failures let the router decide whether to escalate."""
         feedback=None
-        for n in range(self._attempts_allowed(chain)):
+        n=0
+        transport_used=0
+        while n<self._attempts_allowed(chain):
             provider,decision=self._pick(role,chain,need=need,stage=stage)
+            # 发请求之前就记下“这次由谁修复”：请求中途崩溃后，恢复时路由器仍知道这个候选已经试过。
+            # Record WHO is attempting the fix BEFORE the request, so a crash mid-call still tells the router this candidate was tried.
+            if chain=='fix':
+                self.job['pending_fix']={'candidate':decision.candidate,'level':decision.level}
             try:
                 return call(provider,feedback)
             except RoutingStop:
+                raise
+            except TransportFailure:
+                if chain=='fix':self.job['pending_fix']=None  # 传输失败不是模型的错 / not the model's fault
+                if self._wait_for_server(provider,transport_used):
+                    transport_used+=1
+                    continue
                 raise
             except ContextOverflow as overflow:
                 # 这个候选的窗口放不下输入：记一次失败，并用估算的真实输入量重新选择，路由器会跳过放不下的候选。
@@ -112,15 +141,19 @@ class WorkflowCoordinator:
                 # candidates are skipped. Fixed mode has no alternative, so the explicit error surfaces.
                 if not self._ladder:
                     raise
+                if chain=='fix':self.job['pending_fix']=None  # 这次失败已直接记入失败链，避免重复计数 / already recorded below
                 self._fail(chain,decision)
                 need=overflow.estimated_tokens
+                n+=1
                 continue
             except MasaError:
                 reason=self._retryable(self.job.get('run_id')) if n<self._attempts_allowed(chain)-1 else None
                 if not reason:
                     raise
+                if chain=='fix':self.job['pending_fix']=None
                 self._fail(chain,decision)
                 feedback='Your previous attempt was rejected: '+reason
+                n+=1
 
     def _stopped(self, stop, run_id):
         """路由决定停止：保留证据，任务以说明结束，而不是报错。 A routing stop ends the task with a note and keeps all evidence."""
@@ -139,6 +172,19 @@ class WorkflowCoordinator:
         generation=ProjectGeneration(store,runner)
         checkpoint=self.job
         plan=checkpoint.get('plan_id')
+        # 可行性预检：确定性规则零成本；确定会失败的需求直接拦下（除非用户明确要求继续）。
+        # Feasibility triage: deterministic rules are free; a requirement certain to fail is stopped unless the user forces it.
+        triage=None
+        triage_provider=None
+        if not plan and not self.resuming:
+            triage=assess(goal)
+            if triage['verdict']=='infeasible' and not self.job['request'].get('force'):
+                blocked=planning.record_triage_block(goal,triage)
+                self.job.update(run_id=blocked,status='completed',result={'id':blocked},
+                                note='triage: '+'; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible'))
+                return
+            if self._ladder and self.router.policy.get('triage_model'):
+                triage_provider=self.router.local_provider('project_triage')
         # 发布与后台检查点之间也可能中断；直接复用已发布的同一份方案。
         # Publication can precede the job checkpoint: reuse that exact saved plan.
         if self.resuming and not plan and checkpoint.get('phase')=='planning' and checkpoint.get('run_id'):
@@ -150,7 +196,10 @@ class WorkflowCoordinator:
         retry_of=None
         planner_retries=int(self.router.policy.get('planner_retries',1))
         decision=None
-        for retry in range(3 if not plan else 0):
+        transport_used=0
+        provider=None
+        for index in range((3+int(self.router.policy.get('transport_retries',0))) if not plan else 0):
+            retry=index-transport_used  # 真正的规划重试次数；传输等待不计入 / real planning retries; transport waits do not count
             try:
                 recover_id=checkpoint.get('run_id') if self.resuming and checkpoint['phase']=='planning' and retry==0 else None
                 if recover_id:
@@ -159,13 +208,21 @@ class WorkflowCoordinator:
                     provider,decision=self._pick('project_tester' if reuse else 'project_planner','planning',
                                                  need=goal,stage='planning')
                 plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id,
-                                       retry_of=retry_of,retry_feedback=planner_feedback)
+                                       retry_of=retry_of,retry_feedback=planner_feedback,
+                                       triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return
                 checkpoint['plan_id']=plan
                 break
             except RoutingStop:
+                raise
+            except TransportFailure:
+                if provider is not None and self._wait_for_server(provider,transport_used):
+                    transport_used+=1
+                    retry_of=self.job['run_id'] if not reuse else retry_of  # 新 run，沿用已回答的澄清 / new run keeping answered clarifications
+                    phase('planning_retry',self.job['run_id'])
+                    continue
                 raise
             except MasaError:
                 failed_id=self.job['run_id']
@@ -268,6 +325,14 @@ class WorkflowCoordinator:
             if self.checkpoint.record_assertion(verified,assertion):
                 self.job.update(status='completed',result={'id':verified},
                     note='same test assertion failed three times; inspect specification and test expectation before further repair')
+                return
+            # 确定会失败的运行：同一失败签名在多轮后仍不变，并且更强的模型也已经试过，就停下交给人，不再继续花钱。
+            # A doomed run: the same failure signature survives several rounds AND the strongest model was already tried.
+            repeats=self.checkpoint.record_signature(verified,failure_signature(checks))
+            if repeats>=int(self.router.policy.get('stuck_after',99)) and self._strongest_tried():
+                self._emit('task_stopped',{'reason':'stuck','detail':f'同一失败签名连续 {repeats} 次未变化'},verified,always=True)
+                self.job.update(status='completed',result={'id':verified},
+                    note=f'stuck: the same failure signature repeated {repeats} times, including attempts by the strongest model; a human needs to look (specification, tests or requirement)')
                 return
             outputs=[result for _,result in checks]
             evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)

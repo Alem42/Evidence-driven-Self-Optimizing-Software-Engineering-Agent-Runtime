@@ -215,3 +215,19 @@ def validate_files(files, spec):
     preflight_go(files, spec['module'])
     return files
 
+
+
+def validate_triage(action):
+    """本地模型的可行性意见：只能是 ok 或 risky（它没有拦截权）；“infeasible”会被降级为 risky，因为弱模型不能误杀好需求。
+    The local model's opinion: ok or risky only (it has no blocking power); "infeasible" is downgraded to risky."""
+    if not isinstance(action, dict) or set(action) - {'verdict', 'reasons', 'suggestions'} or action.get('verdict') not in {'ok', 'risky', 'infeasible'}:
+        raise MasaError('invalid triage opinion')
+    result = {'verdict': 'ok' if action['verdict'] == 'ok' else 'risky'}
+    for key in ('reasons', 'suggestions'):
+        items = action.get(key, [])
+        if not isinstance(items, list) or len(items) > 5 or any(not isinstance(i, str) or len(i) > 400 or '\x00' in i for i in items):
+            raise MasaError('invalid triage ' + key)
+        result[key] = [i.strip() for i in items if i.strip()]
+    if action['verdict'] == 'infeasible':
+        result['reasons'] = ['（本地模型认为不可行，已降级为风险提示）'] + result['reasons']
+    return result

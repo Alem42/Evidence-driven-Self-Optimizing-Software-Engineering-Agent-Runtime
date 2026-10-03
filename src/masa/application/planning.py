@@ -37,7 +37,8 @@ class ProjectPlanning:
                 status,reason,event='failed',plan['error'],'project_deadline_expired'
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
-    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None):
+    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
+                 triage=None, triage_provider=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         if resume_id:
@@ -52,14 +53,24 @@ class ProjectPlanning:
             (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
             plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
             plan['clarification_enabled']=True
+            if triage:plan['triage']=triage
             if retry_of:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
-                for key in ('clarification','clarification_id','clarification_answers','requirement_revision'):
+                for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4, deadline_seconds=86400),
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0), deadline_seconds=86400),
                                                            graph=harness_policy(), project_plan=plan, parent_run_id=reuse or retry_of)
         if on_created:
             on_created(rid)
+        # 本地模型复核可行性：只能升级为“有风险”，失败也不影响规划。Local review may only raise a warning; failures never block planning.
+        if triage_provider is not None and not resume_id and not reuse and not retry_of:
+            try:
+                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal})
+                plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{**opinion,'by':triage_provider.profile.get('model')}}
+                if opinion['verdict']=='risky' and plan['triage'].get('verdict')=='ok':plan['triage']['verdict']='risky'
+            except Exception as exc:  # 预检只是建议：任何失败都不能影响规划 / advisory only: no failure may block planning
+                plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{'verdict':'skipped','reasons':[str(exc)[:200]],'suggestions':[]}}
+            self.update(rid,plan,'created','triage_reviewed')
         try:
             if resume_id and plan.get('spec_ref'):
                 spec=self.store.read(plan['spec_ref'])
@@ -116,6 +127,20 @@ class ProjectPlanning:
             plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
             self.update(rid, plan, 'failed', 'project_planning_failed')
             raise stage_error(exc, f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+
+    def record_triage_block(self, goal, triage):
+        """确定会失败的需求：不调用任何模型，只留下一条带原因和改写建议的失败记录，方便在历史里看到为什么。
+        A requirement that is certain to fail: no model call, just a failed record with reasons and rewrites for the history."""
+        text(goal, 16000)
+        seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
+        seed.mkdir(parents=True)
+        (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
+        reasons='; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible')
+        plan={'status':'failed','provider':{},'template':'go-cli','dependencies':[],'triage':triage,'error':'infeasible: '+reasons[:600]}
+        rid=Runtime(self.store,self.executor).create(seed,goal,Budget(model_calls=1,deadline_seconds=86400),graph=harness_policy(),project_plan=plan)
+        self.store.event(rid,'triage_blocked',{'rules':[f['rule'] for f in triage['findings'] if f['level']=='infeasible']})
+        self.update(rid,plan,'failed','project_triage_blocked')
+        return rid
 
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""

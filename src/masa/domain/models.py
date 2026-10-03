@@ -20,11 +20,19 @@ class ContextOverflow(MasaError):
                          'rejected before sending because local servers silently truncate instead of failing')
 
 
+class TransportFailure(MasaError):
+    """没有收到任何响应（连接被拒绝、被重置、服务被杀）。对免费的本地模型，这种失败可以在服务恢复后安全重试；
+    对付费云调用，结果仍视为未知。 No response was received (refused, reset, server killed). Safe to retry for FREE local models
+    once the server is back; for paid cloud calls the outcome stays unknown."""
+
+
 def stage_error(exc, message):
     """阶段包装器用它构造要抛出的异常：上下文溢出必须保持类型（路由器据此升级），其余沿用带 run 编号的 MasaError。
     Stage wrappers raise this: a context overflow keeps its type so the router can act on it; everything else is the usual MasaError."""
     if isinstance(exc, ContextOverflow):
         return ContextOverflow(exc.estimated_tokens, exc.limit, exc.model)
+    if isinstance(exc, TransportFailure):
+        return TransportFailure(f'{message} ({exc})')
     return MasaError(message)
 
 

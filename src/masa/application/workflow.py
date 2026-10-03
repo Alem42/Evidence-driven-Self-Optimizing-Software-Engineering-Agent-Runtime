@@ -26,3 +26,12 @@ class WorkflowCheckpoint:
             self.job.update(prior_assertion=signature, repeated_assertions=repeated,
                             evaluated_verification=verified)
         return bool(signature) and self.job.get('repeated_assertions', 0) >= 3
+
+    def record_signature(self, verified, signature):
+        """与 record_assertion 同理，但针对通用失败签名（编译/vet/测试诊断）；每个验证只计一次，跨重启保留。
+        Like record_assertion but for the general failure signature; one count per verification, preserved across restarts."""
+        signature = json.loads(json.dumps(signature))
+        if self.job.get('signature_for') != verified:
+            repeated = self.job.get('repeated_signature', 0) + 1 if signature and signature == self.job.get('prior_signature') else 1
+            self.job.update(prior_signature=signature, repeated_signature=repeated, signature_for=verified)
+        return self.job.get('repeated_signature', 0) if signature else 0

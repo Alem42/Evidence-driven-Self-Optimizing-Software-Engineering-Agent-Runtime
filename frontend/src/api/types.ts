@@ -24,6 +24,7 @@ export interface ProjectPlan {
   clarification_id?: string;
   clarification?: Clarification;
   coverage_warning?: string;
+  triage?: Triage;
   test_review?: { findings: { severity: string; message: string }[] };
   error?: string;
 }
@@ -334,4 +335,21 @@ export interface AccountBalance {
   reason?: string;
   available?: boolean;
   balances?: { currency: string; total: string; granted: string; topped_up: string }[];
+}
+
+// ───────── 可行性预检 Feasibility triage ─────────
+export interface TriageFinding {
+  rule: string;
+  level: 'infeasible' | 'risky';
+  matched: string[];
+  reason: string;
+  suggestion: string;
+}
+
+export interface Triage {
+  verdict: 'ok' | 'risky' | 'infeasible';
+  summary?: string;
+  findings: TriageFinding[];
+  /** 本地模型的复核意见：只能告警，不拦截。 Local-model review: warns only. */
+  model?: { verdict: 'ok' | 'risky' | 'skipped'; reasons: string[]; suggestions: string[]; by?: string };
 }

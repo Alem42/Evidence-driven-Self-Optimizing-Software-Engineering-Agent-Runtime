@@ -44,6 +44,11 @@ describe('deriveStatus', () => {
   it('a job for another version does not make this one live', () => {
     expect(deriveStatus(detail({ status: 'succeeded' }), { status: 'running', run_id: 'other' }).live).toBe(false);
   });
+  it('a triage-blocked run is its own state, not a model failure', () => {
+    const s = deriveStatus(detail({ status: 'failed', plan: { status: 'failed', error: 'infeasible: x', triage: { verdict: 'infeasible', findings: [] } } }));
+    expect(s.key).toBe('triage_blocked');
+    expect(s.tone).toBe('warn');
+  });
   it('succeeded run passes', () => {
     expect(deriveStatus(detail({ status: 'succeeded' })).key).toBe('passed');
   });

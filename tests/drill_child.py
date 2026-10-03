@@ -1,9 +1,9 @@
 """恢复演练的子进程（不是测试，由 test_recovery_drill 启动并硬杀）。
 Child process of the recovery drill (not a test): started and hard-killed by test_recovery_drill.
 
-用法 / usage: python drill_child.py <state_dir> <start|resume> <none|verify|model|generation>
+用法 / usage: python drill_child.py <state_dir> <start|resume> <none|verify|model|generation|cloudrepair>
   start  : 启动一个本地优先的自动任务。kill=verify 在第二次验证（本地修复后的验证）中卡住等待被杀；
-           kill=model 在本地修复的模型调用中途卡住；kill=generation 在本地生成代码的模型调用中途卡住。
+           kill=model 在本地修复的模型调用中途卡住；kill=generation 在本地生成代码的模型调用中途卡住；kill=cloudrepair 在付费云修复的调用中途卡住。
   resume : 全新进程重开同一个状态目录并恢复被中断的任务。
 所有“假模型调用/假工具执行”都追加到 <state>/drill-calls.log，供父进程跨进程计数。
 """
@@ -59,6 +59,7 @@ class Model:
     def __init__(self, name):
         self.name = name
         self.profile = {'provider': 'test', 'model': name}
+        self.config = {'model_type': 'local' if name == 'local' else 'cloud'}  # 账本层据此判断能否重试 / the ledger uses this to decide on retries
         self.usage = {'prompt_tokens': 100, 'completion_tokens': 50, 'total_tokens': 150}
 
     def respond(self, context):
@@ -68,11 +69,13 @@ class Model:
             block('local generation in flight')
         if purpose == 'project_repair':
             if self.name == 'cloud':
+                if kill == 'cloudrepair' and phase == 'start':
+                    block('paid cloud repair in flight')
                 executor.exit_code = 0  # 云模型修好了 / the cloud model fixes it
             elif kill == 'model' and phase == 'start':
                 block('local repair in flight')
             return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // {self.name}\n'}
-        return {'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
 
 
 MODELS = {'local': Model('local'), 'cloud': Model('cloud')}
@@ -116,6 +119,7 @@ finally:
 print('RESULT ' + json.dumps({
     'status': job['status'], 'error': job.get('error'), 'note': job.get('note'), 'final_run_status': final,
     'route_history': job.get('route_history'), 'pending_fix': job.get('pending_fix'),
+    'abandoned': sum(1 for c in report['calls'] if c['status'] == 'abandoned'),
     'escalations': (report['routing'] or {}).get('escalations'), 'models': {m['model']: m['calls'] for m in report['by_model']},
     'stopped': (report['routing'] or {}).get('stopped')}, ensure_ascii=False))
 console.close()

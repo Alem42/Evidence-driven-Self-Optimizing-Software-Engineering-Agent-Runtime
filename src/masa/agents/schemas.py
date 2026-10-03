@@ -20,6 +20,10 @@ def response_schema(context):
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'required':[path],
                                      'properties':{path:string}}}}
+    if purpose=='project_triage':
+        short={'type':'array','maxItems':5,'items':{'type':'string','maxLength':400}}
+        return {'type':'object','additionalProperties':False,'required':['verdict','reasons','suggestions'],
+                'properties':{'verdict':{'enum':['ok','risky']},'reasons':short,'suggestions':short}}
     if purpose=='project_tester':
         case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
               'properties':{'name':{'type':'string','minLength':1},'input':string,

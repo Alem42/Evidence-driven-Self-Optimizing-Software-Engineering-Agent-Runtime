@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
-from masa.domain.models import MasaError, canonical, ContextOverflow
+from masa.domain.models import MasaError, TransportFailure, canonical, ContextOverflow
 from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
 from masa.agents.schemas import response_schema
@@ -42,7 +42,7 @@ def validate_config(config):
         if type(value) is not int or not low<=value<=high:raise MasaError('invalid '+name)
         values[name]=value
     roles=config.get('roles',[])
-    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','code_generation','verifier'}
+    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','project_triage','project_diagnoser','code_generation','verifier'}
     if not isinstance(roles,list) or any(not isinstance(r,str) or r not in allowed for r in roles) or len(set(roles))!=len(roles):
         raise MasaError('invalid model roles')
     values['roles']=roles
@@ -114,6 +114,29 @@ class ChatProvider:
         self.usage = None
         self.metrics = None
         self.contract_diagnostic = None
+
+    def reachable(self, timeout=3):
+        """本地服务是否在响应（Ollama: /api/version；兼容服务: /models）。 Is the local server answering?"""
+        path = '/api/version' if self.config['protocol'] == 'ollama' else '/models'
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(self.config['base_url'].rstrip('/') + path, timeout=timeout) as response:
+                response.read(1024)
+            return True
+        except (OSError, urllib.error.URLError, ValueError):
+            return False
+
+    def wait_until_reachable(self, max_seconds, *, interval=3, sleep=time.sleep, clock=time.monotonic):
+        """等本地服务恢复（用户能容忍很长的时间）。只用于本地模型；云端没有这个概念。
+        Wait for the local server to come back (the user tolerates long waits). Local models only."""
+        if self.config['model_type'] != 'local':
+            return False
+        deadline = clock() + max_seconds
+        while True:
+            if self.reachable():
+                return True
+            if clock() >= deadline:
+                return False
+            sleep(interval)
 
     def respond(self, context, *, timeout=None):
         """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
@@ -209,10 +232,11 @@ class ChatProvider:
             raise MasaError(
                 f"model HTTP {code}; no automatic retry; check API configuration"
             ) from None
-        except (OSError, ValueError, urllib.error.URLError):
-            raise MasaError(
-                "model transport/JSON failure; billing may be unknown"
-            ) from None
+        except (OSError, urllib.error.URLError):
+            # 没有拿到响应：连接被拒绝/重置/超时。 No response received: refused, reset or timed out.
+            raise TransportFailure("model transport failure: no response received; billing may be unknown") from None
+        except ValueError:
+            raise MasaError("model response was not valid JSON; billing may be unknown") from None
         try:
             if self.config['protocol']=='ollama':
                 # verbose 同源的纳秒计数，只计算真实完成响应的速率。

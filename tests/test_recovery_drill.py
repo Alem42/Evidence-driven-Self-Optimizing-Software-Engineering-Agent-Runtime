@@ -4,7 +4,7 @@ Crash-recovery drill: a real child process is hard-killed (no cleanup) and a bra
 验证的是持久化与恢复契约，而不是“看起来能恢复”：
   · 已完成的模型调用不会被重复（跨进程计数）；
   · 路由状态（失败链、pending_fix、预算）跨崩溃保留；
-  · 请求已发出但结果未知的调用不会被静默重放，而是明确停下。
+  · 免费本地调用结果未知时作为新尝试重试；付费云调用永远不会被静默重放，而是明确停下。
 """
 import json
 import subprocess
@@ -78,22 +78,21 @@ class RecoveryDrillTests(unittest.TestCase):
         self.assertEqual(result['escalations'], 1)  # 失败链跨崩溃保留，所以还是升级了 / the chain survived the crash
         self.assertEqual(result['route_history']['fix'][0]['candidate'], 'local')
 
-    def test_crash_in_the_middle_of_a_model_call_is_not_silently_replayed(self):
-        """模型请求已发出、结果未知时被硬杀：恢复必须明确停下，而不是悄悄重放这次请求。"""
+    def test_a_free_local_repair_call_lost_in_a_crash_is_retried_as_a_new_attempt(self):
+        """本地修复请求已发出、进程被硬杀：免费调用作为同一次调用的新尝试重试（旧尝试标为被放弃），随后正常升级并成功。"""
         code, _, _ = run_child(self.state, 'start', 'model', wait_for_block=True)
         self.assertNotEqual(code, 0)
         self.assertEqual(calls(self.state).count('local project_repair'), 1)
-
         code, out, err = run_child(self.state, 'resume', 'none')
         result = result_of(out, err)
         after = calls(self.state)
-        self.assertEqual(after.count('local project_repair'), 1, 'the unknown request must not be replayed')
-        self.assertEqual(after.count('cloud project_repair'), 0)
-        self.assertNotEqual(result.get('final_run_status'), 'succeeded', result)
-        print('\n[drill] unknown-result resume ->', {k: result.get(k) for k in ('status', 'error', 'note', 'refused')})
+        self.assertEqual(after.count('local project_repair'), 2, 'the lost free call is attempted again')
+        self.assertEqual(after.count('cloud project_repair'), 1)
+        self.assertEqual(result['final_run_status'], 'succeeded', result)
+        self.assertEqual(result['abandoned'], 1)  # 报告里能看到被放弃的那次 / the report shows the abandoned attempt
 
-    def test_crash_during_local_generation_is_not_silently_replayed_and_keeps_completed_work(self):
-        """本地生成代码的调用中途被硬杀（最常见的真实崩溃点）：已完成的规划/测试方案不重做，生成调用不被悄悄重放。"""
+    def test_a_free_local_generation_call_lost_in_a_crash_is_retried_and_finished_work_is_kept(self):
+        """本地生成代码的请求中途丢失：已完成的规划/测试方案不重做，生成作为新尝试重试。"""
         code, _, _ = run_child(self.state, 'start', 'generation', wait_for_block=True)
         self.assertNotEqual(code, 0)
         code, out, err = run_child(self.state, 'resume', 'none')
@@ -101,9 +100,21 @@ class RecoveryDrillTests(unittest.TestCase):
         after = calls(self.state)
         self.assertEqual(after.count('local project_planner'), 1)
         self.assertEqual(after.count('local project_tester'), 1)
-        self.assertEqual(after.count('local project_developer'), 1, 'the unknown generation request must not be replayed')
+        self.assertEqual(after.count('local project_developer'), 2)  # 丢失的一次 + 重试 / the lost call plus its retry
+        self.assertEqual(result['final_run_status'], 'succeeded', result)
+        self.assertEqual(result['abandoned'], 1)
+
+    def test_a_paid_cloud_call_lost_in_a_crash_is_never_replayed(self):
+        """付费云调用结果未知：永远不自动重放，明确停下。这是免费重试的边界。"""
+        code, _, _ = run_child(self.state, 'start', 'cloudrepair', wait_for_block=True)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(calls(self.state).count('cloud project_repair'), 1)
+        code, out, err = run_child(self.state, 'resume', 'none')
+        result = result_of(out, err)
+        after = calls(self.state)
+        self.assertEqual(after.count('cloud project_repair'), 1, 'a paid request must never be replayed silently')
         self.assertNotEqual(result.get('final_run_status'), 'succeeded', result)
-        print('\n[drill] unknown generation resume ->', {k: result.get(k) for k in ('status', 'error', 'note', 'refused')})
+        self.assertIn('unavailable', str(result.get('error')))
 
 
 if __name__ == '__main__':

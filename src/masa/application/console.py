@@ -108,6 +108,14 @@ class Console:
             return Projects(store).view(rid) if rid else {'projects':Projects(store).catalog()}
         finally:store.close()
 
+    def triage(self, body):
+        """需求可行性预检（确定性规则，无模型调用），供新建任务页实时提示。 Rules-only feasibility triage for the New Task page."""
+        goal = body.get('goal')
+        if not isinstance(goal, str) or len(goal) > 16000:
+            raise MasaError('goal must be text up to 16000 characters')
+        from masa.application.triage import assess
+        return assess(goal)
+
     def project_report(self, rid):
         """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""
         store = Store(self.root)
@@ -473,7 +481,7 @@ class Console:
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
+                              'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
             from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)

@@ -349,3 +349,7 @@ td.best { font-weight: 700; color: var(--ok); }
 .bchip { position: relative; overflow: hidden; display: inline-block; border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 10px; font-size: 12px; font-family: var(--mono); background: var(--panel); }
 .bchip i { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--ok); } .bchip.warm { border-color: var(--warn); } .bchip.warm i { background: var(--warn); } .bchip.hot { border-color: var(--bad); color: var(--bad); } .bchip.hot i { background: var(--bad); }
 @media (max-width: 900px) { .order-row { grid-template-columns: 18px 50px 24px 1fr auto; } .order-row .ctx, .order-row .price { display: none; } }
+
+/* ───────── triage ───────── */
+.triage { gap: 6px; } .triage .finding { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px dashed var(--line-strong); }
+.triage-preview { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }

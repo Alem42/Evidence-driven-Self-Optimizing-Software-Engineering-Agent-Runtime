@@ -223,7 +223,11 @@ class ProjectGeneration:
         roles=RoleRuntime(self.store)
         purpose='project_test_revision' if metadata.get('revision_scope')=='tests' else 'project_repair'
         saved=next((row for row in roles.states(rid) if row['purpose']==purpose),None)
-        if not saved or saved['status']!='completed':
+        # 免费本地模型的未完成调用可由 RoleRuntime 作为新尝试重试；其余仍要求显式新修订。
+        # A free local call may be re-attempted by RoleRuntime; anything else still needs an explicit new revision.
+        retryable=bool(saved) and saved['status']!='completed' and getattr(provider,'retry_unknown_calls',False) \
+            and (getattr(provider,'config',None) or {}).get('model_type')=='local'
+        if not saved or (saved['status']!='completed' and not retryable):
             raise MasaError('revision result unavailable; create an explicit retry revision')
         # 使用原始输入和原始模型配置校验缓存身份，恢复时仍执行所有提案约束。
         # Check cached input/route identity and repeat every proposal validation on recovery.

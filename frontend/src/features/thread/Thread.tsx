@@ -3,6 +3,7 @@ import type { Detail } from '../../api/types';
 import { useActivity } from '../../app/activity';
 import type { DerivedStatus } from '../../entities/status';
 import { Button, Card, Notice } from '../../shared/ui';
+import { TriageView } from './TriageView';
 import { ActivityLog } from './ActivityLog';
 import { ModelSelect, useModelChoice } from './ModelSelect';
 import { useAction } from './useAction';
@@ -25,6 +26,8 @@ export function Thread({ detail, status }: { detail: Detail; status: DerivedStat
       <Card title="需求" className="req">
         <p className="goal">{run.data.goal}</p>
       </Card>
+
+      {plan?.triage && <TriageView triage={plan.triage} />}
 
       {detail.worker_error && <Notice tone="bad">后台错误：{detail.worker_error}</Notice>}
 

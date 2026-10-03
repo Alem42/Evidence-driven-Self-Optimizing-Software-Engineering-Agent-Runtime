@@ -88,8 +88,18 @@ class Router:
 
     def provider(self, candidate_id):
         if candidate_id not in self._providers:
-            self._providers[candidate_id] = self.factory(self.entries[candidate_id])
+            provider = self.factory(self.entries[candidate_id])
+            # 让账本层知道：这个任务允许重试免费本地调用的遗留请求。 Tell the role ledger this task may re-attempt orphaned free local calls.
+            provider.retry_unknown_calls = bool(self.policy.get('retry_unknown_local'))
+            self._providers[candidate_id] = provider
         return self._providers[candidate_id]
+
+    def local_provider(self, role):
+        """最低等级的、允许该角色的本地模型；没有就返回 None。用于只许用本地模型的判断（例如可行性预检），绝不会选到云端。
+        The lowest-level local model allowed for the role, else None. Used by judgements that must never spend API money."""
+        local = [c for c in self.candidates if c.model_type == 'local' and (not c.roles or role in c.roles) and c.id not in self.unavailable]
+        local.sort(key=lambda c: (c.level, c.priority, c.id))
+        return self.provider(local[0].id) if local else None
 
     def provider_matching(self, profile):
         """找到身份（profile 字典）与保存记录一致的提供方，用于恢复未完成的调用。 Find the provider whose identity matches a saved call."""

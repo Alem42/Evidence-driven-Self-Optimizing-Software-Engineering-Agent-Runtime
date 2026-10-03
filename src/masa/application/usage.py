@@ -32,6 +32,15 @@ def _model_calls(store, run, events=None):
         key = (p.get('step_id'), p.get('invocation_id'), p.get('attempt_no'))
         if e['type'] == 'model_requested':
             pending[key] = (e, p.get('route') or {})
+        elif e['type'] == 'model_abandoned':
+            req, route = pending.pop(key, (None, {}))
+            if req:
+                calls.append({
+                    'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'), 'attempt_no': p.get('attempt_no'),
+                    'status': 'abandoned', 'model': route.get('model') or '未知模型', 'provider': route.get('provider'),
+                    'kind': 'local' if _is_local(route) else 'cloud', 'started': req['created'], 'finished': e['created'], 'duration_ms': None,
+                    'prompt_tokens': None, 'completion_tokens': None, 'total_tokens': None, 'tokens_per_second': None,
+                    'error': '进程中断或请求丢失，已作为新尝试重试', 'reserved_tokens': _int(route.get('context_limit'))})
         elif e['type'] in ('model_completed', 'model_failed'):
             req, route = pending.pop(key, (None, {}))
             usage = p.get('usage') or {}

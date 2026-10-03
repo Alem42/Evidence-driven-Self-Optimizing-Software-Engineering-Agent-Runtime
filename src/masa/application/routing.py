@@ -22,8 +22,16 @@ DEFAULT_POLICY = {
     'max_escalations': 2,
     'planner_retries': 2,
     'start_level_by_role': {},  # 例如 {'project_planner': 2}：Planner 从 L2 起步 / e.g. start the Planner at L2
+    # 免费本地调用：崩溃遗留或没收到响应时，等服务恢复后作为新尝试重试；付费云调用永远不自动重放。
+    # Free local calls: re-attempted after a crash or when no response arrived. Paid cloud calls are never replayed.
+    'retry_unknown_local': True,
+    'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
+    'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
+    'transport_retries': 6,
+    'transport_wait_seconds': 900,
 }
-FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 1}
+FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 1,
+                'retry_unknown_local': False, 'triage_model': False, 'stuck_after': 99, 'transport_retries': 0, 'transport_wait_seconds': 0}
 DEFAULT_BUDGET = {'max_model_calls': 40, 'max_cloud_tokens': 200_000, 'max_active_seconds': 3600, 'max_cost': None}
 BUDGET_KEYS = ('max_model_calls', 'max_cloud_tokens', 'max_active_seconds', 'max_cost')
 
@@ -237,7 +245,7 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
 ROLES = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision')
 
@@ -261,6 +269,10 @@ def validate_policy(policy) -> dict:
                 if role not in ROLES or type(level) is not int or not 1 <= level <= 100:
                     raise MasaError('start_level_by_role needs known roles and levels 1..100')
                 out['start_level_by_role'][role] = level
+        elif key in ('retry_unknown_local', 'triage_model'):
+            if type(value) is not bool:
+                raise MasaError(f'{key} must be true or false')
+            out[key] = value
         elif key in POLICY_BOUNDS:
             low, high = POLICY_BOUNDS[key]
             if type(value) is not int or not low <= value <= high:

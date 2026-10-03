@@ -130,6 +130,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = console.projects(parts[2])
                 elif path == "/api/settings":
                     result = console.settings.save(body) if write else console.settings.public()
+                elif path == '/api/triage' and write:
+                    result = console.triage(body)
                 elif path == '/api/routing':
                     result = console.settings.save_routing(body) if write else console.settings.routing()
                 elif path == '/api/settings/order' and write:
@@ -151,6 +153,12 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = OllamaControl().catalog()
                 elif path == '/api/ollama/action' and write:
                     result = console.ollama_action(body)
+                elif path == '/api/ollama/orphans' and not write:
+                    from masa.infrastructure import orphans
+                    result = {'runners': orphans.list_runners()}
+                elif path == '/api/ollama/orphans/clean' and write:
+                    from masa.infrastructure import orphans
+                    result = orphans.clean_orphans()
                 elif path == '/api/hardware' and not write:
                     result = console.hardware.snapshot()
                 elif path == '/api/diagnostics' and not write:

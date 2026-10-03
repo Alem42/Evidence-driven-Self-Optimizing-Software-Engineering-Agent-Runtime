@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
 import { useProfiles } from '../../api/queries';
+import { api } from '../../api/client';
+import type { Triage } from '../../api/types';
+import { TriageView } from '../thread/TriageView';
 import { byRouting, profileLevel } from '../../entities/profiles';
 import { Link } from 'react-router-dom';
 import { profileLabel, profileReady } from '../../entities/profiles';
@@ -30,20 +33,30 @@ export function NewTask() {
   const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('fixed');
   const [apiTokens, setApiTokens] = useState('');
   const selectedModels = useUi((x) => x.selectedModels);
+  const [triage, setTriage] = useState<Triage | null>(null);
+  const [force, setForce] = useState(false);
+  // 输入时实时预检（确定性规则，不调用模型）。 Live pre-check while typing: deterministic rules, no model call.
+  useEffect(() => {
+    setForce(false);
+    if (goal.trim().length < 6) { setTriage(null); return; }
+    const t = setTimeout(() => api<Triage>('/triage', { goal }).then(setTriage).catch(() => setTriage(null)), 500);
+    return () => clearTimeout(t);
+  }, [goal]);
+  const blockedByTriage = triage?.verdict === 'infeasible' && !force;
 
   const ready = (profiles?.profiles ?? []).filter(profileReady);
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
   const blocked = !ready.length || !bootstrap?.runner_ready || working;
 
   async function start() {
-    if (!goal.trim() || blocked || starting) return;
+    if (!goal.trim() || blocked || starting || blockedByTriage) return;
     setStarting(true);
     try {
       useUi.getState().set({ follow: true });
       const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
         '/projects/plan',
-        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
+        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
         { label: '项目规划' },
       );
       push({ tone: 'info', text: '任务已启动，正在规划…' });
@@ -86,11 +99,19 @@ export function NewTask() {
               </select>
               <Segmented value={auto} onChange={setAuto} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
             </div>
-            <Button variant="primary" disabled={!goal.trim() || blocked || starting} onClick={start}>
+            <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage} onClick={start}>
               {starting ? '正在启动…' : '开始任务 ⌘↵'}
             </Button>
           </div>
         </div>
+        {triage && triage.verdict !== 'ok' && (
+          <div className="triage-preview">
+            <TriageView triage={triage} compact />
+            {triage.verdict === 'infeasible' && (
+              <label className="check"><input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> 我了解风险，仍然继续（会花模型调用，且很可能失败）</label>
+            )}
+          </div>
+        )}
         <div className="strategy">
           <Segmented value={strategy} onChange={setStrategy} options={[['fixed', '固定模型'], ['ladder', '本地优先 · 有界升级']]} />
           {strategy === 'ladder' && auto !== 'automatic' && <span className="hint">升级策略只在「自动执行」下生效。</span>}
