@@ -39,6 +39,18 @@ class LocalDeveloper:
 
 
 class LocalGenerationTests(unittest.TestCase):
+    def test_cli_entrypoint_package_is_checked_before_publication(self):
+        """真实 Qwen 生成的库包不能伪装为 CLI，注释内声明也不算。 Library packages and commented declarations cannot masquerade as CLI entrypoints."""
+        from masa.domain.proposals import validate_files
+        target=SPEC['entrypoint']
+        for source in ('package app\nfunc main() {}','/* package main */\npackage app\n'):
+            with self.subTest(source=source),self.assertRaisesRegex(MasaError,'package main'):
+                validate_file_proposal({target:source},SPEC,target)
+            with self.assertRaisesRegex(MasaError,'package main'):
+                validate_files({**FILES,target:source},SPEC)
+        source='\ufeff// Header\n/* package app */\npackage /* inline */ main\nfunc main() {}\n'
+        self.assertEqual(validate_file_proposal({target:source},SPEC,target),{target:source})
+
     def approved_parent(self, store, spec=SPEC):
         """建立已批准规格，保持生成阶段测试独立。 Build approved specs independently of generation."""
         planning = ProjectPlanning(store, FakeExecutor())

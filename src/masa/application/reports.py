@@ -5,7 +5,7 @@ def render(store, run_id: str) -> str:
     """展示真实运行证据及已提交补丁。 Render actual run evidence and committed patches."""
     run = store.run(run_id)
     data = run["data"]
-    profile = data.get("model_profile") or data.get('codegen', {}).get('provider')
+    profile = data.get("model_profile") or data.get('codegen', {}).get('provider') or data.get('project_plan',{}).get('provider')
     provider = (
         f"Provider: {profile['provider']} / {profile['model']}; cost unknown (see provider billing)."
         if profile

@@ -20,6 +20,12 @@ def test_revision_needed(evidence, checks=()):
     if any(re.search(r'_test\.go:\d+:',line) and
            (any(marker in line for marker in markers) or re.search(r'_test\.go:\d+:\d+: expected ',line))
            for line in lines):return True
+    # 编译器类型错误带行和列；普通断言仅带行，不能看到 expected 就修测试。
+    # Compiler type diagnostics carry line and column; ordinary assertion text must not trigger test repair.
+    type_errors=('cannot use','invalid operation:','assignment mismatch:',
+                 'too many arguments','not enough arguments','multiple-value', 'cannot convert')
+    if any(re.search(r'_test\.go:\d+:\d+:',line) and any(marker in line for marker in type_errors)
+           for line in lines):return True
     # 测试内构建选错目录属于测试准备错误；不能让 Developer 修改冻结测试。
     # Building an empty package from a test is a test-setup failure, not an implementation repair.
     if any('no Go files in ' in line for line in lines) and any(re.search(r'_test\.go:\d+:',line) for line in lines):

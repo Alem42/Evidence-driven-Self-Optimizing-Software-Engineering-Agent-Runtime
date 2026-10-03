@@ -118,6 +118,27 @@ def validate_test_revision(changes, original):
     return {**original, **changes}
 
 
+def _entry_package(source):
+    """跳过 Go 文件头注释，读取包声明；语法仍由 Go 工具验证。 Read the package after header comments; Go tools still validate syntax."""
+    remaining=source.lstrip('\ufeff')
+    def token():
+        nonlocal remaining
+        while True:
+            remaining=remaining.lstrip()
+            if remaining.startswith('//'):
+                _,_,remaining=remaining.partition('\n')
+            elif remaining.startswith('/*'):
+                _,end,remaining=remaining.partition('*/')
+                if not end:return ''
+            else:break
+        match=re.match(r'[A-Za-z_][A-Za-z0-9_]*',remaining)
+        if not match:return ''
+        remaining=remaining[match.end():]
+        return match.group()
+    keyword=token()
+    return token() if keyword=='package' else ''
+
+
 def validate_file_proposal(files, spec, target_path):
     """逐文件调用只能返回批准的目标 Go 文件。 A file call may return only its approved target Go source."""
     validate_spec(spec)
@@ -132,6 +153,8 @@ def validate_file_proposal(files, spec, target_path):
         raise MasaError('invalid generated file content')
     if len(content.encode('utf-8')) > 60000:
         raise MasaError('file exceeds 60 KB')
+    if target_path==spec['entrypoint'] and _entry_package(content)!='main':
+        raise MasaError('Go CLI entrypoint must declare package main')
     return files
 
 
@@ -150,6 +173,8 @@ def validate_files(files, spec):
         total += size
     if total > 300000:
         raise MasaError('project exceeds 300 KB')
+    if _entry_package(files[spec['entrypoint']])!='main':
+        raise MasaError('Go CLI entrypoint must declare package main')
     if files['go.mod'].strip() != f"module {spec['module']}\n\ngo 1.27.0":
         raise MasaError('go.mod must use the approved module and Go 1.27.0 without dependencies')
     return files

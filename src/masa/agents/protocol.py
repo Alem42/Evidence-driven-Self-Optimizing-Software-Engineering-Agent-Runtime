@@ -73,6 +73,7 @@ def instruction_for(context):
                 'level (unit, integration or cli). Include happy path, malformed input, empty input, boundary cases and CLI behavior. '
                 'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
                 'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
+                'expected must contain a readable description, not only whitespace: write stdout empty / stdout newline and the exit code when needed. '
                 'Compute expected values independently, not by calling the implementation. Keep fixtures tiny and deterministic. '
                 'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
                 'when zero is within the specified domain. Do not change the spec or invent results.')
@@ -130,6 +131,8 @@ def instruction_for(context):
                     'spec and checks remain approved and must not be changed. previous_files contains already generated source. '
                     'Reuse existing functions, packages and public interfaces from previous_files; never redefine them in another file. '
                     'For an implementation file, keep its responsibility concise and provide interfaces required by later approved files. '
+                    'The CLI entrypoint MUST declare package main, never package app. Tests in that directory should use package main. '
+                    'When run accepts stdout/stderr io.Writer, write to those supplied writers: fmt.Fprintln(stdout, value), not fmt.Println. '
                     'Use only Go standard library, proper imports, gofmt tabs, and short bilingual function comments. '
                     'Distinguish an optional numeric flag being present with zero from that flag being omitted. '
                     'Tests must implement the supplied Tester cases with independently calculated expectations. '

@@ -27,6 +27,10 @@ class AutomaticProjectTests(unittest.TestCase):
         from masa.application.check_policy import test_revision_needed
         self.assertTrue(test_revision_needed('sum_test.go:8:2: use of internal package internal/testenv not allowed'))
         self.assertFalse(test_revision_needed('sum.go:8:2: use of internal package internal/testenv not allowed'))
+        self.assertTrue(test_revision_needed('main_test.go:59:50: cannot use "0" (untyped string constant) as int value in argument to formatExitCode'))
+        self.assertTrue(test_revision_needed('main_test.go:111:17: invalid operation: exitCode != expectedStderr (mismatched types int and string)'))
+        self.assertFalse(test_revision_needed('main.go:59:50: cannot use "0" as int'))
+        self.assertFalse(test_revision_needed('main_test.go:36: expected error message to contain cannot use'))
 
     def test_build_path_and_overflow_are_test_revisions(self):
         """复现真实项目的测试路径与常量错误，同时避免误判实现诊断。 Reproduce setup failures without confusing implementation errors."""

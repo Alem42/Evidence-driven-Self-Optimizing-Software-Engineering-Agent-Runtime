@@ -22,7 +22,8 @@ def response_schema(context):
                                      'properties':{path:string}}}}
     if purpose=='project_tester':
         case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
-              'properties':{'name':string,'input':string,'expected':string,'level':{'enum':['unit','integration','cli']}}}
+              'properties':{'name':{'type':'string','minLength':1},'input':string,
+                            'expected':{'type':'string','minLength':1},'level':{'enum':['unit','integration','cli']}}}
         check={'type':'object','additionalProperties':False,'required':['purpose','acceptance_indices'],
                'properties':{'purpose':string,
                     'acceptance_indices':{'type':'array','items':{'type':'integer','minimum':0,'maximum':len(context['spec']['acceptance'])-1}},

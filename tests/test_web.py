@@ -102,6 +102,9 @@ class WebTests(unittest.TestCase):
         status,result=self.request('/api/runs/'+rid+'/artifacts/'+snapshot)
         self.assertEqual(status,200,result)
         self.assertEqual(result['artifact']['config']['model_type'],'local')
+        report=self.request('/api/runs/'+rid+'/report')[1]['markdown']
+        self.assertIn('ollama-native / m:latest',report)
+        self.assertNotIn('offline, no LLM inference',report)
 
     def test_completed_worker_does_not_hide_a_failed_verification(self):
         """后台完成与Gate结果独立，HTTP明确暴露失败。 Worker completion never hides a failed Gate."""

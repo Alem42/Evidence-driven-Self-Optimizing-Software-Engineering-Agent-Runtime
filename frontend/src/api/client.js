@@ -6,6 +6,6 @@ export async function api(path, body) {
   try {data = await response.json();} catch {throw new Error('服务未返回有效 JSON，请确认后端已更新并重新启动。');}
   // 保留 HTTP 身份，让读取失败与确实不存在的任务分开处理。
   // Preserve the HTTP status so transient read failures do not discard saved job tracking.
-  if (!response.ok){const error=new Error(data.error || '请求失败');error.status=response.status;throw error;}
+  if (!response.ok){const error=new Error((data.error || '请求失败')+(data.request_id?' · 诊断编号 '+data.request_id:''));error.status=response.status;error.request_id=data.request_id;throw error;}
   return data;
 }
