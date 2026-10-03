@@ -22,6 +22,8 @@ from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 from masa.application.usage import task_report
+from masa.application.router import Router, build_snapshot
+from masa.application.routing import DEFAULT_BUDGET, DEFAULT_POLICY
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
@@ -68,6 +70,8 @@ class Console:
                     break
         return {
             "console_version": "workspace-console-v2",
+            # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
+            "routing_defaults": {"policy": DEFAULT_POLICY, "budget": DEFAULT_BUDGET},
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
@@ -444,30 +448,54 @@ class Console:
                             raise MasaError('answer the pending clarification before resuming')
                     finally:store.close()
                 body=previous['request']
+            # 路由：ladder = 本地优先、有界升级、任务级预算；固定模式保持原行为。恢复时沿用任务开始时冻结的候选集合。
+            # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
+            routing=previous.get('routing') if resume_job else None
+            if not resume_job and body.get('routing')=='ladder':
+                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
-            provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
-            if resume_job and previous.get('provider',provider.profile)!=provider.profile:
-                raise MasaError('select the original API profile to resume')
+            if routing:
+                provider=None
+            else:
+                provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
+                if resume_job and previous.get('provider',provider.profile)!=provider.profile:
+                    raise MasaError('select the original API profile to resume')
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
-                              'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,'model_snapshot':getattr(provider,'snapshot',None),
+                              'mode':'auto','phase':'planning','attempt':0,
+                              'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
+                              'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
                               'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
             from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
                 try:
-                    WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job)).run()
+                    router=None
+                    if routing:
+                        # 候选按冻结快照重建；本地权重摘要变了的候选自动不可用。 Rebuild from the frozen set; changed local weights make a candidate unavailable.
+                        router=Router(store,routing,lambda entry:self.settings.provider(snapshot=entry['snapshot']),
+                                      live_digests=self._local_digests() if resume_job else None)
+                        if not self.jobs[ident].get('routing_ref'):
+                            self.jobs[ident]['routing_ref']=store.put(routing)
+                    WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job),router=router).run()
                 except Exception as exc:
                     self._fail_job(ident,exc,'worker:auto')
                 finally:store.close()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-auto-project-job')
             self.job_thread.start()
             return {'job_id':ident}
+
+    def _local_digests(self):
+        """本地模型权重摘要（best effort；Ollama 不可达则返回 None，不阻塞任务）。 Local weight digests, best effort."""
+        try:
+            return {m['name']:m.get('digest') for m in OllamaControl().catalog().get('models',[])}
+        except Exception:
+            return None
 
     def _fail_job(self, ident, exc, route):
         """业务取消不改成失败；其余故障保存安全调用位置。 Preserve cancellation and log safe locations for other faults."""

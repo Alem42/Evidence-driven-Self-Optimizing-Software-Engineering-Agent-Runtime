@@ -53,3 +53,21 @@ export function reportText(r: TaskReport, stepName: (s: string | null) => string
   ];
   return lines.join('\n');
 }
+
+export const REASON_TEXT: Record<string, string> = {
+  start_lowest_eligible: '从满足条件的最低等级开始',
+  retry_same_level: '同级再试（自修）',
+  escalate: '升级到更高等级',
+  top_level: '已在最高等级',
+  no_candidate: '没有可用模型',
+  no_higher_level: '没有更高等级',
+  escalation_limit: '升级次数到顶',
+  budget_calls: '调用次数预算用完',
+  budget_time: '运行时间预算用完',
+  budget_cloud_tokens: 'API token 预算用完',
+  budget_cost: '费用预算用完',
+  price_unknown: '缺少价格，无法保证费用上限',
+  context: '输入超出模型上下文',
+};
+
+export const CHAIN_TEXT: Record<string, string> = { planning: '规划', generation: '生成', fix: '修复' };

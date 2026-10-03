@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-03 M0 完成**：分支 feature/multi-model 已实现任务级预算与路由（routing.py 纯策略、router.py、coordinator 全部模型调用经路由器、报告 routing 区块、前端策略/预算/报告）。下一步 M0.5（杀进程恢复演练、提供方硬上下文拦截、同级轮换、按角色起始等级、可编辑预算）再 M1（Diagnoser、声明式图、worker 租约）。详见进展008 §5。注意：真实本地→云升级端到端未验证；用户需要 GPU 时不要跑本地模型。
+
 **2026-10-03 深夜**：git 已修复（main 原为无关历史的 Initial commit，现已并入 develop 并快进，二者同为 f5fd53d）；新分支 `feature/multi-model`，下一步按 PLAN_MULTI_MODEL_RUNTIME 做 M0（任务级预算 + RoutingSnapshot + route() + 修复升级阶梯）。
 
 **2026-10-03 晚**：新增任务报告（usage.py）与自动化修复（gofmt 规范化/契约重试/测试规格仲裁/Go 预检），见进展007；`scripts/e2e_live.py` 可用任意 profile 做真实端到端并打印逐次用量，`scripts/show_failures.py` 打印版本链失败证据。

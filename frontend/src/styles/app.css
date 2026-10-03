@@ -325,3 +325,11 @@ th { color: var(--muted); font-weight: 600; background: var(--sunken); } tr:last
 .tl-bar { height: 4px; background: var(--sunken); border-radius: 999px; overflow: hidden; } .tl-bar i { display: block; height: 100%; }
 .row.end { justify-content: flex-end; }
 .modal-body > * { flex: none; }
+
+/* ───────── routing & budget ───────── */
+.strategy { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.strategy-body { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.field.inline { flex-direction: row; align-items: center; gap: 10px; } .field.inline input { max-width: 180px; }
+.budget { display: flex; flex-direction: column; gap: 6px; }
+.budget-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; align-items: center; font-size: 12.5px; }
+.budget-bar { height: 8px; background: var(--sunken); border-radius: 999px; overflow: hidden; } .budget-bar i { display: block; height: 100%; background: var(--ok); } .budget-bar i.hot { background: var(--bad); }

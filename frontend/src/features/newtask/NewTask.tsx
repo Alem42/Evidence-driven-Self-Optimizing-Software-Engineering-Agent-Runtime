@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
 import { useProfiles } from '../../api/queries';
+import { byRouting, profileLevel } from '../../entities/profiles';
 import { profileLabel, profileReady } from '../../entities/profiles';
 import { useToasts, useUi } from '../../stores/ui';
 import { Button, Notice, Segmented } from '../../shared/ui';
@@ -19,11 +20,14 @@ export function NewTask() {
   const navigate = useNavigate();
   const { data: profiles } = useProfiles();
   const { bootstrap, working } = useActivity();
+  const boot = bootstrap;
   const push = useToasts((s) => s.push);
   const [goal, setGoal] = useState('');
   const [model, setModel] = useState('');
   const [auto, setAuto] = useState<'review' | 'automatic'>('review');
   const [starting, setStarting] = useState(false);
+  const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('fixed');
+  const [apiTokens, setApiTokens] = useState('');
 
   const ready = (profiles?.profiles ?? []).filter(profileReady);
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
@@ -34,7 +38,12 @@ export function NewTask() {
     setStarting(true);
     try {
       useUi.getState().set({ follow: true });
-      await startJob('/projects/plan', { goal, api_profile_id: profile, auto_verify: auto === 'automatic' }, { label: '项目规划' });
+      const ladder = strategy === 'ladder' && auto === 'automatic';
+      await startJob(
+        '/projects/plan',
+        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {} } : {}) },
+        { label: '项目规划' },
+      );
       push({ tone: 'info', text: '任务已启动，正在规划…' });
     } catch (e) {
       push({ tone: 'bad', text: (e as Error).message });
@@ -79,6 +88,21 @@ export function NewTask() {
               {starting ? '正在启动…' : '开始任务 ⌘↵'}
             </Button>
           </div>
+        </div>
+        <div className="strategy">
+          <Segmented value={strategy} onChange={setStrategy} options={[['fixed', '固定模型'], ['ladder', '本地优先 · 有界升级']]} />
+          {strategy === 'ladder' && auto !== 'automatic' && <span className="hint">升级策略只在「自动执行」下生效。</span>}
+          {strategy === 'ladder' && auto === 'automatic' && (
+            <div className="strategy-body">
+              <p className="muted">
+                候选（按等级、优先级）：{[...ready].sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。本地模型先试并自修一次，仍失败才升级到更高等级；预算耗尽会停止并保留证据。
+              </p>
+              <label className="field inline">
+                <span className="field-label">API token 上限</span>
+                <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => setApiTokens(e.target.value)} />
+              </label>
+            </div>
+          )}
         </div>
         <p className="hint">
           {auto === 'automatic' ? '自动采用有效草稿，真实检查失败最多修复四轮。' : '方案与代码都会停下来等你确认，可编辑后再批准。'} 会调用所选模型。

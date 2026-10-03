@@ -157,6 +157,12 @@ class Settings:
             )
             return self.public()
 
+    def ready_profiles(self):
+        """已启用且凭据就绪（本地无需密钥）的配置，按等级与优先级排序。 Enabled, credentialed profiles in routing order."""
+        with self.lock:
+            return [(i, dict(p)) for i, p in sorted(self.profiles.items(), key=lambda item: (item[1]['level'], item[1]['priority'], item[0]))
+                    if p['enabled'] and (p['model_type'] == 'local' or self.keys.get(i))]
+
     def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""
         with self.lock:

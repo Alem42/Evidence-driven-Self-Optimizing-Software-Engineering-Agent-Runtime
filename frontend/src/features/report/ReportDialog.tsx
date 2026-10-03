@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useReport } from '../../api/queries';
 import type { TaskReport } from '../../api/types';
-import { fmtDuration, fmtTokens, kindLabel, OUTCOME, reportText } from '../../entities/report';
+import { CHAIN_TEXT, fmtDuration, fmtTokens, kindLabel, OUTCOME, REASON_TEXT, reportText } from '../../entities/report';
 import { stageLabels } from '../../entities/status';
 import { useUi } from '../../stores/ui';
 import { Badge, Button, Spinner } from '../../shared/ui';
@@ -19,6 +19,54 @@ function SplitBar({ local, cloud }: { local: number; cloud: number }) {
       <i className="seg-local" style={{ width: (local / total) * 100 + '%' }} />
       <i className="seg-cloud" style={{ width: (cloud / total) * 100 + '%' }} />
     </div>
+  );
+}
+
+/** 预算条：已用（含对未知用量请求的预留）/ 上限。 Budget bar: used (incl. reservations) vs limit. */
+function BudgetBar({ label, used, limit, fmt }: { label: string; used: number; limit: number | null; fmt: (n: number) => string }) {
+  if (limit == null) return <div className="budget-row"><span>{label}</span><span className="muted">{fmt(used)} · 不限</span></div>;
+  const pct = Math.min(100, (used / limit) * 100);
+  return (
+    <div className="budget-row">
+      <span>{label}</span>
+      <div className="budget-bar"><i className={pct >= 90 ? 'hot' : ''} style={{ width: pct + '%' }} /></div>
+      <span className="mono">{fmt(used)} / {fmt(limit)}</span>
+    </div>
+  );
+}
+
+function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
+  const b = r.budget;
+  const t0 = r.decisions[0]?.at ?? 0;
+  return (
+    <>
+      <h3>路由与预算 <span className="muted">{r.mode === 'ladder' ? '本地优先 · 有界升级' : '固定模型'}</span></h3>
+      {r.mode === 'ladder' && (
+        <div className="budget">
+          <BudgetBar label="API token" used={r.spend.cloud_tokens} limit={b.max_cloud_tokens} fmt={fmtTokens} />
+          <BudgetBar label="模型调用" used={r.spend.calls} limit={b.max_model_calls} fmt={String} />
+          <BudgetBar label="运行时间" used={r.spend.active_seconds} limit={b.max_active_seconds} fmt={(n) => fmtDuration(n * 1000)} />
+          {b.max_cost != null && <BudgetBar label="费用" used={r.spend.cost} limit={b.max_cost} fmt={(n) => n.toFixed(4)} />}
+          {r.spend.reserved_calls > 0 && <p className="hint">有 {r.spend.reserved_calls} 次云调用没有返回用量，已按其上下文上限预留。</p>}
+        </div>
+      )}
+      {r.stopped && <div className="notice notice-warn">路由已停止：{REASON_TEXT[r.stopped.reason] ?? r.stopped.reason}{r.stopped.detail ? '（' + r.stopped.detail + '）' : ''}。证据已保留，未继续花费。</div>}
+      <div className="row wrap"><Badge tone={r.escalations ? 'warn' : 'ok'}>{r.escalations ? `升级 ${r.escalations} 次` : '未升级'}</Badge><span className="muted">候选：{r.candidates.map((c) => `L${c.level} ${c.model}`).join(' → ')}</span></div>
+      <ol className="timeline">
+        {r.decisions.map((d, i) => (
+          <li key={i} className={d.escalated ? 'tl-pending' : d.action === 'stop' ? 'tl-failed' : ''}>
+            <time>{t0 ? '+' + fmtDuration((d.at - t0) * 1000) : '—'}</time>
+            <div className="tl-main">
+              <div className="row between">
+                <span><strong>{CHAIN_TEXT[d.chain] ?? d.chain}</strong> <span className="muted">· {step(d.role)}</span></span>
+                <span className="mono">{d.action === 'stop' ? '停止' : `L${d.level} ${d.model}`}</span>
+              </div>
+              <div className="muted">{d.escalated && <strong>升级 · </strong>}{REASON_TEXT[d.reason] ?? d.reason}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -48,6 +96,8 @@ function Body({ r }: { r: TaskReport }) {
       </div>
       <SplitBar local={t.local_tokens} cloud={t.cloud_tokens} />
       {t.unknown_usage_calls > 0 && <p className="hint">有 {t.unknown_usage_calls} 次调用服务端没有返回用量，已计为“未知”，没有当作 0。</p>}
+
+      {r.routing && <RoutingBlock r={r.routing} />}
 
       <h3>按模型</h3>
       <div className="table-wrap">
