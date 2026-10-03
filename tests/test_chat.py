@@ -16,6 +16,19 @@ from test_runtime import FakeExecutor
 
 
 class ChatTests(unittest.TestCase):
+    def test_native_repair_schema_limits_paths_without_weakening_domain(self):
+        """模型格式只允许实施文件，业务校验仍拒绝改测试。 Model formatting limits implementation paths and Domain still rejects test edits."""
+        from test_project_generation import FILES
+        target='internal/app/app.go'
+        provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama'})
+        context={'purpose':'project_repair','original_files':FILES}
+        self.envelope={'done':True,'done_reason':'stop','message':{'content':json.dumps({'files':{target:FILES[target]}})}}
+        self.assertEqual(provider.respond(context),{target:FILES[target]})
+        paths=set(self.requests[-1]['format']['properties']['files']['properties'])
+        self.assertEqual(paths,{p for p in FILES if p.endswith('.go') and not p.endswith('_test.go')})
+        self.envelope['message']['content']=json.dumps({'files':{'internal/app/app_test.go':FILES['internal/app/app_test.go']}})
+        with self.assertRaises(MasaError):provider.respond(context)
+
     def test_native_file_request_has_one_target_and_no_module_instruction(self):
         """逐文件原生请求不混入整套模块契约，响应越界仍拒绝。 Native file calls cannot inherit bulk module instructions or accept extra files."""
         from test_project_plan import SPEC

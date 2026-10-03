@@ -54,5 +54,6 @@ test('Ollama controls and cancelled runs retain their real meaning in the live s
   assert.equal(liveStatus({status:'cancelled'},false).title,'已取消');
   assert.equal(liveStatus({status:'cancelled'},true).active,false);
   assert.equal(liveStatus({status:'completed',run_status:'cancelled'},false).title,'已取消');
+  assert.equal(liveStatus({status:'running',run_status:'cancelled'},true).title,'取消已记录 · 等待当前请求结束');
   assert.equal(liveStatus(null,false,detail('cancelled')).title,'已取消');
 });

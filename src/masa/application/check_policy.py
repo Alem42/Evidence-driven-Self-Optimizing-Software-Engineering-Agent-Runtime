@@ -15,6 +15,7 @@ def test_revision_needed(evidence, checks=()):
     if 'import cycle not allowed in test' in evidence:return True
     markers=('imported and not used','declared and not used','undefined:',
              'syntax error','missing return','overflows int','executable file not found in %PATH%',
+             'use of internal package','no required module provides package','is not in std',
              'cannot run executable found relative to current directory')
     if any(re.search(r'_test\.go:\d+:',line) and
            (any(marker in line for marker in markers) or re.search(r'_test\.go:\d+:\d+: expected ',line))

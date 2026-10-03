@@ -60,6 +60,9 @@ export function liveStatus(job,working,detail){
   const run=detail?.run,plan=run?.data?.project_plan;
   if(attached&&job?.status==='waiting_for_input')return {title:'等待你补充需求',active:false};
   if(job?.status!=='running'&&plan?.status==='waiting_for_input')return {title:'等待你补充需求',active:false};
+  // 取消意图与网络请求收尾分开，后台忙时不能谎称请求已经停下。
+  // Distinguish cancellation intent from a still-draining network request.
+  if(attached&&working&&job?.status==='running'&&(job?.run_status==='cancelled'||run?.status==='cancelled'))return {title:'取消已记录 · 等待当前请求结束',active:true};
   if(attached&&(job?.status==='cancelled'||job?.run_status==='cancelled'||run?.status==='cancelled'&&job?.status!=='running'))return {title:'已取消',active:false};
   if(working){
     const labels={planning:'Planner 规划',project_planner:'Planner 规划',project_tester:'Tester 测试方案',generation:'生成代码',project_developer:'Developer 生成',verification:'Go 验证',repair:'修复实现',test_revision:'修订测试',project_repair:'修复实现',project_test_revision:'修订测试',planning_retry:'重试测试方案',test_format:'整理测试格式',application:'运行程序',load:'Ollama 加载模型',unload:'Ollama 释放模型',test:'Ollama 真实测速'};

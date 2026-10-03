@@ -5,6 +5,14 @@ def response_schema(context):
     """约束 Planner 规格或澄清，保留业务校验。 Constrain specs or clarification without replacing validation."""
     string={'type':'string'}
     purpose=context.get('purpose')
+    if purpose in {'project_repair','project_test_revision'}:
+        # 在传输层就限制修复文件类别，Domain 再独立核对冻结边界。
+        # Restrict repair paths in transport; Domain independently enforces frozen boundaries.
+        tests=purpose=='project_test_revision'
+        paths=[p for p in context['original_files'] if p.endswith('.go') and p.endswith('_test.go')==tests]
+        return {'type':'object','additionalProperties':False,'required':['files'],
+                'properties':{'files':{'type':'object','additionalProperties':False,'minProperties':1,
+                                     'properties':{p:string for p in paths}}}}
     if purpose=='project_developer' and context.get('generation_mode')=='files-v1':
         # 一次仅约束一个批准文件，减少整套源码语法约束的输出压力。
         # Constrain one approved file rather than an entire code bundle.

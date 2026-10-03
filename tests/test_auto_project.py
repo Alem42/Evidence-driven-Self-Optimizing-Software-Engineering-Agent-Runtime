@@ -22,6 +22,12 @@ class CompositeProvider:
 
 
 class AutomaticProjectTests(unittest.TestCase):
+    def test_private_toolchain_import_is_a_test_preparation_error(self):
+        """真实本地模型的私有测试工具导入须修测试，不改冻结边界。 Private toolchain imports route to test repair without relaxing frozen boundaries."""
+        from masa.application.check_policy import test_revision_needed
+        self.assertTrue(test_revision_needed('sum_test.go:8:2: use of internal package internal/testenv not allowed'))
+        self.assertFalse(test_revision_needed('sum.go:8:2: use of internal package internal/testenv not allowed'))
+
     def test_build_path_and_overflow_are_test_revisions(self):
         """复现真实项目的测试路径与常量错误，同时避免误判实现诊断。 Reproduce setup failures without confusing implementation errors."""
         import json
