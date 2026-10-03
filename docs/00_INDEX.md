@@ -9,7 +9,7 @@
 | 下一步 | [PLAN](PLAN_NEXT_STAGE.md) |
 | 开发接续 | [CURRENT](handoff/CURRENT.md)、[长期约定](MEMORY_PROJECT.md)、[实施入口](LLM_IMPLEMENTATION_GUIDE.md) |
 | 架构 | [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md)、[减法执行范围](PLAN_ARCHITECTURE_SIMPLIFICATION.md) |
-| 模型实施 | [多模型唯一计划](PLAN_MULTI_MODEL.md) |
+| 模型实施 | [Runtime v2：多模型/长任务/动态角色](PLAN_MULTI_MODEL_RUNTIME.md)、[R0–R5 细节](PLAN_MULTI_MODEL.md) |
 | 本地控制 | [Ollama控制页](guides/USER_OLLAMA_CONTROLLER.md)、[Runtime与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)、[硬件方案](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md) |
 | 愿景 | [IDE 工作台](PLAN_MODEL_ROUTING_AND_WORKBENCH.md) |
 | 前端 v3 | [前后端分离与布局方案](PLAN_FRONTEND_REDESIGN.md)、[进展006](progress/PROGRESS_2026-10-03_006_frontend-v3.md)、[进展007](progress/PROGRESS_2026-10-03_007_usage-report-and-auto-fixes.md) |
