@@ -57,7 +57,9 @@ class Projects:
                 roles=[('project_test_revision','Tester 修订测试') if plan.get('revision_scope')=='tests' else ('project_repair','Developer 修复')] if plan.get('repair_of') else (
                     [('project_developer','Developer')] if plan.get('kind')=='code' else [('project_planner','Planner'),('project_tester','Tester')])
                 for role,label in roles:
-                    related=[e for e in events if e['payload'].get('step_id')==role]
+                    # 旧快照事件为标量；读取投影必须兼容，不改写历史证据。
+                    # Legacy snapshot events were scalar; tolerate them without rewriting evidence.
+                    related=[e for e in events if isinstance(e['payload'],dict) and e['payload'].get('step_id')==role]
                     latest=next((e['type'] for e in reversed(related) if e['type'] in {'model_requested','model_completed','model_failed'}),None)
                     started=latest=='model_requested'
                     done=latest=='model_completed'

@@ -71,7 +71,8 @@ class RoleRuntime:
                 if run['model_calls'] >= run['data']['budget']['model_calls']:
                     raise MasaError('model_call_budget_exhausted')
                 if snapshot_ref and not frozen:
-                    self.store.save_metadata(rid,'model_snapshot_ref',snapshot_ref,'model_configuration_frozen')
+                    self.store.save_metadata(rid,'model_snapshot_ref',snapshot_ref,'model_configuration_frozen',
+                                             payload={'snapshot_ref':snapshot_ref,'mode':'fixed'})
                 self.store.db.execute('UPDATE runs SET model_calls=model_calls+1 WHERE id=?',(rid,))
                 self.store.db.execute('INSERT INTO role_invocations VALUES(?,?,?,?,?,?,?,?,?,?)',
                     (rid,purpose,invocation_id,attempt_no,context_ref,route_ref,'running',None,time.time(),None))

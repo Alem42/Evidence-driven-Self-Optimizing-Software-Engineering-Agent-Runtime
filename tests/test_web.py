@@ -16,6 +16,36 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_real_profile_snapshot_and_legacy_event_preserve_clarification(self):
+        """真实配置快照与旧标量事件不得隐藏澄清。 Real profile snapshots and legacy scalar events must not hide questions."""
+        from masa.infrastructure.llm import ChatProvider
+        from test_clarification import AskingProvider
+        self.console.settings.save({'name':'local','base_url':'http://127.0.0.1:11434/v1',
+                                    'model':'m:latest','model_type':'local'})
+        with patch.object(ChatProvider,'respond',side_effect=AskingProvider().respond),patch('masa.application.console.Runner',return_value=FakeExecutor()):
+            status,job=self.request('/api/projects/plan',{'goal':'Build CLI','auto_verify':True})
+            self.assertEqual(status,200,job)
+            self.console.job_thread.join(10)
+        _,job=self.request('/api/jobs/'+job['job_id'])
+        self.assertEqual(job['status'],'waiting_for_input',job)
+        rid=job['run_id'];store=Store(self.console.root)
+        try:
+            snapshot=store.run(rid)['data']['model_snapshot_ref']
+            event=next(e for e in store.events(rid) if e['type']=='model_configuration_frozen')
+            self.assertEqual(event['payload']['snapshot_ref'],snapshot)
+            store.event(rid,'model_configuration_frozen',snapshot)  # Simulate an existing pre-fix event.
+        finally:store.close()
+        status,view=self.request('/api/projects/'+rid)
+        self.assertEqual(status,200,view)
+        status,detail=self.request('/api/runs/'+rid)
+        self.assertEqual(status,200,detail)
+        plan=detail['run']['data']['project_plan']
+        self.assertEqual(plan['status'],'waiting_for_input')
+        self.assertEqual(self.request('/api/runs/'+rid+'/artifacts/'+plan['clarification_id'])[0],200)
+        status,result=self.request('/api/runs/'+rid+'/artifacts/'+snapshot)
+        self.assertEqual(status,200,result)
+        self.assertEqual(result['artifact']['config']['model_type'],'local')
+
     def test_completed_worker_does_not_hide_a_failed_verification(self):
         """后台完成与Gate结果独立，HTTP明确暴露失败。 Worker completion never hides a failed Gate."""
         from masa.runtime.engine import Runtime

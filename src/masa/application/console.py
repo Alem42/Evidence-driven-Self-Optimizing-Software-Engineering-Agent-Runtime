@@ -147,6 +147,7 @@ class Console:
         try:
             run = store.run(rid)
             refs = {run["data"]["manifest_ref"]}
+            if run['data'].get('model_snapshot_ref'):refs.add(run['data']['model_snapshot_ref'])
             if run['data'].get('project_bundle'):
                 # 只允许读取本次发布快照绑定的完整代码 artifact。
                 # Expose only the exact approval artifact bound to this published snapshot.
@@ -154,6 +155,7 @@ class Console:
             for row in store.steps(rid) + store.tools(rid):
                 refs.update(v for k, v in row.items() if k.endswith("_ref") and v)
             for event in store.events(rid):
+                if not isinstance(event['payload'],dict):continue
                 refs.update(
                     v
                     for k, v in event["payload"].items()
