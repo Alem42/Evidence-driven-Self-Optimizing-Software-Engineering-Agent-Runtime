@@ -277,6 +277,7 @@ export interface RoutingPolicy {
   attempts_per_level: Record<string, number>;
   max_escalations: number;
   planner_retries: number;
+  start_level_by_role: Record<string, number>;
 }
 
 export interface RouteDecision {
@@ -305,4 +306,32 @@ export interface RoutingReport {
   decisions: RouteDecision[];
   escalations: number;
   stopped: { reason: string; detail?: string } | null;
+}
+
+// ───────── API 账户 Accounts ─────────
+export interface Account {
+  id: string;
+  base_url: string;
+  host: string;
+  profiles: { id: string; name: string; model: string; level: number; enabled: boolean }[];
+  balance_supported: boolean;
+  pricing_source: string | null;
+}
+
+export interface AccountModel {
+  id: string;
+  name: string;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  vision: boolean;
+  efforts: string[] | null;
+  added: boolean;
+  suggestion: { level: number; price_in: number; price_out: number; currency: string; source: string; note: string } | null;
+}
+
+export interface AccountBalance {
+  supported: boolean;
+  reason?: string;
+  available?: boolean;
+  balances?: { currency: string; total: string; granted: string; topped_up: string }[];
 }

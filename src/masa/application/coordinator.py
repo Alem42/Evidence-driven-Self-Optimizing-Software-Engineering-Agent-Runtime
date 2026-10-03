@@ -218,7 +218,10 @@ class WorkflowCoordinator:
                     if resume:provider=self._provider_of(resume)
                     return generation.generate(plan,provider,lambda rid:phase('generation',rid),
                                                resume_id=resume,retry_feedback=fb)
-                draft=self._attempt('generation','project_developer',generate,need=[goal,approved],stage='generation')
+                # 逐文件生成时 previous_files 会随文件数增长：按每个已生成文件约 4000 字符估计（启发式，写在文档里）。
+                # previous_files grows with each file call: roughly 4000 chars per already generated file (a documented heuristic).
+                growth='x'*4000*max(0,len(approved['spec']['files'])-1)
+                draft=self._attempt('generation','project_developer',generate,need=[goal,approved,growth],stage='generation')
             checkpoint['draft_id']=draft
         for attempt in range(checkpoint.get('attempt',0),5):
             meta=store.run(draft)['data']['project_plan']

@@ -22,8 +22,39 @@ def _count(value, rates) -> int:
 
 
 def estimate_tokens(value) -> int:
-    return _count(value, HIGH)
+    return _count(value, HIGH)  # HIGH 在调用时读取，configure() 可替换 / read at call time
 
 
 def estimate_tokens_lower(value) -> int:
     return _count(value, LOW)
+
+
+def fit(rows):
+    """对 (ASCII 字符数, 非 ASCII 字符数, 真实 token 数) 做两参数最小二乘；退化时只拟合 ASCII。
+    Two-parameter least squares over (ascii chars, non-ascii chars, real tokens); falls back to ASCII only when degenerate."""
+    saa = sum(a * a for a, n, t in rows)
+    san = sum(a * n for a, n, t in rows)
+    snn = sum(n * n for a, n, t in rows)
+    sat = sum(a * t for a, n, t in rows)
+    snt = sum(n * t for a, n, t in rows)
+    det = saa * snn - san * san
+    if det > 1e-9 * max(saa * snn, 1):
+        a, c = (sat * snn - snt * san) / det, (snt * saa - sat * san) / det
+        if a > 0 and c > 0:
+            return a, c
+    return (sat / saa if saa else HIGH[0] / 1.1), 0.54
+
+
+def configure(path) -> bool:
+    """加载 <state>/token-calibration.json（如果存在且合法）；否则保留内置系数。 Load calibration when present and valid."""
+    global HIGH, LOW
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+        high, low = tuple(float(x) for x in data['high']), tuple(float(x) for x in data['low'])
+        if len(high) == len(low) == 2 and all(0 < x < 5 for x in high + low) and all(l <= h for l, h in zip(low, high)):
+            HIGH, LOW = high, low
+            return True
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return False

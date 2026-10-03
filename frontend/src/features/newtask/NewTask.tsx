@@ -4,6 +4,7 @@ import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
 import { useProfiles } from '../../api/queries';
 import { byRouting, profileLevel } from '../../entities/profiles';
+import { Link } from 'react-router-dom';
 import { profileLabel, profileReady } from '../../entities/profiles';
 import { useToasts, useUi } from '../../stores/ui';
 import { Button, Notice, Segmented } from '../../shared/ui';
@@ -28,6 +29,7 @@ export function NewTask() {
   const [starting, setStarting] = useState(false);
   const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('fixed');
   const [apiTokens, setApiTokens] = useState('');
+  const selectedModels = useUi((x) => x.selectedModels);
 
   const ready = (profiles?.profiles ?? []).filter(profileReady);
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
@@ -41,7 +43,7 @@ export function NewTask() {
       const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
         '/projects/plan',
-        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {} } : {}) },
+        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
         { label: '项目规划' },
       );
       push({ tone: 'info', text: '任务已启动，正在规划…' });
@@ -95,8 +97,12 @@ export function NewTask() {
           {strategy === 'ladder' && auto === 'automatic' && (
             <div className="strategy-body">
               <p className="muted">
-                候选（按等级、优先级）：{[...ready].sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。本地模型先试并自修一次，仍失败才升级到更高等级；预算耗尽会停止并保留证据。
+                本任务使用的模型与次序：{[...ready].filter((p) => !selectedModels || selectedModels.includes(p.id)).sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。本地模型先试并自修，仍失败才升级到更高等级；预算耗尽会停止并保留证据。
               </p>
+              <div className="row wrap">
+                <Link to="/settings/order?from=new" className="btn btn-default btn-sm">模型与次序 · 调整 / 勾选</Link>
+                <Link to="/settings/accounts" className="btn btn-ghost btn-sm">API 账户</Link>
+              </div>
               <label className="field inline">
                 <span className="field-label">API token 上限</span>
                 <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => setApiTokens(e.target.value)} />

@@ -333,3 +333,19 @@ th { color: var(--muted); font-weight: 600; background: var(--sunken); } tr:last
 .budget { display: flex; flex-direction: column; gap: 6px; }
 .budget-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; align-items: center; font-size: 12.5px; }
 .budget-bar { height: 8px; background: var(--sunken); border-radius: 999px; overflow: hidden; } .budget-bar i { display: block; height: 100%; background: var(--ok); } .budget-bar i.hot { background: var(--bad); }
+
+/* ───────── model order / accounts / budget chips ───────── */
+.order-list { display: flex; flex-direction: column; gap: 6px; }
+.order-row { display: grid; grid-template-columns: 18px 56px 24px minmax(120px, 1.4fr) auto 64px 44px 90px auto auto; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.order-row.dragging { opacity: 0.45; } .order-row.over { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); } .order-row.unready { opacity: 0.6; }
+.order-row .grip { cursor: grab; color: var(--faint); user-select: none; } .order-row .pos { text-align: center; padding: 4px 4px; }
+.order-row .who { min-width: 0; display: flex; flex-direction: column; } .order-row .who strong, .order-row .who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-row .level { display: flex; align-items: center; gap: 3px; color: var(--muted); font-weight: 600; } .order-row .level input { padding: 4px 4px; text-align: center; }
+.order-row .ctx, .order-row .price { font-size: 12px; font-family: var(--mono); white-space: nowrap; }
+.ladder { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .tier { background: var(--accent-soft); border-radius: 8px; padding: 4px 10px; } .arrow { color: var(--faint); }
+table.compare td { vertical-align: top; white-space: normal; } table.compare tr.picked td { background: var(--accent-soft); }
+td.best { font-weight: 700; color: var(--ok); }
+.budget-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.bchip { position: relative; overflow: hidden; display: inline-block; border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 10px; font-size: 12px; font-family: var(--mono); background: var(--panel); }
+.bchip i { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--ok); } .bchip.warm { border-color: var(--warn); } .bchip.warm i { background: var(--warn); } .bchip.hot { border-color: var(--bad); color: var(--bad); } .bchip.hot i { background: var(--bad); }
+@media (max-width: 900px) { .order-row { grid-template-columns: 18px 50px 24px 1fr auto; } .order-row .ctx, .order-row .price { display: none; } }

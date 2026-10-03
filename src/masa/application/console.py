@@ -44,6 +44,9 @@ class Console:
             Path(project),
         )
         self.settings = Settings(self.root)
+        # 如果跑过 scripts/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
+        from masa.domain.tokens import configure as configure_tokens
+        configure_tokens(self.root / 'token-calibration.json')
         self.hardware = HardwareMonitor()
         self.diagnostics = DiagnosticLog(self.root)
         self.lock = threading.RLock()
@@ -71,7 +74,7 @@ class Console:
         return {
             "console_version": "workspace-console-v2",
             # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
-            "routing_defaults": {"policy": DEFAULT_POLICY, "budget": DEFAULT_BUDGET},
+            "routing_defaults": self.settings.routing(),
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
@@ -452,7 +455,8 @@ class Console:
             # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
             routing=previous.get('routing') if resume_job else None
             if not resume_job and body.get('routing')=='ladder':
-                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),digests=self._local_digests())
+                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),policy=body.get('policy'),
+                                       profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
             if routing:
                 provider=None

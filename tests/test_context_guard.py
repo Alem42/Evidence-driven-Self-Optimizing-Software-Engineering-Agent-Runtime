@@ -1,6 +1,7 @@
 """硬上下文拦截：本地服务静默截断，所以必须在发请求之前拒绝几乎一定溢出的输入。
 Hard context guard: local servers silently truncate, so near-certain overflows are rejected BEFORE the request is sent."""
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from masa.domain.models import ContextOverflow, MasaError, stage_error
@@ -76,6 +77,34 @@ class ContextGuardTests(unittest.TestCase):
         sample = {'goal': '实现区间归并 CLI ' * 50, 'code': 'func main() {}\n' * 100}
         self.assertLess(estimate_tokens_lower(sample), estimate_tokens(sample))
         self.assertGreater(estimate_tokens('中' * 100), estimate_tokens('a' * 100))
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_fit_recovers_known_coefficients(self):
+        from masa.domain.tokens import fit
+        rows = [(a, n, round(a * 0.25 + n * 0.5)) for a, n in ((1000, 0), (4000, 300), (200, 900), (8000, 50), (50, 2000))]
+        ascii_rate, other_rate = fit(rows)
+        self.assertAlmostEqual(ascii_rate, 0.25, places=2)
+        self.assertAlmostEqual(other_rate, 0.5, places=2)
+
+    def test_configure_loads_valid_files_and_ignores_bad_ones(self):
+        import json
+        import tempfile
+        from masa.domain import tokens
+        saved = (tokens.HIGH, tokens.LOW)
+        self.addCleanup(lambda: setattr(tokens, 'HIGH', saved[0]) or setattr(tokens, 'LOW', saved[1]))
+        with tempfile.TemporaryDirectory() as temp:
+            good = Path(temp) / 'good.json'
+            good.write_text(json.dumps({'high': [0.4, 0.7], 'low': [0.2, 0.4]}))
+            self.assertTrue(tokens.configure(good))
+            self.assertEqual(tokens.HIGH, (0.4, 0.7))
+            self.assertGreater(tokens.estimate_tokens('a' * 1000), 399)
+            for content in ('not json', json.dumps({'high': [9, 9], 'low': [1, 1]}), json.dumps({'high': [0.1, 0.1], 'low': [0.2, 0.2]}), json.dumps({})):
+                bad = Path(temp) / 'bad.json'
+                bad.write_text(content)
+                self.assertFalse(tokens.configure(bad))
+            self.assertFalse(tokens.configure(Path(temp) / 'missing.json'))
+            self.assertEqual(tokens.HIGH, (0.4, 0.7))  # 坏文件不改变已加载的系数 / bad files never change loaded values
 
 
 if __name__ == '__main__':

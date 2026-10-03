@@ -1,14 +1,18 @@
 import { NavLink, Navigate, useParams } from 'react-router-dom';
 import { DiagnosticsSection } from './DiagnosticsSection';
+import { AccountsSection } from './AccountsSection';
 import { HarnessSection } from './HarnessSection';
 import { LocalSection } from './LocalSection';
 import { ModelsSection } from './ModelsSection';
+import { OrderSection } from './OrderSection';
 import { RoutingSection } from './RoutingSection';
 
 const SECTIONS = [
   ['models', '模型配置', '本地与云端模型、等级、角色权限'],
+  ['order', '模型与次序', '拖动调整尝试顺序；选择本任务用哪些'],
+  ['accounts', 'API 账户', '一把 key 的可用模型、余额，一键添加'],
   ['local', '本地运行时', 'Ollama 模型、加载与硬件'],
-  ['routing', '路由与预算', '本地优先 / 升级策略（规划中）'],
+  ['routing', '路由与预算', '默认预算与策略（可编辑）'],
   ['harness', 'Harness', 'Go 工具链、runner、检查策略'],
   ['diagnostics', '诊断', '后台异常记录'],
 ] as const;
@@ -31,6 +35,8 @@ export function SettingsPage() {
       </nav>
       <div className="settings-body">
         {section === 'models' && <ModelsSection />}
+        {section === 'order' && <OrderSection />}
+        {section === 'accounts' && <AccountsSection />}
         {section === 'local' && <LocalSection />}
         {section === 'routing' && <RoutingSection />}
         {section === 'harness' && <HarnessSection />}

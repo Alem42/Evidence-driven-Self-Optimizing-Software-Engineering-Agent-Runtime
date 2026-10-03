@@ -21,6 +21,7 @@ DEFAULT_POLICY = {
     'attempts_per_level': {'planning': 2, 'generation': 2, 'fix': 1},  # 初次 + 自修；fix 链的“初次”已是前面的生成 / initial + self-repair
     'max_escalations': 2,
     'planner_retries': 2,
+    'start_level_by_role': {},  # 例如 {'project_planner': 2}：Planner 从 L2 起步 / e.g. start the Planner at L2
 }
 FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 1}
 DEFAULT_BUDGET = {'max_model_calls': 40, 'max_cloud_tokens': 200_000, 'max_active_seconds': 3600, 'max_cost': None}
@@ -156,16 +157,22 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
 
     skipped: list[str] = []
 
-    def pick(level_ok) -> tuple[Candidate | None, str | None]:
+    def pick(level_ok, turn: int = 0) -> tuple[Candidate | None, str | None]:
+        """在满足 level_ok 的候选里挑第 turn 个可用的（同级轮换）；被挡住的记入 skipped。
+        Pick the turn-th usable candidate (same-level siblings take turns); blocked ones are noted."""
         first_block = None
+        usable = []
         for c in allowed:
             if not level_ok(c.level):
                 continue
             why = _blocked(c, need_tokens, spend, budget)
             if why is None:
-                return c, None
+                usable.append(c)
+                continue
             skipped.append(f'{c.model}（{SKIP_TEXT.get(why, why)}）')
             first_block = first_block or why
+        if usable:
+            return usable[turn % len(usable)], None
         return None, first_block
 
     def note() -> str:
@@ -173,7 +180,13 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
         return ('跳过：' + '；'.join(skipped)) if skipped else ''
 
     if current is None:
-        c, why = pick(lambda lv: True)
+        # 某些角色可以从更高等级起步（例如 Planner/Tester 的输出短但影响大）；没有可用的就退回到任意等级。
+        # Some roles may start higher (short but decisive outputs); fall back to any level when none is usable.
+        start = policy.get('start_level_by_role', {}).get(role)
+        c, why = (pick(lambda lv: lv >= start) if start is not None else (None, None))
+        if not c:
+            skipped.clear() if start is not None else None
+            c, why = pick(lambda lv: True)
         if c:
             return Decision('use', c.id, c.level, 'start_lowest_eligible', detail=note())
         return Decision('stop', reason=why or 'no_candidate', detail='没有满足上下文/预算的候选')
@@ -181,7 +194,9 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
     failed_here = sum(1 for lv in used_levels if lv == current)
     # 当前等级还有尝试额度，或已是最高等级：继续使用本级。 Stay on this level while attempts remain, or at the top.
     if current == top or failed_here < per_level:
-        c, why = pick(lambda lv: lv == current)
+        # 失败次数作为轮换序号：同级有多个候选时交替使用，换一个模型比重复同一个更可能出现不同结果。
+        # The failure count is the rotation turn: siblings alternate, since a different model is likelier to differ.
+        c, why = pick(lambda lv: lv == current, turn=failed_here)
         if c:
             return Decision('use', c.id, c.level, 'top_level' if current == top else 'retry_same_level', detail=note())
         if current == top:
@@ -220,3 +235,37 @@ SKIP_TEXT = {
     'budget_cost': '费用预算不够',
     'price_unknown': '缺少价格',
 }
+
+
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4)}
+CHAINS = ('planning', 'generation', 'fix')
+ROLES = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision')
+
+
+def validate_policy(policy) -> dict:
+    """规范化用户策略（缺省取默认）。 Normalize a user policy; missing fields take defaults."""
+    from masa.domain.models import MasaError
+    out = {**DEFAULT_POLICY, 'attempts_per_level': dict(DEFAULT_POLICY['attempts_per_level']), 'start_level_by_role': {}}
+    for key, value in (policy or {}).items():
+        if key == 'attempts_per_level':
+            if not isinstance(value, dict):
+                raise MasaError('attempts_per_level must be an object')
+            for chain, n in value.items():
+                if chain not in CHAINS or type(n) is not int or not 1 <= n <= 5:
+                    raise MasaError('attempts_per_level needs planning/generation/fix integers in 1..5')
+                out['attempts_per_level'][chain] = n
+        elif key == 'start_level_by_role':
+            if not isinstance(value, dict):
+                raise MasaError('start_level_by_role must be an object')
+            for role, level in value.items():
+                if role not in ROLES or type(level) is not int or not 1 <= level <= 100:
+                    raise MasaError('start_level_by_role needs known roles and levels 1..100')
+                out['start_level_by_role'][role] = level
+        elif key in POLICY_BOUNDS:
+            low, high = POLICY_BOUNDS[key]
+            if type(value) is not int or not low <= value <= high:
+                raise MasaError(f'{key} must be an integer in {low}..{high}')
+            out[key] = value
+        else:
+            raise MasaError(f'unknown policy field: {key}')
+    return out

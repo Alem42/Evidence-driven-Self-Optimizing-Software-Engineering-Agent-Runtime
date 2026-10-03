@@ -130,6 +130,20 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = console.projects(parts[2])
                 elif path == "/api/settings":
                     result = console.settings.save(body) if write else console.settings.public()
+                elif path == '/api/routing':
+                    result = console.settings.save_routing(body) if write else console.settings.routing()
+                elif path == '/api/settings/order' and write:
+                    result = console.settings.reorder(body.get('order'), body.get('levels'))
+                elif path == '/api/accounts' and not write:
+                    result = {'accounts': console.settings.accounts()}
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'models' and not write:
+                    result = {'models': console.settings.account_models(parts[2])}
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'balance' and not write:
+                    result = console.settings.account_balance(parts[2])
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'add-models' and write:
+                    result = console.settings.add_models(parts[2], body.get('models'))
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'select' and write:
+                    result = console.settings.select_models(parts[2], body.get('models'))
                 elif path == '/api/settings/test' and write:
                     result = console.settings.test(body.get('id') or console.settings.active_id)
                 elif path == '/api/ollama' and not write:

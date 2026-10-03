@@ -7,8 +7,8 @@ Router: glue between the pure route() policy, the store, providers and events.
 快照不含密钥；恢复时用快照里的候选集合，凭据仍取自存活的同一目的地址的配置。
 Snapshots contain no secrets; on resume the frozen candidate set is used and credentials come from the live profile.
 """
-from masa.application.routing import (Candidate, DEFAULT_POLICY, FIXED_POLICY, STOP_TEXT, estimate_tokens, route,
-                                      spend_from_report, unlimited_budget, validate_budget)
+from masa.application.routing import (Candidate, DEFAULT_BUDGET, DEFAULT_POLICY, FIXED_POLICY, STOP_TEXT, estimate_tokens, route,
+                                      spend_from_report, unlimited_budget, validate_budget, validate_policy)
 from masa.domain.models import MasaError
 
 SNAPSHOT_VERSION = 1
@@ -33,6 +33,13 @@ def build_snapshot(settings, *, mode='ladder', budget=None, policy=None, digests
     """从当前可用配置冻结候选集合（不含密钥）。 Freeze the candidate set from live, ready profiles (no secrets)."""
     if mode not in {'ladder', 'fixed'}:
         raise MasaError('unknown routing mode')
+    # 默认值来自设置页保存的内容；本任务的覆盖项逐层合并（嵌套的每链次数、起始等级也逐项合并）。
+    # Defaults come from what the Settings page saved; per-task overrides merge on top, including nested fields.
+    saved = settings.routing() if hasattr(settings, 'routing') else {'policy': DEFAULT_POLICY, 'budget': DEFAULT_BUDGET}
+    merged_policy = {**saved['policy'], **(policy or {})}
+    for nested in ('attempts_per_level', 'start_level_by_role'):
+        merged_policy[nested] = {**saved['policy'].get(nested, {}), **((policy or {}).get(nested) or {})}
+    merged_budget = {**saved['budget'], **(budget or {})}
     entries = []
     for ident, cfg in settings.ready_profiles():
         if profile_ids is not None and ident not in profile_ids:
@@ -46,8 +53,8 @@ def build_snapshot(settings, *, mode='ladder', budget=None, policy=None, digests
                         'snapshot': provider.snapshot})
     if not entries:
         raise MasaError('no usable model profile; configure and enable at least one model')
-    return {'version': SNAPSHOT_VERSION, 'mode': mode, 'policy': {**(DEFAULT_POLICY if mode == 'ladder' else FIXED_POLICY), **(policy or {})},
-            'budget': validate_budget(budget) if mode == 'ladder' else unlimited_budget(), 'candidates': entries}
+    return {'version': SNAPSHOT_VERSION, 'mode': mode, 'policy': validate_policy(merged_policy) if mode == 'ladder' else dict(FIXED_POLICY),
+            'budget': validate_budget(merged_budget) if mode == 'ladder' else unlimited_budget(), 'candidates': entries}
 
 
 class Router:
