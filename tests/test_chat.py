@@ -173,11 +173,13 @@ class ChatTests(unittest.TestCase):
     def test_ollama_native_uses_no_auth_and_normalizes_actual_usage(self):
         """原生本地请求真实走HTTP，保持JSON和用量契约。 Exercise native HTTP without auth while preserving JSON/usage contracts."""
         self.envelope={'done':True,'done_reason':'stop','message':{'content':'{"type":"final","summary":"local result"}','thinking':'PRIVATE'},
-                       'prompt_eval_count':12,'eval_count':8}
+                       'prompt_eval_count':12,'eval_count':8,'eval_duration':2000000000,'prompt_eval_duration':1000000000,'total_duration':4000000000,'load_duration':1000000000}
         provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama','timeout_seconds':180})
         result=provider.respond(self.context)
         self.assertEqual(result['summary'],'local result')
         self.assertEqual(provider.usage['total_tokens'],20)
+        self.assertEqual(provider.metrics['generation_tokens_per_second'],4)
+        self.assertEqual(provider.metrics['prompt_tokens_per_second'],12)
         self.assertFalse(self.requests[0]['stream']);self.assertEqual(self.requests[0]['format'],'json')
         self.assertEqual(self.requests[0]['options']['num_ctx'],8192)
         self.assertFalse(self.requests[0]['think'])
@@ -192,6 +194,34 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn('private',str(caught.exception))
         self.assertEqual(len(self.requests),1)
         self.assertEqual(self.provider.usage['total_tokens'],7)
+
+    def test_native_tester_mapping_normalizes_then_keeps_business_validation(self):
+        """本地键映射不绕过工具白名单或验收引用。 Native keyed checks preserve allowlists and acceptance validation."""
+        provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama'})
+        check={'purpose':'Check behavior','acceptance_indices':[0],'cases':[{'name':'empty','input':'','expected':'exit 0','level':'cli'}]}
+        def response(checks):
+            return {'done':True,'done_reason':'stop','message':{'content':json.dumps({'checks':checks})},'eval_count':8,'eval_duration':0}
+        self.envelope=response({'go_test':check})
+        context={'purpose':'project_tester','spec':{'acceptance':['criterion']}}
+        result=provider.respond(context)
+        self.assertEqual(result[0]['operation'],'go_test')
+        self.assertIsNone(provider.metrics['generation_tokens_per_second'])
+        self.envelope=response({'shell':check})
+        with self.assertRaisesRegex(MasaError,'unauthorized'):provider.respond(context)
+        self.envelope=response({'go_test':{**check,'acceptance_indices':[1]}})
+        with self.assertRaisesRegex(MasaError,'acceptance reference'):provider.respond(context)
+
+    def test_native_developer_uses_json_but_keeps_strict_module_validation(self):
+        """源码避免复杂grammar循环，但发布仍校验批准模块。 Avoid complex code grammars while preserving approved-module validation."""
+        from test_project_plan import SPEC
+        from test_project_generation import FILES
+        provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama'})
+        context={'purpose':'project_developer','spec':SPEC}
+        self.envelope={'done':True,'done_reason':'stop','message':{'content':json.dumps({'files':FILES})}}
+        self.assertEqual(provider.respond(context),FILES)
+        self.assertEqual(self.requests[-1]['format'],'json')
+        self.envelope={'done':True,'done_reason':'stop','message':{'content':json.dumps({'files':{**FILES,'go.mod':'module wrong/app\n\ngo 1.27.0\n'}})}}
+        with self.assertRaisesRegex(MasaError,'approved module'):provider.respond(context)
 
     def test_truncation_errors_and_redirects_never_retry(self):
         """错误与重定向不产生隐式额外请求。 Errors and redirects never cause implicit requests."""

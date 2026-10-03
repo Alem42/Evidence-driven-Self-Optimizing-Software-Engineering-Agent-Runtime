@@ -8,17 +8,17 @@ def response_schema(context):
     if purpose=='project_tester':
         case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
               'properties':{'name':string,'input':string,'expected':string,'level':{'enum':['unit','integration','cli']}}}
-        check={'type':'object','additionalProperties':False,'required':['operation','purpose','acceptance_indices'],
-               'properties':{'operation':{'enum':['go_test','go_vet','go_fmt_check']},'purpose':string,
+        check={'type':'object','additionalProperties':False,'required':['purpose','acceptance_indices'],
+               'properties':{'purpose':string,
                     'acceptance_indices':{'type':'array','items':{'type':'integer','minimum':0,'maximum':len(context['spec']['acceptance'])-1}},
                     'cases':{'type':'array','minItems':1,'maxItems':16,'items':case}}}
+        # 名称作为键避免重复工具，绕过本地不完整的 tuple schema 支持。
+        # Named keys prevent duplicate operations without relying on unsupported tuple schemas.
+        test={**check,'required':check['required']+['cases']}
+        static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
         return {'type':'object','additionalProperties':False,'required':['checks'],
-                'properties':{'checks':{'type':'array','minItems':1,'maxItems':3,'items':check}}}
-    if purpose=='project_developer':
-        paths=[f['path'] for f in context['spec']['files']]
-        return {'type':'object','additionalProperties':False,'required':['files'],
-                'properties':{'files':{'type':'object','additionalProperties':False,'required':paths,
-                    'properties':{p:string for p in paths}}}}
+                'properties':{'checks':{'type':'object','additionalProperties':False,'required':['go_test'],
+                    'properties':{'go_test':test,'go_vet':static,'go_fmt_check':static}}}}
     if purpose!='project_planner':
         return 'json'
     spec={'type':'object','additionalProperties':False,

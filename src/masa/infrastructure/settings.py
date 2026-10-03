@@ -209,6 +209,7 @@ class Settings:
                 "ok": True,
                 "message": "连接及 JSON 协议测试通过",
                 "usage": provider.usage,
+                "metrics": provider.metrics,
                 "cost": None,
                 "time": time.time(),
             }
@@ -217,6 +218,7 @@ class Settings:
                 "ok": False,
                 "message": str(exc),
                 "usage": provider.usage,
+                "metrics": provider.metrics,
                 "cost": None,
                 "time": time.time(),
             }

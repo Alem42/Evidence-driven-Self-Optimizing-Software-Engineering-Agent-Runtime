@@ -67,7 +67,7 @@ def main():
         store=Store(state)
         try:
             service=ProjectGeneration(store,runner)
-            draft=service.revise_tests(args.repair_tests,Settings(state).provider(),
+            draft=service.revise_tests(args.repair_tests,Settings(state).provider(args.profile),
                 'Fix CLI test setup only: build and execute an absolute binary path in t.TempDir(); preserve all behavioral assertions.')
             meta=store.run(draft)['data']['project_plan']
             rid=service.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref'])})
@@ -84,7 +84,7 @@ def main():
         store=Store(state);jobs=Jobs(state);ident=uuid.uuid4().hex
         try:
             parent=store.run(args.plan)
-            provider=Settings(state).provider()
+            provider=Settings(state).provider(args.profile)
             jobs[ident]={'status':'running','mode':'auto','phase':'generation','attempt':0,
                 'started':time.time(),'plan_id':args.plan,'run_id':args.plan,'provider':provider.profile,
                 'request':{'goal':parent['data']['goal']}}

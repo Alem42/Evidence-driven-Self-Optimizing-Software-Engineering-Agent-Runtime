@@ -16,6 +16,34 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_completed_worker_does_not_hide_a_failed_verification(self):
+        """后台完成与Gate结果独立，HTTP明确暴露失败。 Worker completion never hides a failed Gate."""
+        from masa.runtime.engine import Runtime
+        from masa.domain.models import Budget
+        class Failing(FakeExecutor):
+            def execute(self,request,workspace,cancelled):
+                result=super().execute(request,workspace,cancelled);result['exit_code']=1;return result
+        store=Store(self.root/'state')
+        try:
+            runtime=Runtime(store,Failing());rid=runtime.create(self.source,'verify',Budget())
+            runtime.execute(rid)
+        finally:store.close()
+        self.console.jobs['ended']={'status':'completed','run_id':rid,'started':1}
+        status,result=self.request('/api/jobs/ended')
+        self.assertEqual(status,200);self.assertEqual(result['run_status'],'failed')
+
+    def test_ollama_catalog_and_profile_selection_have_authenticated_routes(self):
+        """本地控制沿用工作台认证，切换返回可用配置。 Reuse local session auth and return usable selected profiles."""
+        from masa.infrastructure.ollama import OllamaControl
+        with patch.object(OllamaControl,'catalog',return_value={'models':[{'name':'m:latest','size':100}],'running':[]}),patch.object(OllamaControl,'installed',return_value={'name':'m:latest'}):
+            status,result=self.request('/api/ollama')
+            self.assertEqual(status,200);self.assertEqual(result['models'][0]['size'],100)
+            status,result=self.request('/api/ollama/action',{'action':'select','model':'m:latest'})
+            self.assertEqual(status,200)
+            self.assertEqual(result['settings']['model_type'],'local')
+            self.assertEqual(self.request('/api/ollama/action',{'action':'shell','model':'m:latest'})[0],400)
+            self.assertEqual(self.request('/api/ollama',headers={'X-MASA-Token':''})[0],403)
+
     def test_results_expose_test_setup_repair_advice(self):
         """HTTP 修复建议来自实际工具输出，前端无需重复猜测。 Derive browser repair advice from recorded tool output."""
         from masa.runtime.engine import Runtime

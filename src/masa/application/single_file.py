@@ -161,6 +161,7 @@ class CodeGeneration:
                     "provider": route["provider"],
                     "model": route["model"],
                     "usage": provider.usage,
+                    "metrics": getattr(provider,'metrics',None),
                     "cost": None,
                     "duration_ms": round((time.monotonic() - started) * 1000),
                 },

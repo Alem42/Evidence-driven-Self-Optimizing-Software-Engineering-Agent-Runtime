@@ -23,6 +23,7 @@ from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
+from masa.infrastructure.ollama import OllamaControl
 
 
 from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, repeated_assertion_signature
@@ -444,9 +445,57 @@ class Console:
         job=dict(self.jobs[ident])
         if job['run_id']:
             detail=self.detail(job['run_id'])
+            job['run_status']=detail['run']['status']
             requested=[e for e in detail['events'] if e['type']=='model_requested']
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
+            # 版本切换后仍显示同任务最近的实际速度，不伪造当前请求吞吐。
+            # Keep the latest measured speed across revisions, never pretend it is the current live rate.
+            store=Store(self.root)
+            try:
+                rid=job['run_id'];seen=set();measurements=[]
+                while rid and rid not in seen and len(seen)<30:
+                    seen.add(rid)
+                    measurements.extend(e for e in store.events(rid) if e['type'] in {'model_completed','model_failed'} and e['payload'].get('metrics'))
+                    rid=store.run(rid)['data'].get('parent_run_id')
+                if measurements:
+                    latest=max(measurements,key=lambda e:e['seq'])
+                    job['last_model_metrics']=latest['payload']['metrics']
+                if detail.get('role_active') and requested:job['stage']=requested[-1]['payload']['step_id']
+            finally:store.close()
+        job['model']=job.get('provider',{}).get('model') or job.get('model')
         return job
+
+    def ollama_action(self,body):
+        """受控动作共用单后台槽，避免与项目推理争抢。 Use one worker slot for local controls and project inference."""
+        action=body.get('action');model=body.get('model');control=OllamaControl()
+        if action=='show':return control.show(model)
+        if action not in {'select','load','unload','test'}:raise MasaError('unsupported Ollama action')
+        with self.lock:
+            self._available()
+            installed=control.installed(model)
+            if action=='select':
+                matches=[i for i,p in self.settings.profiles.items() if p['model_type']=='local' and p['protocol']=='ollama' and p['base_url']==control.base and p['model']==model]
+                values={'model_type':'local','protocol':'ollama','base_url':control.base,'model':model,'enabled':True}
+                if matches:values['id']=matches[0]
+                else:values.update(new=True,name='Ollama '+model,level=1,priority=0,context_limit=16384,max_output_tokens=8192,timeout_seconds=600,thinking='disabled')
+                profiles=self.settings.save(values)
+                return {'settings':profiles,'model':installed}
+            ident=uuid.uuid4().hex
+            self.jobs[ident]={'status':'running','mode':'ollama','phase':action,'run_id':None,'started':time.time(),'model':model}
+            def work():
+                try:
+                    if action=='test':
+                        from masa.infrastructure.llm import ChatProvider
+                        provider=ChatProvider({'model_type':'local','base_url':control.base,'model':model,'timeout_seconds':600,
+                                               'context_limit':8192,'max_output_tokens':256,'thinking':'disabled'})
+                        output=provider.respond({'operation':'go_test','goal':'Request the allowed go_test tool.','tool_results':[]})
+                        result={'output':output,'usage':provider.usage,'metrics':provider.metrics}
+                    else:result=control.residency(model,action=='load')
+                    self.jobs[ident].update(status='completed',result=result)
+                except Exception as exc:
+                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'local model control failed')
+            self.job_thread=threading.Thread(target=work,daemon=True,name='masa-ollama-control');self.job_thread.start()
+            return {'job_id':ident}
 
     def review_project_sources(self, rid, body):
         """解析可见草稿，结果只用于审查而不替代 Gate。 Parse the visible draft without replacing Gate verification."""

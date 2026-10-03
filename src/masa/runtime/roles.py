@@ -82,13 +82,13 @@ class RoleRuntime:
             except Exception:
                 with self.store.transaction():
                     self.store.db.execute("UPDATE role_invocations SET status='failed',finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(time.time(),rid,purpose,invocation_id))
-                    self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None)})
+                    self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None)})
                 raise
             output_ref=self.store.put(output)
             with self.store.transaction():
                 self.store.db.execute("UPDATE role_invocations SET status='completed',output_ref=?,finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(output_ref,time.time(),rid,purpose,invocation_id))
                 self.store._event(rid,'model_completed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'response_ref':output_ref,
-                    'usage':getattr(provider,'usage',None),'duration_ms':round((time.monotonic()-started)*1000)})
+                    'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None),'duration_ms':round((time.monotonic()-started)*1000)})
             return output
 
     def states(self, rid):

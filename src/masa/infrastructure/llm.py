@@ -111,10 +111,12 @@ class ChatProvider:
             self.profile.update(provider='ollama-native' if self.config['protocol']=='ollama' else 'local-openai-compatible',
                 context_limit=self.config['context_limit'],timeout_seconds=self.config['timeout_seconds'])
         self.usage = None
+        self.metrics = None
 
     def respond(self, context, *, timeout=None):
         """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
         self.usage = None
+        self.metrics = None
         if not self.config['enabled']:raise MasaError('model profile is disabled')
         purpose=context.get('purpose','verifier')
         if self.config['roles'] and purpose not in self.config['roles']:
@@ -123,6 +125,10 @@ class ChatProvider:
             self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
         )
         instruction = instruction_for(context)
+        if self.config['protocol']=='ollama' and purpose=='project_tester':
+            instruction+=' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
+        if self.config['protocol']=='ollama' and purpose=='project_developer':
+            instruction+=' Copy this exact go.mod value: '+json.dumps(f"module {context['spec']['module']}\n\ngo 1.27.0\n")+'. Keep implementation concise. Avoid repetitive comments.'
         payload = {
             "model": self.config["model"],
             "messages": [
@@ -139,7 +145,9 @@ class ChatProvider:
         if self.config['protocol']=='ollama':
             # 原生端点明确限制上下文/输出并关闭流，仍复用同一角色契约。
             # Native options bound context/output without streaming; role contracts remain shared.
-            payload={'model':self.config['model'],'messages':payload['messages'],'format':response_schema(context),'stream':False,
+            # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
+            # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
+            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' else response_schema(context),'stream':False,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
@@ -178,7 +186,16 @@ class ChatProvider:
                 decoded = json.loads(b"".join(chunks))
         except urllib.error.HTTPError as exc:
             code = exc.code
+            # 本地服务仅提取受限错误说明，便于判断模型/上下文配置。
+            # Read only a bounded local error message to diagnose model/context configuration.
+            local_error=None
+            if self.config['protocol']=='ollama':
+                try:
+                    message=json.loads(exc.read(4096)).get('error')
+                    if isinstance(message,str):local_error=message[:500].replace(self.key,'[REDACTED]') if self.key else message[:500]
+                except (ValueError,AttributeError,OSError):pass
             exc.close()
+            if local_error:raise MasaError(f'Ollama HTTP {code}: {local_error}; no automatic retry') from None
             raise MasaError(
                 f"model HTTP {code}; no automatic retry; check API configuration"
             ) from None
@@ -188,6 +205,13 @@ class ChatProvider:
             ) from None
         try:
             if self.config['protocol']=='ollama':
+                # verbose 同源的纳秒计数，只计算真实完成响应的速率。
+                # Use the same nanosecond counters as verbose output; never invent live rates.
+                fields=('total_duration','load_duration','prompt_eval_duration','eval_duration','prompt_eval_count','eval_count')
+                self.metrics={k:decoded.get(k) if type(decoded.get(k)) is int and decoded[k]>=0 else None for k in fields}
+                for name,count,duration in [('generation_tokens_per_second','eval_count','eval_duration'),('prompt_tokens_per_second','prompt_eval_count','prompt_eval_duration')]:
+                    n=self.metrics[count];d=self.metrics[duration]
+                    self.metrics[name]=round(n*1e9/d,2) if n is not None and d else None
                 # 统一实际用量与完成标记，未知字段保持未知，不读取 thinking。
                 # Normalize actual usage and completion without persisting private thinking.
                 prompt=decoded.get('prompt_eval_count');completion=decoded.get('eval_count')
@@ -220,4 +244,12 @@ class ChatProvider:
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
+        if self.config['protocol']=='ollama' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):
+            # 仅归一化本地传输形状；原业务校验仍拒绝非法工具和内容。
+            # Normalize transport shape only; business validation still rejects invalid tools/content.
+            checks=[]
+            for operation,check in action['checks'].items():
+                if not isinstance(check,dict) or 'operation' in check:raise MasaError('invalid local check object')
+                checks.append({'operation':operation,**check})
+            action={**action,'checks':checks}
         return validate_response(context, action, self.key)

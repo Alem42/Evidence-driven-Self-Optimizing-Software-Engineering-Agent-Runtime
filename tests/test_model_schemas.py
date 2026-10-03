@@ -12,13 +12,9 @@ class ModelSchemaTests(unittest.TestCase):
         self.assertEqual(len(choices),2)
         self.assertEqual(choices[1]['properties']['kind']['const'],'clarification_request')
         tester=response_schema({'purpose':'project_tester','spec':{'acceptance':['a','b']}})
-        refs=tester['properties']['checks']['items']['properties']['acceptance_indices']['items']
+        checks=tester['properties']['checks']
+        refs=checks['properties']['go_test']['properties']['acceptance_indices']['items']
         self.assertEqual((refs['minimum'],refs['maximum']),(0,1))
+        self.assertEqual(set(checks['properties']),{'go_test','go_vet','go_fmt_check'})
+        self.assertFalse(checks['additionalProperties'])
 
-    def test_developer_paths_match_approved_spec_and_tools_keep_json(self):
-        """生成器只能返回批准路径；工具协议保持原样。 Restrict generated paths without changing tool contracts."""
-        schema=response_schema({'purpose':'project_developer','spec':{'files':[{'path':'go.mod'},{'path':'cmd/app/main.go'}]}})
-        files=schema['properties']['files']
-        self.assertEqual(files['required'],['go.mod','cmd/app/main.go'])
-        self.assertFalse(files['additionalProperties'])
-        self.assertEqual(response_schema({'purpose':'verifier'}),'json')

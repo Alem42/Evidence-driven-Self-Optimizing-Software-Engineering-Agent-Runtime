@@ -106,6 +106,11 @@ def make_server(console, port=8765):
                     result = console.settings.save(body) if write else console.settings.public()
                 elif path == '/api/settings/test' and write:
                     result = console.settings.test(body.get('id') or console.settings.active_id)
+                elif path == '/api/ollama' and not write:
+                    from masa.infrastructure.ollama import OllamaControl
+                    result = OllamaControl().catalog()
+                elif path == '/api/ollama/action' and write:
+                    result = console.ollama_action(body)
                 elif path == '/api/generate' and write:
                     result = console.generate(body)
                 elif path == '/api/projects/plan' and write:
