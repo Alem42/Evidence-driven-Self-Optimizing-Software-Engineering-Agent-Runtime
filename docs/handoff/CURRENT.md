@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-03 前端 v3**：前后端已分离。后端 `python -m masa serve`（纯 API，/api/session 发令牌，CORS 白名单），前端在 `frontend/`（React19+TS+Vite+TanStack Query+zustand+CodeMirror），`npm run dev` 或 `scripts/dev.ps1`。旧 `frontend/src` 与 `interfaces/http/static` 已删除。结构、扩展点、已知后端卡顿根因与待办见 [PLAN_FRONTEND_REDESIGN](../PLAN_FRONTEND_REDESIGN.md)（第 5、6 节）。下一步后端优先：只读连接/增量接口/变更游标，再做路由与预算；前端按扩展点接入。
+
 2026-10-03。先 git status，读 MEMORY/STATUS/PLAN_NEXT_STAGE 和 [进展005](../progress/PROGRESS_2026-10-03_005_local-recovery.md)。代码讲解在 guides/USER_LOCAL_RUNTIME_AND_RECOVERY。
 
 本轮修复模型快照标量事件破坏 Projects.view/Console.artifact；新事件为对象，旧证据兼容读取。用户原任务 9620c8ba3e5946b3b53ab28666e5cd84 实际 waiting_for_input，14.61秒生成问题，真实 HTTP 已恢复读取，未代答。

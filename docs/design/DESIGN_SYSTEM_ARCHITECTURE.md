@@ -3,7 +3,7 @@
 2026-10-03。
 
 ```text
-React 工作台 → HTTP / Console → Coordinator
+React 前端（独立 SPA）→ HTTP API / Console → Coordinator
                                   ├─ Planning / Generation / Review
                                   ├─ RoleRuntime → LLM
                                   └─ Tool Runtime → Go Runner → Gate
@@ -25,6 +25,6 @@ run_kind 区分规划、代码草稿、验证和语义评审；旧记录读取�
 
 UI 主状态由当前版本来源链投影：模型请求/完成/失败对应角色，等待输入对应澄清，awaiting_review 对应审批，step 状态对应 Executor/Gate。线程存活单独决定是否显示运行进度和恢复按钮。调用/工具表是事实，不以 UI 投影回写它们。
 
-前端历史侧栏、中央任务/代码/验证/日志标签、右侧角色时间线、底部状态条；新建需求表单只在开始项目时显示。检查图渲染已删除，后端检查图仍负责依赖调度与 Gate 覆盖。角色流程是状态投影，不是任意 Agent 图。workspaceState仅解释状态，useWorkbench区分跟随执行与手动历史浏览。
+前端是独立 SPA（见 PLAN_FRONTEND_REDESIGN）：任务历史、顶部执行图、对话·决策/代码/验证/日志标签、Inspector 与设置中心；图与状态都是后端事实的投影，不是任意 Agent 图。
 
 保留隔离副本、批准引用、冻结测试、工具预算、不确定调用不重放。隔离副本不是完整安全沙箱；当前只支持标准库 Go CLI。旧单文件与只读 demo 仅兼容保留，退出主产品路线。模型路由与持续对话见愿景文档，尚未实现。

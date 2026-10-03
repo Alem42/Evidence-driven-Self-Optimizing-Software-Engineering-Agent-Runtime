@@ -20,26 +20,11 @@
 ## 2. 当前结构：每层只负责一件事
 
 ```text
-frontend/src
-  app/useWorkbench.js              项目选择、后台任务跟踪、读取轮询
-  features/projects/LiveStatus.jsx 顶部阶段、时间、最近速率、文件进度
-  features/settings/OllamaPanel.jsx 本地模型、硬件、后台诊断
-
-src/masa
-  interfaces/http/server.py        本机 HTTP 路由、会话认证、服务独占
-  application/console.py           连接界面与应用服务，管理单个后台工作槽
-  application/coordinator.py       顺序推进工作流，选择失败修复范围
-  application/planning.py          Planner、澄清、Tester、方案审批
-  application/generation.py        代码草稿、逐文件生成、发布和关联修订
-  runtime/roles.py                 模型调用账本、预算、复用、未知请求保护
-  runtime/engine.py                真实检查调度与独立 Gate
-  agents/protocol.py + schemas.py  模型输出格式和传输约束
-  domain/proposals.py              独立验证文件、路径和修复边界
-  infrastructure/llm.py            本地/云端传输与实际计数归一化
-  infrastructure/ollama.py         固定 Ollama 管理接口
-  infrastructure/hardware.py       有界只读硬件采集
-  infrastructure/diagnostics.py    有界、去原文的服务故障日志
-  infrastructure/store.py + jobs.py artifact、运行记录与后台检查点
+frontend/src            （2026-10-03 起为 TypeScript 独立前端，结构见 PLAN_FRONTEND_REDESIGN 第 4 节）
+  api/queries.ts        服务端状态与自适应轮询
+  app/activity.tsx      后台任务统一跟踪与“跟随执行”
+  features/topbar       顶部阶段、时间、最近速率、文件进度
+  features/settings     本地模型、硬件、后台诊断
 ```
 
 Planner、Tester、Developer 是不同职责，不是必须同时运行的三个进程。现在同一个选定模型可以依次承担这些角色。Coordinator 决定接下来做什么，RoleRuntime 记录真实模型请求，Go runner 执行真实工具。页面的角色状态来自事件和业务状态，而不是用固定图假装某个 Agent 已完成。

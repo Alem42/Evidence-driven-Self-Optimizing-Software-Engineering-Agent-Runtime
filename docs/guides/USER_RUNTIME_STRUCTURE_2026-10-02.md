@@ -22,7 +22,7 @@
 | infrastructure/ | SQLite、artifact、进程、配置、锁、工作区 |
 | runner/internal/indexer | Go AST 的语法事实和空测试诊断 |
 | runner/internal/runner | 固定操作、超时取消、进程树控制 |
-| frontend/src/features/projects | 项目图、需求回答、方案/代码审查、结果/运行 |
+| frontend/src/features/* | （2026-10-03 已由前端 v3 取代，见 PLAN_FRONTEND_REDESIGN）任务页、图、代码、设置等 |
 
 ## 一次需求如何流转
 

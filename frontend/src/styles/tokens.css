@@ -1,0 +1,108 @@
+/* 设计令牌：浅色为默认，系统深色与手动深色共用同一组变量。
+   Design tokens: light default; dark via OS preference or the manual toggle. */
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --sunken: #f0f0ed;
+  --hover: #ececE8;
+  --line: #e4e3de;
+  --line-strong: #d3d2cb;
+  --text: #1c1c1a;
+  --muted: #68675f;
+  --faint: #a09f96;
+  --accent: #4f5bd5;
+  --accent-soft: #e6e8fb;
+  --accent-text: #ffffff;
+  --ok: #2b8a57;
+  --ok-soft: #e3f4ea;
+  --bad: #cf3f36;
+  --bad-soft: #fbe7e5;
+  --warn: #b7791f;
+  --warn-soft: #fbf0d9;
+  --wait: #b45f06;
+  --wait-soft: #fdeed8;
+  --run: #2f6fdb;
+  --run-soft: #e2edfc;
+  --code-bg: #fbfbfa;
+  --syn-keyword: #a626a4;
+  --syn-string: #3f8a3a;
+  --syn-number: #b5651d;
+  --syn-comment: #8b8a82;
+  --syn-type: #2060b0;
+  --syn-func: #8a4a0f;
+  --shadow: 0 1px 2px rgba(20, 20, 15, 0.05), 0 4px 16px rgba(20, 20, 15, 0.05);
+  --radius: 10px;
+  --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #161715;
+    --panel: #1e1f1c;
+    --sunken: #191a18;
+    --hover: #272825;
+    --line: #2f302c;
+    --line-strong: #3c3d38;
+    --text: #e8e8e3;
+    --muted: #a3a29a;
+    --faint: #6b6a63;
+    --accent: #8c96f5;
+    --accent-soft: #272b52;
+    --accent-text: #11122a;
+    --ok: #5fc58b;
+    --ok-soft: #1b3025;
+    --bad: #f0746b;
+    --bad-soft: #3a1f1d;
+    --warn: #e0b04f;
+    --warn-soft: #362c14;
+    --wait: #eba04e;
+    --wait-soft: #38290f;
+    --run: #6ea0f5;
+    --run-soft: #1a2a45;
+    --code-bg: #1a1b19;
+    --syn-keyword: #d68be0;
+    --syn-string: #8cc884;
+    --syn-number: #e0a56b;
+    --syn-comment: #7d7c74;
+    --syn-type: #7ab2f0;
+    --syn-func: #e8b97a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #161715;
+  --panel: #1e1f1c;
+  --sunken: #191a18;
+  --hover: #272825;
+  --line: #2f302c;
+  --line-strong: #3c3d38;
+  --text: #e8e8e3;
+  --muted: #a3a29a;
+  --faint: #6b6a63;
+  --accent: #8c96f5;
+  --accent-soft: #272b52;
+  --accent-text: #11122a;
+  --ok: #5fc58b;
+  --ok-soft: #1b3025;
+  --bad: #f0746b;
+  --bad-soft: #3a1f1d;
+  --warn: #e0b04f;
+  --warn-soft: #362c14;
+  --wait: #eba04e;
+  --wait-soft: #38290f;
+  --run: #6ea0f5;
+  --run-soft: #1a2a45;
+  --code-bg: #1a1b19;
+  --syn-keyword: #d68be0;
+  --syn-string: #8cc884;
+  --syn-number: #e0a56b;
+  --syn-comment: #7d7c74;
+  --syn-type: #7ab2f0;
+  --syn-func: #e8b97a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
