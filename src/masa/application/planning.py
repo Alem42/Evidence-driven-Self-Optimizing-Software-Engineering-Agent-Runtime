@@ -26,6 +26,15 @@ class ProjectPlanning:
         """原子发布规划状态和引用。 Publish plan state and references atomically."""
         with self.store.transaction():
             reason=plan.get('error') or ('code proposal: review before verification' if plan.get('kind')=='code' else 'project specification: review before generation')
+            # 异步取消必须压过迟到的模型结果或异常处理，不得回到待审状态。
+            # Concurrent cancellation wins over late model results and failure handlers.
+            run=self.store.run(rid)
+            if run['cancel_requested'] or run['status']=='cancelled':
+                plan['status']='cancelled'
+                status,reason,event='cancelled','cancellation_requested','project_cancelled'
+            elif time.time()>=run['data']['deadline_at']:
+                plan.update(status='failed',error='project deadline expired')
+                status,reason,event='failed',plan['error'],'project_deadline_expired'
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None):

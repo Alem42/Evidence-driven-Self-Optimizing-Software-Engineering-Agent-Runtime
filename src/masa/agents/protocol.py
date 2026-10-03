@@ -119,6 +119,28 @@ def instruction_for(context):
                 'and crypto/rand and math/rand have distinct aliases when both are needed. '
                 'avoid network/time-dependent tests, never skip failing cases or change requirements to make tests pass. '
                 'Use bilingual Chinese/English function comments. No placeholders. The human reviews before any write.')
+            if context.get('generation_mode') == 'files-v1':
+                # 单次只生成一个批准文件；已生成源码约束后续接口与测试。
+                # Generate one approved file per call; prior code binds later interfaces and tests.
+                instruction = common + (
+                    'You are Developer generating ONE file of an approved project. '
+                    'Return exactly {"files":{target_path:complete_file_content}} using the literal target_path from input. '
+                    'Do not return go.mod, other files, Markdown or explanation. The complete target file must be at most 60 KB. '
+                    'spec and checks remain approved and must not be changed. previous_files contains already generated source. '
+                    'Reuse existing functions, packages and public interfaces from previous_files; never redefine them in another file. '
+                    'For an implementation file, keep its responsibility concise and provide interfaces required by later approved files. '
+                    'Use only Go standard library, proper imports, gofmt tabs, and short bilingual function comments. '
+                    'Distinguish an optional numeric flag being present with zero from that flag being omitted. '
+                    'Tests must implement the supplied Tester cases with independently calculated expectations. '
+                    'Use t.Fatal or t.Fatalf for failed assertions, never panic, placeholders or skips. '
+                    'Prefer direct run(args []string, stdout, stderr io.Writer) int tests where available. '
+                    'Go tests run in the tested package directory: in cmd/app/main_test.go build "." with cmd.Dir unset. '
+                    'If cmd.Dir is the module root, build "./cmd/app" instead; never build an empty cmd directory. '
+                    'Use t.TempDir() and an absolute binary path for go build -o and exec.Command. '
+                    'Choose a .exe suffix on Windows using runtime.GOOS. Never exec os.Args[0], which recursively starts tests. '
+                    'Avoid network, timing, and probabilistic uniqueness assertions. Never weaken approved requirements. '
+                    'Do not claim execution or success; independent tools and Gate will verify the assembled project.'
+                )
     return instruction
 
 def validate_response(context, action, key):
@@ -164,9 +186,11 @@ def validate_response(context, action, key):
                 return validate_question(action)
             return validate_spec(action)
         if context['purpose'] == 'project_developer':
-            from masa.domain.proposals import validate_files
+            from masa.domain.proposals import validate_files, validate_file_proposal
             if set(action) != {'files'}:
                 raise MasaError('invalid Developer proposal')
+            if context.get('generation_mode') == 'files-v1':
+                return validate_file_proposal(action['files'], context['spec'], context.get('target_path'))
             return validate_files(action['files'], context['spec'])
         if set(action) != {'checks'}:
             raise MasaError('invalid Tester proposal')

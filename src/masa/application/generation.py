@@ -1,4 +1,4 @@
-from masa.domain.proposals import validate_files, validate_repair, validate_test_revision
+from masa.domain.proposals import validate_files, validate_file_proposal, validate_repair, validate_test_revision
 """已批准架构到多文件草稿和隔离执行。 Approved architecture to multi-file drafts and isolated execution."""
 from pathlib import Path
 import tempfile
@@ -65,21 +65,66 @@ class ProjectGeneration:
             rid=resume_id
         else:
             metadata = {'kind':'code','status':'generating','spec_approval_ref':plan['approval_ref'], 'provider':provider.profile}
+            # 本地模型的输出预算较小：新草稿逐文件生成，旧草稿仍沿用原调用契约。
+            # Local models have smaller output budgets: new drafts use file calls, old drafts keep their original contract.
+            config = getattr(provider, 'config', {}) or {}
+            snapshot = getattr(provider, 'snapshot', {}) or {}
+            frozen_config = snapshot.get('config', {}) if isinstance(snapshot, dict) else {}
+            local_files = (config.get('model_type') == 'local'
+                           and frozen_config.get('protocol', snapshot.get('protocol')) == 'ollama')
+            if local_files:
+                metadata['generation_mode'] = 'files-v1'
+            calls = len(approved['spec']['files']) - 1 if local_files else 2
             rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
-                  Budget(model_calls=2, tool_calls=3, deadline_seconds=86400), graph=graph,
+                  Budget(model_calls=calls, tool_calls=3, deadline_seconds=86400), graph=graph,
                   parent_run_id=parent, project_plan=metadata)
         if on_created:
             on_created(rid)
         try:
-            files = self.planning.call(rid, provider, 'project_developer', {'goal':original['data']['goal'], **approved})
+            if metadata.get('generation_mode') == 'files-v1':
+                files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata)
+            else:
+                files = self.planning.call(rid, provider, 'project_developer', {'goal':original['data']['goal'], **approved})
             validate_files(files, approved['spec'])
             metadata.update(status='awaiting_review', files_ref=self.store.put(files))
             self.planning.update(rid, metadata, 'paused', 'project_code_review_requested')
+            if metadata.get('status') in {'cancelled', 'failed'}:
+                raise MasaError(metadata.get('error', 'project generation cancelled'))
             return rid
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'generation failed')
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
             raise MasaError(f'project generation failed; run {rid}: {metadata["error"]}') from None
+
+    def _generate_local_files(self, rid, provider, goal, approved, metadata):
+        """逐文件落盘与恢复，不重放未知调用；合并后仍进行完整校验。 Checkpoint file calls without replaying unknown results; validate the final bundle."""
+        from masa.runtime.roles import RoleRuntime
+        spec = approved['spec']
+        validate_spec(spec)
+        # go.mod 由已批准规格确定，无需浪费模型调用；实现先于测试。
+        # The approved specification determines go.mod; generate implementation before tests.
+        files = {'go.mod': f"module {spec['module']}\n\ngo 1.27.0\n"}
+        paths = [item['path'] for item in spec['files'] if item['path'] != 'go.mod']
+        paths = [path for path in paths if not path.endswith('_test.go')] + [
+            path for path in paths if path.endswith('_test.go')]
+        roles = RoleRuntime(self.store)
+        for ordinal, path in enumerate(paths):
+            metadata['gen_progress'] = {'completed': ordinal, 'total': len(paths), 'current': path}
+            self.planning.update(rid, metadata, 'created', 'project_file_generation_started')
+            if metadata.get('status') in {'cancelled', 'failed'}:
+                raise MasaError(metadata.get('error', 'project generation cancelled'))
+            values = {'goal': goal, **approved, 'generation_mode': 'files-v1',
+                      'target_path': path, 'previous_files': dict(files)}
+            invocation = 'initial' if ordinal == 0 else f'file:{ordinal + 1}'
+            generated = roles.call(rid, provider, 'project_developer', values, invocation_id=invocation)
+            validate_file_proposal(generated, spec, path)
+            files.update(generated)
+            metadata['partial_files_ref'] = self.store.put(files)
+            metadata['gen_progress'] = {'completed': ordinal + 1, 'total': len(paths), 'current': None}
+            self.planning.update(rid, metadata, 'created', 'project_file_generated')
+            if metadata.get('status') in {'cancelled', 'failed'}:
+                raise MasaError(metadata.get('error', 'project generation cancelled'))
+        return validate_files(files, spec)
 
     def repair(self, parent, provider, feedback='', on_created=None, use_intelligence=False):
         """以真实失败证据生成一次修复草稿，不自动批准或循环。 Propose one evidence-backed repair without auto-approval or loops."""

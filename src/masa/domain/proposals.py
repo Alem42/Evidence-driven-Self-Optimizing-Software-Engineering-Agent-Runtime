@@ -118,6 +118,23 @@ def validate_test_revision(changes, original):
     return {**original, **changes}
 
 
+def validate_file_proposal(files, spec, target_path):
+    """逐文件调用只能返回批准的目标 Go 文件。 A file call may return only its approved target Go source."""
+    validate_spec(spec)
+    approved = {item['path'] for item in spec['files']}
+    if (not isinstance(target_path, str) or target_path not in approved
+            or not target_path.endswith('.go')):
+        raise MasaError('file generation target must be an approved Go file')
+    if not isinstance(files, dict) or set(files) != {target_path}:
+        raise MasaError('file proposal must contain exactly the requested target file')
+    content = files[target_path]
+    if not isinstance(content, str) or not content.strip() or '\x00' in content:
+        raise MasaError('invalid generated file content')
+    if len(content.encode('utf-8')) > 60000:
+        raise MasaError('file exceeds 60 KB')
+    return files
+
+
 def validate_files(files, spec):
     """文件集合必须严格匹配批准目录，限制内容与模块声明。 Bind bounded contents to the exact approved file set."""
     validate_spec(spec)

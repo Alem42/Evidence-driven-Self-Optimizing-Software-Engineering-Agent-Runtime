@@ -5,6 +5,13 @@ def response_schema(context):
     """约束 Planner 规格或澄清，保留业务校验。 Constrain specs or clarification without replacing validation."""
     string={'type':'string'}
     purpose=context.get('purpose')
+    if purpose=='project_developer' and context.get('generation_mode')=='files-v1':
+        # 一次仅约束一个批准文件，减少整套源码语法约束的输出压力。
+        # Constrain one approved file rather than an entire code bundle.
+        path=context['target_path']
+        return {'type':'object','additionalProperties':False,'required':['files'],
+                'properties':{'files':{'type':'object','additionalProperties':False,'required':[path],
+                                     'properties':{path:string}}}}
     if purpose=='project_tester':
         case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
               'properties':{'name':string,'input':string,'expected':string,'level':{'enum':['unit','integration','cli']}}}

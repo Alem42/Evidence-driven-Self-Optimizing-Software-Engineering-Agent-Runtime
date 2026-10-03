@@ -5,6 +5,7 @@ from masa.application.workflow import WorkflowCheckpoint
 from masa.application.check_policy import test_format_only, test_revision_needed, repeated_assertion_signature
 from masa.runtime.engine import Runtime
 from masa.domain.models import MasaError
+import time
 
 
 class WorkflowCoordinator:
@@ -42,7 +43,12 @@ class WorkflowCoordinator:
             except MasaError:
                 if recover_id:raise
                 failed_id=self.job['run_id']
-                failed=store.run(failed_id)['data'].get('project_plan',{})
+                run=store.run(failed_id)
+                # 取消和过期是工作流边界，不应伪装成 Tester 契约失败重建任务。
+                # Cancellation and expiry are workflow boundaries, never retryable Tester contracts.
+                if run['cancel_requested'] or run['status']=='cancelled' or time.time()>=run['data']['deadline_at']:
+                    raise
+                failed=run['data'].get('project_plan',{})
                 if retry==2 or not failed.get('spec_ref'):
                     raise
                 # 仅复用已校验 Planner 结果，Tester 最多额外调用两次。
@@ -78,6 +84,9 @@ class WorkflowCoordinator:
             result=Runtime(store,runner).execute(verified)
             if result['status']=='succeeded':
                 self.job.update(status='completed',result={'id':verified})
+                return
+            if result['status']=='cancelled':
+                self.job.update(status='cancelled',result={'id':verified},note='取消已生效；不会开始新的修复。')
                 return
             if attempt==4:
                 self.job.update(status='completed',result={'id':verified},

@@ -16,6 +16,33 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_cancel_request_is_responsive_during_model_call_and_not_retried(self):
+        """控制请求不等待模型锁；取消不重试 Tester。 Controls do not wait on inference locks or retry cancelled Tester calls."""
+        from test_auto_project import CompositeProvider
+        entered=threading.Event();release=threading.Event();purposes=[]
+        class Blocking(CompositeProvider):
+            def respond(self,context):
+                purposes.append(context['purpose']);entered.set()
+                if not release.wait(8):raise AssertionError('missing test release')
+                return super().respond(context)
+        for automatic in (False,True):
+            with self.subTest(automatic=automatic):
+                entered.clear();release.clear();purposes.clear()
+                with patch.object(self.console.settings,'provider',return_value=Blocking()),patch('masa.application.console.Runner',return_value=FakeExecutor()):
+                    _,started=self.request('/api/projects/plan',{'goal':'Build CLI','background':True,'auto_verify':automatic})
+                    self.assertTrue(entered.wait(5))
+                    rid=self.console.jobs[started['job_id']]['run_id']
+                    begin=time.monotonic()
+                    try:
+                        status,result=self.request('/api/runs/'+rid+'/cancel',{})
+                        self.assertEqual(status,200,result)
+                        self.assertLess(time.monotonic()-begin,2)
+                        self.assertTrue(self.request('/api/bootstrap')[1]['active_job'])
+                    finally:release.set();self.console.job_thread.join(10)
+                self.assertEqual(self.request('/api/jobs/'+started['job_id'])[1]['status'],'cancelled')
+                self.assertEqual(self.request('/api/runs/'+rid)[1]['run']['status'],'cancelled')
+                self.assertEqual(purposes,['project_planner'])
+
     def test_unexpected_fault_returns_traceable_safe_diagnostic(self):
         """程序错误返回可追踪 JSON，而不是断开连接或泄露异常原文。 Faults return traceable JSON without disconnecting or exposing raw messages."""
         with patch.object(self.console,'projects',side_effect=AttributeError('synthetic-secret-body')):
@@ -52,7 +79,7 @@ class WebTests(unittest.TestCase):
         from test_clarification import AskingProvider
         self.console.settings.save({'name':'local','base_url':'http://127.0.0.1:11434/v1',
                                     'model':'m:latest','model_type':'local'})
-        with patch.object(ChatProvider,'respond',side_effect=AskingProvider().respond),patch('masa.application.console.Runner',return_value=FakeExecutor()):
+        with patch.object(ChatProvider,'respond',side_effect=lambda context,**_:AskingProvider().respond(context)),patch('masa.application.console.Runner',return_value=FakeExecutor()):
             status,job=self.request('/api/projects/plan',{'goal':'Build CLI','auto_verify':True})
             self.assertEqual(status,200,job)
             self.console.job_thread.join(10)

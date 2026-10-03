@@ -112,6 +112,7 @@ class ChatProvider:
                 context_limit=self.config['context_limit'],timeout_seconds=self.config['timeout_seconds'])
         self.usage = None
         self.metrics = None
+        self.contract_diagnostic = None
 
     def respond(self, context, *, timeout=None):
         """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
@@ -127,7 +128,7 @@ class ChatProvider:
         instruction = instruction_for(context)
         if self.config['protocol']=='ollama' and purpose=='project_tester':
             instruction+=' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
-        if self.config['protocol']=='ollama' and purpose=='project_developer':
+        if self.config['protocol']=='ollama' and purpose=='project_developer' and context.get('generation_mode')!='files-v1':
             instruction+=' Copy this exact go.mod value: '+json.dumps(f"module {context['spec']['module']}\n\ngo 1.27.0\n")+'. Keep implementation concise. Avoid repetitive comments.'
         payload = {
             "model": self.config["model"],
@@ -147,7 +148,7 @@ class ChatProvider:
             # Native options bound context/output without streaming; role contracts remain shared.
             # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
             # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
-            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' else response_schema(context),'stream':False,
+            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':False,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
@@ -242,6 +243,10 @@ class ChatProvider:
                 # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
                 # Distinguish a received invalid response from uncertain transport, without exposing content.
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
+            # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
+            # Record response shape only, never code, thinking or raw exception text.
+            self.contract_diagnostic={'action_type':type(action).__name__,
+                'top_keys':[str(k).replace(self.key,'[REDACTED]')[:80] if self.key else str(k)[:80] for k in list(action)[:8]] if isinstance(action,dict) else []}
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
         if self.config['protocol']=='ollama' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):

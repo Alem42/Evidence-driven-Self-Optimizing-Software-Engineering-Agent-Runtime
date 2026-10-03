@@ -2,6 +2,7 @@
 import time
 from masa.domain.models import MasaError
 from masa.infrastructure.locking import owner_lock
+from masa.infrastructure.llm import ChatProvider
 
 
 class RoleRuntime:
@@ -41,7 +42,7 @@ class RoleRuntime:
         route_ref = self.store.put(provider.profile)
         with owner_lock(self.store.root/'role-locks'/f'{rid}.lock'):
             run = self.store.run(rid)
-            if run['cancel_requested'] or time.time() >= run['data']['deadline_at']:
+            if run['cancel_requested'] or run['status']=='cancelled' or time.time() >= run['data']['deadline_at']:
                 raise MasaError('role run cancelled or deadline expired')
             row = self.store.db.execute('SELECT * FROM role_invocations WHERE run_id=? AND purpose=? AND invocation_id=?', (rid,purpose,invocation_id)).fetchone()
             if row:
@@ -79,17 +80,31 @@ class RoleRuntime:
                 self.store._event(rid,'model_requested',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'route':provider.profile,'context_ref':context_ref})
             started=time.monotonic()
             try:
-                output=provider.respond(context)
+                # 真实网络调用不能超过任务剩余时间；旧测试提供商仍使用原签名。
+                # Bound real requests by the remaining run deadline without changing fake providers.
+                if isinstance(provider,ChatProvider):
+                    remaining=run['data']['deadline_at']-time.time()
+                    if remaining<=0:
+                        raise MasaError('role run cancelled or deadline expired')
+                    output=provider.respond(context,timeout=min(provider.config['timeout_seconds'],remaining))
+                else:
+                    output=provider.respond(context)
             except Exception:
                 with self.store.transaction():
                     self.store.db.execute("UPDATE role_invocations SET status='failed',finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(time.time(),rid,purpose,invocation_id))
-                    self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None)})
+                    self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None),
+                        'contract_diagnostic':getattr(provider,'contract_diagnostic',None)})
                 raise
             output_ref=self.store.put(output)
             with self.store.transaction():
                 self.store.db.execute("UPDATE role_invocations SET status='completed',output_ref=?,finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(output_ref,time.time(),rid,purpose,invocation_id))
                 self.store._event(rid,'model_completed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'response_ref':output_ref,
                     'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None),'duration_ms':round((time.monotonic()-started)*1000)})
+            # 收到的完整输出先保留为证据；取消或过期后不再将其应用到业务流程。
+            # Preserve a received response as evidence, but never apply it after cancellation/expiry.
+            latest=self.store.run(rid)
+            if latest['cancel_requested'] or latest['status']=='cancelled' or time.time()>=latest['data']['deadline_at']:
+                raise MasaError('role run cancelled or deadline expired; completed response preserved')
             return output
 
     def states(self, rid):

@@ -16,6 +16,22 @@ from test_runtime import FakeExecutor
 
 
 class ChatTests(unittest.TestCase):
+    def test_native_file_request_has_one_target_and_no_module_instruction(self):
+        """逐文件原生请求不混入整套模块契约，响应越界仍拒绝。 Native file calls cannot inherit bulk module instructions or accept extra files."""
+        from test_project_plan import SPEC
+        from test_project_generation import FILES
+        target='internal/app/app.go'
+        context={'purpose':'project_developer','generation_mode':'files-v1','target_path':target,'previous_files':{},'spec':SPEC}
+        self.envelope={'done':True,'done_reason':'stop','message':{'content':json.dumps({'files':{target:FILES[target]}})}}
+        provider=ChatProvider({**self.config,'protocol':'ollama','model_type':'local'})
+        self.assertEqual(provider.respond(context),{target:FILES[target]})
+        payload=self.requests[-1]
+        self.assertEqual(payload['format']['properties']['files']['required'],[target])
+        self.assertNotIn('Copy this exact go.mod value',payload['messages'][0]['content'])
+        self.envelope['message']['content']=json.dumps({'content':'not-the-contract'})
+        with self.assertRaises(MasaError):provider.respond(context)
+        self.assertEqual(provider.contract_diagnostic['top_keys'],['content'])
+
     def setUp(self):
         """本地假服务只模拟提供商，调用路径仍走 HTTP。 Mock only the provider, keeping real HTTP transport."""
         self.action = {"type": "tool_call", "operation": "go_test", "arguments": {}}

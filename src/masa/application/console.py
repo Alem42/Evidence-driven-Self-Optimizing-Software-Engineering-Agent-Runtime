@@ -355,10 +355,13 @@ class Console:
             def work():
                 try:
                     result=self.resume_project(rid,body,created) if body.get('resume_project') else (self.revise_project_tests(rid,body,created) if body.get('test_revision') else self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
-                    self.jobs[ident].update(status='completed',result=result)
+                    store=Store(self.root)
+                    try:plan=store.run(result['id'])['data'].get('project_plan',{})
+                    finally:store.close()
+                    status=plan.get('status') if plan.get('status') in {'waiting_for_input','cancelled','failed'} else 'completed'
+                    self.jobs[ident].update(status=status,result=result)
                 except Exception as exc:
-                    self.diagnostics.record('worker:project',exc)
-                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
+                    self._fail_job(ident,exc,'worker:project')
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
             self.job_thread.start()
             return {'job_id':ident}
@@ -450,12 +453,27 @@ class Console:
                 try:
                     WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job)).run()
                 except Exception as exc:
-                    self.diagnostics.record('worker:auto',exc)
-                    self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'automatic project job failed')
+                    self._fail_job(ident,exc,'worker:auto')
                 finally:store.close()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-auto-project-job')
             self.job_thread.start()
             return {'job_id':ident}
+
+    def _fail_job(self, ident, exc, route):
+        """业务取消不改成失败；其余故障保存安全调用位置。 Preserve cancellation and log safe locations for other faults."""
+        cancelled=False
+        rid=self.jobs[ident].get('run_id')
+        if rid:
+            store=Store(self.root)
+            try:
+                run=store.run(rid)
+                cancelled=bool(run['cancel_requested'] or run['status']=='cancelled')
+            finally:store.close()
+        if cancelled:
+            self.jobs[ident].update(status='cancelled',note='取消已生效；当前模型请求已收尾，保留已收到的证据。')
+        else:
+            request_id=self.diagnostics.record(route,exc)
+            self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else '后台任务失败，请查看诊断。',request_id=request_id)
 
     def project_job(self, ident):
         """返回服务端进度，不编造 token 百分比。 Return server progress without inventing token percentages."""
@@ -465,6 +483,7 @@ class Console:
         if job['run_id']:
             detail=self.detail(job['run_id'])
             job['run_status']=detail['run']['status']
+            job['generation_progress']=detail['run']['data'].get('project_plan',{}).get('gen_progress')
             requested=[e for e in detail['events'] if e['type']=='model_requested']
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
             # 版本切换后仍显示同任务最近的实际速度，不伪造当前请求吞吐。
@@ -729,19 +748,20 @@ class Console:
 
     def control(self, rid, action):
         """持久化人工控制，无 worker 时直接完成取消。 Persist human control and finalize detached cancellation."""
-        with self.lock:
-            store = Store(self.root)
-            try:
-                if action == "pause":
-                    store.request_pause(rid)
-                else:
-                    store.cancel(rid)
-                    # 另一个任务的 worker 不会处理本任务的取消。
-                    # A different run's worker cannot observe this run's cancellation.
-                    if self.active != rid:
-                        store.set_status(rid, "cancelled", "cancellation_requested")
-            finally:
-                store.close()
+        # 网络调用可能持有 Console 锁；控制写入使用独立 SQLite 事务，立即保存意图。
+        # A network call may hold the Console lock; persist control in its own SQLite transaction.
+        store = Store(self.root)
+        try:
+            if action == "pause":
+                store.request_pause(rid)
+            else:
+                store.cancel(rid)
+                # 角色 HTTP 请求待返回后收尾，已收到结果会保留，但不会发布代码。
+                # Role HTTP calls drain before shutdown; received results stay saved without publication.
+                if self.active != rid:
+                    store.set_status(rid, "cancelled", "cancellation_requested")
+        finally:
+            store.close()
         return {"id": rid, "requested": action}
 
     def close(self):

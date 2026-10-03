@@ -60,12 +60,14 @@ export function liveStatus(job,working,detail){
   const run=detail?.run,plan=run?.data?.project_plan;
   if(attached&&job?.status==='waiting_for_input')return {title:'等待你补充需求',active:false};
   if(job?.status!=='running'&&plan?.status==='waiting_for_input')return {title:'等待你补充需求',active:false};
+  if(attached&&(job?.status==='cancelled'||job?.run_status==='cancelled'||run?.status==='cancelled'&&job?.status!=='running'))return {title:'已取消',active:false};
   if(working){
-    const labels={planning:'Planner 规划',project_planner:'Planner 规划',project_tester:'Tester 测试方案',generation:'生成代码',project_developer:'Developer 生成',verification:'Go 验证',repair:'修复实现',test_revision:'修订测试',project_repair:'修复实现',project_test_revision:'修订测试',planning_retry:'重试测试方案',test_format:'整理测试格式',application:'运行程序'};
+    const labels={planning:'Planner 规划',project_planner:'Planner 规划',project_tester:'Tester 测试方案',generation:'生成代码',project_developer:'Developer 生成',verification:'Go 验证',repair:'修复实现',test_revision:'修订测试',project_repair:'修复实现',project_test_revision:'修订测试',planning_retry:'重试测试方案',test_format:'整理测试格式',application:'运行程序',load:'Ollama 加载模型',unload:'Ollama 释放模型',test:'Ollama 真实测速'};
     return {title:job?.status==='running'?(labels[job.stage||job.phase]||'执行中'):'Go 验证',active:true};
   }
   if(attached&&job?.status==='failed')return {title:'流程失败 · 查看失败记录',active:false};
   if(attached&&job?.status==='interrupted')return {title:'任务已中断 · 可检查恢复',active:false};
+  if(run?.status==='cancelled')return {title:'已取消',active:false};
   if(plan?.status==='awaiting_review')return {title:plan.kind==='code'?'等待你确认代码':'等待你确认方案',active:false};
   if(plan&&run.status==='failed')return {title:'模型阶段未完成 · 可查看日志',active:false};
   if(run?.status==='succeeded'||attached&&job?.run_status==='succeeded')return {title:'验证通过',active:false};

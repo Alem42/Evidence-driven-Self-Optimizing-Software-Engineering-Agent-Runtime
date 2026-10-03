@@ -47,3 +47,12 @@ test('a background job keeps reporting execution while an unrelated historical r
   assert.equal(liveStatus({run_id:'live',status:'running',stage:'project_developer'},true,old).title,'Developer 生成');
   assert.equal(liveStatus({run_id:'live',status:'failed'},false,{run:{id:'new',status:'succeeded',data:{}}}).title,'验证通过');
 });
+test('Ollama controls and cancelled runs retain their real meaning in the live status',()=>{
+  assert.equal(liveStatus({status:'running',phase:'load'},true).title,'Ollama 加载模型');
+  assert.equal(liveStatus({status:'running',phase:'unload'},true).title,'Ollama 释放模型');
+  assert.equal(liveStatus({status:'running',phase:'test'},true).title,'Ollama 真实测速');
+  assert.equal(liveStatus({status:'cancelled'},false).title,'已取消');
+  assert.equal(liveStatus({status:'cancelled'},true).active,false);
+  assert.equal(liveStatus({status:'completed',run_status:'cancelled'},false).title,'已取消');
+  assert.equal(liveStatus(null,false,detail('cancelled')).title,'已取消');
+});
