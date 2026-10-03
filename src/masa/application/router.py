@@ -101,6 +101,20 @@ class Router:
         local.sort(key=lambda c: (c.level, c.priority, c.id))
         return self.provider(local[0].id) if local else None
 
+    def release(self, keep=None):
+        """释放除 keep 之外所有可能驻留在显存里的本地模型。切换到云端或另一个模型、任务结束、等待人时都要调用：
+        不能有空挂的模型。尽力而为，永不抛异常。Unload every local model that may be resident except `keep`: no idle models, ever."""
+        released = []
+        for provider in list(self._providers.values()) + ([self.fixed_provider] if self.fixed_provider is not None else []):
+            if provider is keep or not getattr(provider, 'loaded', False) or not hasattr(provider, 'unload'):
+                continue
+            try:
+                if provider.unload():
+                    released.append((provider.profile or {}).get('model'))
+            except Exception:  # 释放是清理动作，不能影响任务 / cleanup must never affect the task
+                pass
+        return released
+
     def provider_matching(self, profile):
         """找到身份（profile 字典）与保存记录一致的提供方，用于恢复未完成的调用。 Find the provider whose identity matches a saved call."""
         for c in self.candidates:

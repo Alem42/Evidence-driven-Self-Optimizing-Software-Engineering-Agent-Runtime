@@ -25,13 +25,16 @@ DEFAULT_POLICY = {
     # 免费本地调用：崩溃遗留或没收到响应时，等服务恢复后作为新尝试重试；付费云调用永远不自动重放。
     # Free local calls: re-attempted after a crash or when no response arrived. Paid cloud calls are never replayed.
     'retry_unknown_local': True,
+    'diagnose': True,  # 修复前允许 Diagnoser 诊断 / allow the Diagnoser before fixing
+    'diagnose_max': 2,  # 每个任务最多诊断几次 / diagnoses per task
+    'prefer_highest_roles': ['project_diagnoser'],  # 这些角色直接用最高等级 / these roles start at the top level
     'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
 FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 1,
-                'retry_unknown_local': False, 'triage_model': False, 'stuck_after': 99, 'transport_retries': 0, 'transport_wait_seconds': 0}
+                'retry_unknown_local': False, 'triage_model': False, 'stuck_after': 99, 'diagnose': False, 'diagnose_max': 0, 'prefer_highest_roles': [], 'transport_retries': 0, 'transport_wait_seconds': 0}
 DEFAULT_BUDGET = {'max_model_calls': 40, 'max_cloud_tokens': 200_000, 'max_active_seconds': 3600, 'max_cost': None}
 BUDGET_KEYS = ('max_model_calls', 'max_cloud_tokens', 'max_active_seconds', 'max_cost')
 
@@ -156,7 +159,7 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
                      key=lambda c: (c.level, c.priority, c.id))
     if not allowed:
         return Decision('stop', reason='no_candidate', detail=f'没有可承担 {role} 的可用模型')
-    per_level = int(policy.get('attempts_per_level', {}).get(chain, 1))
+    per_level = int(policy.get('attempts_per_level', {}).get(chain.split(':')[0], 1))  # fix:test 与 fix:implementation 共用 fix 的次数 / siblings share the base chain's budget
     top = max(c.level for c in allowed)
     levels = sorted({c.level for c in allowed})
     used_levels = [h['level'] for h in history]
@@ -191,6 +194,8 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
         # 某些角色可以从更高等级起步（例如 Planner/Tester 的输出短但影响大）；没有可用的就退回到任意等级。
         # Some roles may start higher (short but decisive outputs); fall back to any level when none is usable.
         start = policy.get('start_level_by_role', {}).get(role)
+        if role in policy.get('prefer_highest_roles', ()):
+            start = top  # 诊断者：判断一次，值得用最强的模型 / the diagnoser judges once, so it is worth the strongest model
         c, why = (pick(lambda lv: lv >= start) if start is not None else (None, None))
         if not c:
             skipped.clear() if start is not None else None
@@ -245,9 +250,9 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'transport_wait_seconds': (10, 86400)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
-ROLES = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision')
+ROLES = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
 
 
 def validate_policy(policy) -> dict:
@@ -269,7 +274,11 @@ def validate_policy(policy) -> dict:
                 if role not in ROLES or type(level) is not int or not 1 <= level <= 100:
                     raise MasaError('start_level_by_role needs known roles and levels 1..100')
                 out['start_level_by_role'][role] = level
-        elif key in ('retry_unknown_local', 'triage_model'):
+        elif key == 'prefer_highest_roles':
+            if not isinstance(value, list) or any(r not in ROLES + ('project_diagnoser',) for r in value):
+                raise MasaError('prefer_highest_roles needs known roles')
+            out[key] = list(value)
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

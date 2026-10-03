@@ -145,7 +145,7 @@ class ScriptedProvider:
             self.repairs += 1
             self.on_repair()
             return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // by {self.profile["model"]} #{self.repairs}\n'}
-        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_diagnoser': {'owner': 'implementation', 'rationale': 'the implementation does not compile', 'implementation_instructions': 'fix the reported compile error', 'test_instructions': ''}, 'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
 
 
 class EscalationIntegrationTests(unittest.TestCase):
@@ -214,7 +214,7 @@ class EscalationIntegrationTests(unittest.TestCase):
         local = ScriptedProvider('small', lambda: None)
         cloud = ScriptedProvider('big', lambda: setattr(executor, 'exit_code', 0))
         store, job = self.run_task(executor, local, cloud)
-        self.assertEqual(job['route_history']['fix'][0]['candidate'], 'local')
+        self.assertEqual(next(v for k, v in job['route_history'].items() if k.startswith('fix'))[0]['candidate'], 'local')
         self.assertTrue(job['budget_emitted'])
 
 

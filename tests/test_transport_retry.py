@@ -81,7 +81,7 @@ class CoordinatorTransportTests(unittest.TestCase):
         self.assertEqual(local.calls, 3)  # 两次传输失败 + 一次成功 / two transport failures then success
         self.assertEqual(local.waits, 2)
         self.assertFalse(any(d['escalated'] for r in store.all_runs() for e in store.events(r['id']) if e['type'] == 'route_decided' for d in [e['payload']]))
-        self.assertEqual(job.get('route_history', {}).get('fix', []), [])  # 传输失败不是模型的错 / not the model's fault
+        self.assertEqual([v for k, v in job.get('route_history', {}).items() if k.startswith('fix')], [])  # 传输失败不是模型的错 / not the model's fault
         kinds = [e['type'] for r in store.all_runs() for e in store.events(r['id'])]
         self.assertEqual(kinds.count('transport_retry'), 2)
 

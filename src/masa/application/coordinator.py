@@ -4,10 +4,24 @@ from masa.application.generation import ProjectGeneration
 from masa.application.workflow import WorkflowCheckpoint
 from masa.application.check_policy import failure_signature, format_only, test_revision_needed, repeated_assertion_signature
 from masa.application.router import Router, RoutingStop
+from masa.application import ownership
+from masa.application.flow import FlowEngine
+from masa.application.workflows import FIX_V1
 from masa.application.triage import assess
 from masa.runtime.engine import Runtime
+from masa.runtime.roles import RoleRuntime
 from masa.domain.models import ContextOverflow, MasaError, TransportFailure
 import time
+
+
+class NoChange(MasaError):
+    """这一次修复没有改动任何文件（已记入失败链）；由工作流决定下一步（诊断 / 换更强的模型重试 / 停止）。
+    This fix changed nothing (already recorded as a failure); the workflow decides what next."""
+
+
+class NoProgress(MasaError):
+    """修复/测试修订原样返回了文件（没有任何改动），且已无更强的模型可换。重新验证同样的内容没有意义。
+    The fix returned the files unchanged and no stronger model is left; re-verifying identical content is pointless."""
 
 
 class WorkflowCoordinator:
@@ -65,6 +79,10 @@ class WorkflowCoordinator:
         self._emit('route_decided',self.router.event_for(decision,role,chain,stage or role,spend),anchor)
         if decision.action=='stop':
             raise RoutingStop(decision.reason,decision.detail)
+        # 切换到另一个模型（或云端）之前，先释放不再使用的本地模型：不能有空挂的模型。
+        # Before switching to another model (or the cloud), release local models no longer in use: no idle models.
+        released=self.router.release(keep=provider)
+        if released:self._emit('models_released',{'models':released,'reason':'switching'},anchor,always=True)
         return provider,decision
 
     def _provider_of(self, run_id):
@@ -103,16 +121,16 @@ class WorkflowCoordinator:
         """修复链里是否已经用过最高等级（固定模式没有更强的模型，视为已用过）。 Has the fix chain already used the top level?"""
         if not self._ladder:return True
         top=max(c.level for c in self.router.candidates)
-        return any(h['level']==top for h in self._history('fix'))
+        return any(h['level']==top for key in self.job.get('route_history',{}) if key.startswith('fix') for h in self._history(key))
 
     def _attempts_allowed(self, chain):
         """一个阶段内最多尝试几次（含升级后的尝试）。固定模式保持原来的“初次 + 重试一次”。
         Total attempts within one stage, including after escalation; fixed mode keeps 'first try + one retry'."""
         if not self._ladder:return 2
         policy=self.router.policy
-        return min(4,int(policy['attempts_per_level'].get(chain,1))*(int(policy.get('max_escalations',0))+1))
+        return min(4,int(policy['attempts_per_level'].get(chain.split(':')[0],1))*(int(policy.get('max_escalations',0))+1))
 
-    def _attempt(self, chain, role, call, *, need=None, stage=None):
+    def _attempt(self, chain, role, call, *, need=None, stage=None, reject_noop=False):
         """call(provider, feedback)；响应被校验拒绝时带原因重试，重复失败由路由器决定是否升级。
         Retry a rejected stage with its reason; repeated failures let the router decide whether to escalate."""
         feedback=None
@@ -122,14 +140,24 @@ class WorkflowCoordinator:
             provider,decision=self._pick(role,chain,need=need,stage=stage)
             # 发请求之前就记下“这次由谁修复”：请求中途崩溃后，恢复时路由器仍知道这个候选已经试过。
             # Record WHO is attempting the fix BEFORE the request, so a crash mid-call still tells the router this candidate was tried.
-            if chain=='fix':
-                self.job['pending_fix']={'candidate':decision.candidate,'level':decision.level}
+            if chain.startswith('fix'):
+                self.job['pending_fix']={'candidate':decision.candidate,'level':decision.level,'chain':chain}
             try:
-                return call(provider,feedback)
-            except RoutingStop:
-                raise
+                value=call(provider,feedback)
+                if reject_noop and chain.startswith('fix') and not self.store.run(value)['data'].get('project_plan',{}).get('changed_files'):
+                    # 模型原样返回了文件：重新验证只会得到同样的失败。当作被拒绝，换更强的模型（或带提示再试），而不是白白消耗一轮。
+                    # The model returned the files unchanged: re-verifying would only repeat the failure. Treat it as rejected.
+                    self.job['noop_streak']=int(self.job.get('noop_streak',0))+1
+                    self._emit('noop_revision',{'stage':stage,'noop_streak':self.job['noop_streak']},always=True)
+                    self.job['pending_fix']=None
+                    self._fail(chain,decision)
+                    raise NoChange('the fix changed nothing')
+                if chain.startswith('fix'):self.job['noop_streak']=0
+                return value
+            except (RoutingStop,NoChange):
+                raise  # 由工作流决定下一步 / the workflow decides what next
             except TransportFailure:
-                if chain=='fix':self.job['pending_fix']=None  # 传输失败不是模型的错 / not the model's fault
+                if chain.startswith('fix'):self.job['pending_fix']=None  # 传输失败不是模型的错 / not the model's fault
                 if self._wait_for_server(provider,transport_used):
                     transport_used+=1
                     continue
@@ -141,7 +169,7 @@ class WorkflowCoordinator:
                 # candidates are skipped. Fixed mode has no alternative, so the explicit error surfaces.
                 if not self._ladder:
                     raise
-                if chain=='fix':self.job['pending_fix']=None  # 这次失败已直接记入失败链，避免重复计数 / already recorded below
+                if chain.startswith('fix'):self.job['pending_fix']=None  # 这次失败已直接记入失败链，避免重复计数 / already recorded below
                 self._fail(chain,decision)
                 need=overflow.estimated_tokens
                 n+=1
@@ -150,10 +178,12 @@ class WorkflowCoordinator:
                 reason=self._retryable(self.job.get('run_id')) if n<self._attempts_allowed(chain)-1 else None
                 if not reason:
                     raise
-                if chain=='fix':self.job['pending_fix']=None
+                if chain.startswith('fix'):self.job['pending_fix']=None
                 self._fail(chain,decision)
                 feedback='Your previous attempt was rejected: '+reason
                 n+=1
+        if reject_noop and int(self.job.get('noop_streak',0))>0:
+            raise NoProgress('the fix returned the files unchanged on every attempt, including the strongest available model')
 
     def _stopped(self, stop, run_id):
         """路由决定停止：保留证据，任务以说明结束，而不是报错。 A routing stop ends the task with a note and keeps all evidence."""
@@ -162,6 +192,17 @@ class WorkflowCoordinator:
 
     # ───────────── 主流程 / main flow ─────────────
     def run(self):
+        """从持久检查点推进流程。无论怎样结束（完成、失败、等待人、被取消），都释放本地模型：不能有空挂的模型。
+        Advance the workflow. However it ends, release local models: no idle model may stay in VRAM."""
+        try:
+            self._run()
+        finally:
+            released=self.router.release()
+            if released and self._ladder:
+                try:self._emit('models_released',{'models':released},always=True)
+                except Exception:pass
+
+    def _run(self):
         """从持久检查点推进流程，等待用户时释放执行权。 Advance checkpoints and yield when user input is required."""
         store,runner=self.store,self.runner
         goal=self.job['request']['goal']
@@ -170,6 +211,281 @@ class WorkflowCoordinator:
             self._emit('task_budget',self.router.describe())
         planning=ProjectPlanning(store,runner)
         generation=ProjectGeneration(store,runner)
+        checkpoint=self.job
+        # 从某个失败的验证处继续自动修复（用户在自动流程停下之后点“继续自动修复”）：跳过规划与生成，
+        # 失败链历史从版本链重建，路由器因此知道之前哪些模型已经试过。
+        # Continue the automatic repair from a failed verification: skip planning and generation; the router learns which models already tried.
+        continue_from=self.job['request'].get('continue_from')
+        if continue_from:
+            self._seed_history_from_lineage(continue_from)
+            draft=None
+        else:
+            draft=self._prepare(planning,generation,goal)
+            if draft is None:
+                return
+        resume_failed=continue_from
+        for attempt in range(checkpoint.get('attempt',0),5):
+            if resume_failed:
+                verified=resume_failed
+                resume_failed=None
+                result={'status':'failed'}
+                phase('verification',verified,attempt)
+            else:
+                meta=store.run(draft)['data']['project_plan']
+                phase('verification',draft,attempt)
+                verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
+                                                   'review_mode':'automatic'})
+                phase('verification',verified,attempt)
+                result=Runtime(store,runner).execute(verified)
+            # 验证在进程崩溃时被中断：引擎保守地标 needs_attention 且不重放。工具幂等，所以新建一次验证（最多两次），
+            # 而不是把它当成“验证失败”去修复。A verification interrupted by a crash is re-run as a new run (at most twice).
+            reverified=0
+            while result['status']=='needs_attention' and reverified<2 and str(store.run(verified)['reason']).startswith('uncertain_tool_state'):
+                reverified+=1
+                verified=generation.reverify(verified)
+                phase('verification',verified,attempt)
+                result=Runtime(store,runner).execute(verified)
+            if result['status']=='needs_attention':
+                self.job.update(status='completed',result={'id':verified},
+                                note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
+                return
+            if result['status']=='succeeded':
+                self.job.update(status='completed',result={'id':verified})
+                return
+            if result['status']=='cancelled':
+                self.job.update(status='cancelled',result={'id':verified},note='取消已生效；不会开始新的修复。')
+                return
+            checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
+                    for t in store.tools(verified) if t['result_ref']]
+            analysis=ownership.analyse(checks)
+            # 上一次由模型产出的修复：只有“它负责的那一类问题还在”才算失败。本地模型修好了实现、剩下的是测试的问题，
+            # 这不是它的失败，也不该因此升级。A model-made fix fails only if ITS class of problem is still present:
+            # a local model that fixed the implementation must not be escalated because a test defect remains.
+            pending=self.job.get('pending_fix')
+            if pending:
+                owner=str(pending.get('chain') or 'fix').split(':')[-1]
+                # 本类“已解决”＝剩下的失败全部属于另一类。没有可解析的诊断、只有断言失败等情况一律算没解决。
+                # "Resolved" means everything that remains belongs to the OTHER class; unparsed or assertion-only failures count as unresolved.
+                resolved={'implementation':analysis['test_blocking'] and not analysis['implementation_blocking'] and analysis['assertion_count']==0,
+                          'test':analysis['implementation_blocking'] and not analysis['test_blocking']}.get(owner,False)
+                still=not resolved
+                if still:
+                    self._fail(pending.get('chain') or 'fix',type('D',(),{'action':'use','candidate':pending['candidate'],'level':pending['level']})())
+                self.job['pending_fix']=None
+            if attempt==4:
+                self.job.update(status='completed',result={'id':verified},
+                                        note='automatic repair limit reached; inspect failed checks')
+                return
+            # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
+            # Three identical assertion failures require spec/test review instead of another implementation repair.
+            assertion=repeated_assertion_signature(checks)
+            if self.checkpoint.record_assertion(verified,assertion):
+                self.job.update(status='completed',result={'id':verified},
+                    note='same test assertion failed three times; inspect specification and test expectation before further repair')
+                return
+            # 确定会失败的运行：同一失败签名在多轮后仍不变，并且更强的模型也已经试过，就停下交给人，不再继续花钱。
+            # A doomed run: the same failure signature survives several rounds AND the strongest model was already tried.
+            repeats=self.checkpoint.record_signature(verified,failure_signature(checks))
+            if repeats>=int(self.router.policy.get('stuck_after',99)) and self._strongest_tried():
+                self._emit('task_stopped',{'reason':'stuck','detail':f'同一失败签名连续 {repeats} 次未变化'},verified,always=True)
+                self.job.update(status='completed',result={'id':verified},
+                    note=f'stuck: the same failure signature repeated {repeats} times, including attempts by the strongest model; a human needs to look (specification, tests or requirement)')
+                return
+            try:
+                outcome=self._run_fix_flow(verified,checks,attempt,generation,assertion,repeats,analysis)
+            except RoutingStop as stop:
+                self._stopped(stop,verified)
+                return
+            if outcome['outcome']=='halt':
+                reason=outcome['facts'].get('halt_reason') or 'the repair workflow halted'
+                self._emit('task_stopped',{'reason':'halted','detail':reason},verified,always=True)
+                self.job.update(status='completed',result={'id':verified},note='halted: '+reason)
+                return
+            draft=outcome['facts']['draft']
+            checkpoint.update(draft_id=draft,attempt=attempt+1)
+
+    # ───────────── 修复子图（声明式工作流）/ the repair subgraph (declarative workflow) ─────────────
+    def _trace_step(self, step, verified):
+        """把工作流走过的每一步写进事件，报告里可见。 Persist every workflow step as an event for the report."""
+        self.store.event(verified,'workflow_node',{'workflow':f"{FIX_V1['id']}-v{FIX_V1['version']}",'node':step.node,'action':step.action,'to':step.to,'why':step.why})
+
+    def _run_fix_flow(self, verified, checks, attempt, generation, assertion, repeats, analysis):
+        """用 fix-v1 决定并执行“验证失败之后做什么”。返回 {end, outcome, facts, trace}。
+        Decide and run what happens after a failed verification, using the fix-v1 workflow."""
+        store=self.store
+        phase=self._phase
+        outputs=[result for _,result in checks]
+        evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
+        # 修复阶段的输入规模：当前整套代码 + 失败证据（估算，用于上下文准入）。
+        # Input size of a fix call: the current bundle plus failure evidence (an estimate for context admission).
+        bundle=store.read(store.run(verified)['data']['project_bundle']['approval_ref'])['files']
+        need=[bundle,evidence[:20000]]
+        facts={'verified':verified,'draft':None,'halted':False,'noop':False,'noop_count':0,'diagnosed':False,'diagnosis':None,'analysis':analysis}
+
+        def classify(ctx):
+            primary=analysis['primary']
+            if primary=='ambiguous' and test_revision_needed(evidence,checks):
+                primary='test'  # 旧规则仍作为兜底 / the legacy rule remains as a fallback
+            history=len(self._history('fix'))
+            noop=int(self.job.get('noop_streak',0))
+            diagnoses=int(self.job.get('diagnoses',0))
+            wants=(repeats>=2 or (primary=='ambiguous' and history>=2))
+            can=bool(self._ladder and self.router.policy.get('diagnose') and diagnoses<int(self.router.policy.get('diagnose_max',0)))
+            return {'primary':primary,'format_only':format_only(checks),'can_diagnose':can,
+                    'arbitrate_due':bool(assertion) and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'),
+                    'needs_diagnosis':bool(can and wants)}
+
+        def diagnose(ctx):
+            try:
+                diagnosis=self._diagnose(verified,analysis,checks,bundle)
+            except RoutingStop:
+                diagnosis=None  # 预算/等级不允许诊断：直接修复，不因此停下 / cannot afford it: just fix
+            except Exception as exc:  # 诊断只是建议：任何失败都不能挡住修复，但要留下记录 / advisory: no failure may block the fix, but record it
+                diagnosis=None
+                self._emit('diagnosis_failed',{'error':str(exc)[:200]},verified,always=True)
+            self.job['diagnoses']=int(self.job.get('diagnoses',0))+1
+            return {'diagnosed':True,'diagnosis':diagnosis,'can_diagnose':False}
+
+        def instructions(owner):
+            parts=[ownership.hint(analysis,owner)]
+            diagnosis=ctx_diagnosis()
+            if diagnosis:
+                key='implementation_instructions' if owner=='implementation' else 'test_instructions'
+                if diagnosis.get(key):parts.append('【Diagnoser 的诊断】'+diagnosis['rationale']+'\n【Diagnoser 的指导】'+diagnosis[key])
+            return '\n'.join(p for p in parts if p)
+
+        def ctx_diagnosis():
+            return facts.get('diagnosis')
+
+        def run_fix(chain, role, stage, make):
+            used={}
+            try:
+                draft=self._attempt(chain,role,lambda provider,fb:self._track(used,provider,make(provider,fb)),
+                                    need=need,stage=stage,reject_noop=True)
+            except NoChange:
+                self._log_fix(stage,None,{})
+                return {'noop':True,'noop_count':int(facts.get('noop_count',0))+1}
+            except NoProgress as exc:
+                return {'halted':True,'halt_reason':str(exc)}
+            if used:self.job['pending_fix']={**used,'chain':chain}
+            self._log_fix(stage,draft,used)
+            return {'draft':draft,'noop':False}
+
+        def format_files(ctx):
+            phase('test_format',verified,attempt+1)
+            return {'draft':generation.format_test_files(verified,lambda rid:phase('test_format',rid,attempt+1))}
+
+        def fix_implementation(ctx):
+            phase('repair',verified,attempt+1)
+            return run_fix('fix:implementation','project_repair','repair',lambda provider,fb:generation.repair(
+                verified,provider,'\n'.join(x for x in (instructions('implementation'),fb) if x),
+                lambda rid:phase('repair',rid,attempt+1),use_intelligence=True))
+
+        def revise_tests(ctx):
+            phase('test_revision',verified,attempt+1)
+            base='Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.'
+            return run_fix('fix:test','project_test_revision','test_revision',lambda provider,fb:generation.revise_tests(
+                verified,provider,'\n'.join(x for x in (base,instructions('test'),fb) if x),
+                lambda rid:phase('test_revision',rid,attempt+1)))
+
+        def arbitrate_tests(ctx):
+            # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
+            # 此后仍相同则由三次规则停止并交给人。 Same assertion survives an implementation repair: let the Tester
+            # arbitrate once against the approved spec; if it still repeats, the three-strike rule hands over to a human.
+            self.job.update(arbitrated=True)
+            phase('test_revision',verified,attempt+1)
+            base=('The same assertions kept failing after an implementation repair. Compare EACH failing assertion with the approved '
+                  'spec.acceptance and the goal text. If an expected value contradicts them, correct that expectation to follow the '
+                  'requirement; do not delete cases or weaken checks. If the test already follows the requirement, change nothing '
+                  'about that assertion.')
+            return run_fix('fix:ambiguous','project_test_revision','arbitration',lambda provider,fb:generation.revise_tests(
+                verified,provider,'\n'.join(x for x in (base,fb) if x),lambda rid:phase('test_revision',rid,attempt+1)))
+
+        actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
+                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests}
+        engine=FlowEngine(FIX_V1,actions,on_step=lambda step:self._trace_step(step,verified))
+        return engine.run(facts)
+
+    def _log_fix(self, stage, draft, used):
+        """记录每次修复产出了什么（谁做的、改了哪些文件），Diagnoser 据此知道“已经试过什么”。
+        Log what each fix did (who, which files) so the Diagnoser knows what was already tried."""
+        changed=(self.store.run(draft)['data'].get('project_plan',{}).get('changed_files') or []) if draft else []
+        log=list(self.job.get('fix_log',[]))[-5:]
+        log.append({'stage':stage,'changed':changed[:6],'level':used.get('level'),'candidate':used.get('candidate')})
+        self.job['fix_log']=log
+
+    def _extend_deadline(self, run_id):
+        """用户明确要求继续时，已过期的验证 run 需要延长期限才能再做角色调用。 Extend an expired run's deadline for an explicit continuation."""
+        run=self.store.run(run_id)
+        if time.time()>=run['data']['deadline_at']-60:
+            self.store.save_metadata(run_id,'deadline_at',time.time()+3600,'deadline_extended',payload={'reason':'continued by the user'})
+
+    def _diagnose(self, verified, analysis, checks, bundle):
+        """Diagnoser：只读、用最高等级、判断“谁的问题”并给出具体指导。结果持久化在角色账本里。
+        Read-only Diagnoser at the strongest level: decides whose problem it is and gives concrete instructions."""
+        store=self.store
+        run=store.run(verified)
+        approved=store.read(store.read(run['data']['project_bundle']['approval_ref'])['spec_approval_ref'])
+        files={}
+        budget=20000
+        wanted=[i['path'] for i in analysis['items'] if i['path']]
+        for path in dict.fromkeys(wanted):
+            if path in bundle and budget>0:
+                files[path]=bundle[path][:6000];budget-=len(files[path])
+        context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'all_files':sorted(bundle),'files':files,
+                 'ownership':ownership.describe(analysis),'failure_evidence':[
+                     {'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3],
+                 'history':list(self.job.get('fix_log',[])),'noop_streak':int(self.job.get('noop_streak',0))}
+        provider,decision=self._pick('project_diagnoser','diagnose',need=context,anchor=verified,stage='diagnose')
+        self._extend_deadline(verified)
+        try:
+            diagnosis=RoleRuntime(store).call(verified,provider,'project_diagnoser',context)
+        except TransportFailure:
+            if self._wait_for_server(provider,0):
+                diagnosis=RoleRuntime(store).call(verified,provider,'project_diagnoser',context)
+            else:raise
+        from masa.domain.proposals import validate_diagnosis
+        diagnosis=validate_diagnosis(diagnosis)
+        self._emit('diagnosis',{'owner':diagnosis['owner'],'rationale':diagnosis['rationale'][:400],'by':(provider.profile or {}).get('model')},verified,always=True)
+        return diagnosis
+
+    def _seed_history_from_lineage(self, verified):
+        """从版本链重建“修复链历史”：每个由模型产出、之后验证仍失败的修复，记为该等级的一次失败。
+        Rebuild the fix-chain history from the version lineage: each model-made fix whose verification still failed counts as a failure."""
+        if any(k.startswith('fix') for k in self.job.get('route_history',{})) or not self._ladder:
+            return
+        by_model={c.model:c for c in self.router.candidates}
+        history=[]
+        current=verified
+        seen=set()
+        runs={r['id']:r for r in self.store.all_runs()}
+        while current in runs and current not in seen:
+            seen.add(current)
+            run=runs[current]
+            parent=run['data'].get('parent_run_id')
+            if run['data'].get('project_bundle') and parent in runs:
+                draft=runs[parent]
+                plan=draft['data'].get('project_plan') or {}
+                if plan.get('repair_of') and not plan.get('format_only'):
+                    asked=[e for e in self.store.events(parent) if e['type']=='model_requested']
+                    model=(asked[-1]['payload'].get('route') or {}).get('model') if asked else None
+                    chain='fix:test' if plan.get('revision_scope')=='tests' else 'fix:implementation'
+                    if model in by_model:
+                        history.append((chain,{'candidate':by_model[model].id,'level':by_model[model].level}))
+            current=parent
+        history.reverse()
+        if history:
+            all_history=dict(self.job.get('route_history',{}))
+            for chain,entry in history:
+                all_history[chain]=list(all_history.get(chain,[]))+[entry]
+            self.job['route_history']=all_history
+            self._emit('history_seeded',{'fix_failures':{c:[e['level'] for ch,e in history if ch==c] for c in {c for c,_ in history}}},verified,always=True)
+
+    def _prepare(self, planning, generation, goal):
+        """规划（含澄清、预检）→ 批准 → 生成，返回待验证的草稿 id；等待用户、被拦下时返回 None。
+        Plan (clarification, triage) → approve → generate; returns the draft id, or None when waiting for the user or blocked."""
+        store=self.store
+        phase=self._phase
         checkpoint=self.job
         plan=checkpoint.get('plan_id')
         # 可行性预检：确定性规则零成本；确定会失败的需求直接拦下（除非用户明确要求继续）。
@@ -182,7 +498,7 @@ class WorkflowCoordinator:
                 blocked=planning.record_triage_block(goal,triage)
                 self.job.update(run_id=blocked,status='completed',result={'id':blocked},
                                 note='triage: '+'; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible'))
-                return
+                return None
             if self._ladder and self.router.policy.get('triage_model'):
                 triage_provider=self.router.local_provider('project_triage')
         # 发布与后台检查点之间也可能中断；直接复用已发布的同一份方案。
@@ -212,7 +528,7 @@ class WorkflowCoordinator:
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
-                    return
+                    return None
                 checkpoint['plan_id']=plan
                 break
             except RoutingStop:
@@ -280,99 +596,7 @@ class WorkflowCoordinator:
                 growth='x'*4000*max(0,len(approved['spec']['files'])-1)
                 draft=self._attempt('generation','project_developer',generate,need=[goal,approved,growth],stage='generation')
             checkpoint['draft_id']=draft
-        for attempt in range(checkpoint.get('attempt',0),5):
-            meta=store.run(draft)['data']['project_plan']
-            phase('verification',draft,attempt)
-            verified=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),
-                                               'review_mode':'automatic'})
-            phase('verification',verified,attempt)
-            result=Runtime(store,runner).execute(verified)
-            # 验证在进程崩溃时被中断：引擎保守地标 needs_attention 且不重放。工具幂等，所以新建一次验证（最多两次），
-            # 而不是把它当成“验证失败”去修复。A verification interrupted by a crash is re-run as a new run (at most twice).
-            reverified=0
-            while result['status']=='needs_attention' and reverified<2 and str(store.run(verified)['reason']).startswith('uncertain_tool_state'):
-                reverified+=1
-                verified=generation.reverify(verified)
-                phase('verification',verified,attempt)
-                result=Runtime(store,runner).execute(verified)
-            if result['status']=='needs_attention':
-                self.job.update(status='completed',result={'id':verified},
-                                note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
-                return
-            if result['status']=='succeeded':
-                self.job.update(status='completed',result={'id':verified})
-                return
-            if result['status']=='cancelled':
-                self.job.update(status='cancelled',result={'id':verified},note='取消已生效；不会开始新的修复。')
-                return
-            # 上一次由模型产出的修复没能让验证通过：记入失败链，路由器据此决定是否升级。
-            # The previous model-made fix did not pass verification: record it so the router can decide about escalation.
-            pending=self.job.get('pending_fix')
-            if pending:
-                self._fail('fix',type('D',(),{'action':'use','candidate':pending['candidate'],'level':pending['level']})())
-                self.job['pending_fix']=None
-            if attempt==4:
-                self.job.update(status='completed',result={'id':verified},
-                                        note='automatic repair limit reached; inspect failed checks')
-                return
-            # 失败中含测试包循环导入时，必须新建测试修订；普通修复不能改变冻结测试。
-            # A test import cycle needs an explicit test revision; implementation-only repair cannot fix frozen tests.
-            checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
-                    for t in store.tools(verified) if t['result_ref']]
-            # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
-            # Three identical assertion failures require spec/test review instead of another implementation repair.
-            assertion=repeated_assertion_signature(checks)
-            if self.checkpoint.record_assertion(verified,assertion):
-                self.job.update(status='completed',result={'id':verified},
-                    note='same test assertion failed three times; inspect specification and test expectation before further repair')
-                return
-            # 确定会失败的运行：同一失败签名在多轮后仍不变，并且更强的模型也已经试过，就停下交给人，不再继续花钱。
-            # A doomed run: the same failure signature survives several rounds AND the strongest model was already tried.
-            repeats=self.checkpoint.record_signature(verified,failure_signature(checks))
-            if repeats>=int(self.router.policy.get('stuck_after',99)) and self._strongest_tried():
-                self._emit('task_stopped',{'reason':'stuck','detail':f'同一失败签名连续 {repeats} 次未变化'},verified,always=True)
-                self.job.update(status='completed',result={'id':verified},
-                    note=f'stuck: the same failure signature repeated {repeats} times, including attempts by the strongest model; a human needs to look (specification, tests or requirement)')
-                return
-            outputs=[result for _,result in checks]
-            evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
-            # 修复阶段的输入规模：当前整套代码 + 失败证据（估算，用于上下文准入）。
-            # Input size of a fix call: the current bundle plus failure evidence (an estimate for context admission).
-            bundle=store.read(store.run(verified)['data']['project_bundle']['approval_ref'])['files']
-            need=[bundle,evidence[:20000]]
-            used={}
-            try:
-                if format_only(checks):
-                    phase('test_format',verified,attempt+1)
-                    draft=generation.format_test_files(verified,
-                        lambda rid:phase('test_format',rid,attempt+1))
-                elif test_revision_needed(evidence,checks):
-                    phase('test_revision',verified,attempt+1)
-                    draft=self._attempt('fix','project_test_revision',lambda provider,fb:self._track(used,provider,generation.revise_tests(verified,provider,
-                        'Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.'+(' '+fb if fb else ''),
-                        lambda rid:phase('test_revision',rid,attempt+1))),need=need,stage='test_revision')
-                elif assertion and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'):
-                    # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
-                    # 此后仍相同则由三次规则停止并交给人。 Same assertion survives an implementation repair: let the Tester
-                    # arbitrate once against the approved spec; if it still repeats, the three-strike rule hands over to a human.
-                    self.job.update(arbitrated=True)
-                    phase('test_revision',verified,attempt+1)
-                    draft=self._attempt('fix','project_test_revision',lambda provider,fb:self._track(used,provider,generation.revise_tests(verified,provider,
-                        'The same assertions kept failing after an implementation repair. Compare EACH failing assertion with the approved '
-                        'spec.acceptance and the goal text. If an expected value contradicts them, correct that expectation to follow the '
-                        'requirement; do not delete cases or weaken checks. If the test already follows the requirement, change nothing '
-                        'about that assertion.'+(' '+fb if fb else ''),
-                        lambda rid:phase('test_revision',rid,attempt+1))),need=need,stage='arbitration')
-                else:
-                    phase('repair',verified,attempt+1)
-                    draft=self._attempt('fix','project_repair',lambda provider,fb:self._track(used,provider,generation.repair(verified,provider,fb or '',
-                        lambda rid:phase('repair',rid,attempt+1),use_intelligence=True)),need=need,stage='repair')
-            except RoutingStop as stop:
-                self._stopped(stop,verified)
-                return
-            # 记住是哪个模型做的这次修复；下一次验证失败时据此计入失败链。 Remember who made this fix.
-            if used:self.job['pending_fix']=dict(used)
-            checkpoint.update(draft_id=draft,attempt=attempt+1)
+        return draft
 
     def _track(self, used, provider, value):
         """记录最近一次成功产出修复草稿的候选。 Remember which candidate produced the latest fix draft."""

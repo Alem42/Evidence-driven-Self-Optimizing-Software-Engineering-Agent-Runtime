@@ -76,7 +76,7 @@ class RecoveryDrillTests(unittest.TestCase):
         self.assertEqual(result['status'], 'completed', result)
         self.assertEqual(result['final_run_status'], 'succeeded', result)
         self.assertEqual(result['escalations'], 1)  # 失败链跨崩溃保留，所以还是升级了 / the chain survived the crash
-        self.assertEqual(result['route_history']['fix'][0]['candidate'], 'local')
+        self.assertEqual(next(v for k, v in result['route_history'].items() if k.startswith('fix'))[0]['candidate'], 'local')
 
     def test_a_free_local_repair_call_lost_in_a_crash_is_retried_as_a_new_attempt(self):
         """本地修复请求已发出、进程被硬杀：免费调用作为同一次调用的新尝试重试（旧尝试标为被放弃），随后正常升级并成功。"""

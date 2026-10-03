@@ -20,6 +20,12 @@ def response_schema(context):
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'required':[path],
                                      'properties':{path:string}}}}
+    if purpose=='project_diagnoser':
+        text={'type':'string','maxLength':2000}
+        return {'type':'object','additionalProperties':False,
+                'required':['owner','rationale','implementation_instructions','test_instructions'],
+                'properties':{'owner':{'enum':['implementation','test','both','spec','unclear']},'rationale':text,
+                              'implementation_instructions':text,'test_instructions':text}}
     if purpose=='project_triage':
         short={'type':'array','maxItems':5,'items':{'type':'string','maxLength':400}}
         return {'type':'object','additionalProperties':False,'required':['verdict','reasons','suggestions'],

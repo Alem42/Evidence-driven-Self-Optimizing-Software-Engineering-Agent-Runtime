@@ -231,3 +231,29 @@ def validate_triage(action):
     if action['verdict'] == 'infeasible':
         result['reasons'] = ['（本地模型认为不可行，已降级为风险提示）'] + result['reasons']
     return result
+
+
+DIAGNOSIS_OWNERS = ('implementation', 'test', 'both', 'spec', 'unclear')
+
+
+def validate_diagnosis(action):
+    """Diagnoser 的结论：谁的问题 + 依据 + 给修复者的指导。它不能改文件，也不能放宽冻结边界；
+    spec/unclear 表示需要人（需求矛盾或证据不足），由工作流确定性地停下。
+    The Diagnoser's verdict: whose problem, why, and instructions for the fixer. It edits nothing and cannot relax frozen boundaries;
+    spec/unclear mean a human is needed and the workflow stops deterministically."""
+    from masa.domain.models import MasaError
+    if not isinstance(action, dict) or set(action) != {'owner', 'rationale', 'implementation_instructions', 'test_instructions'}:
+        raise MasaError('invalid diagnosis fields')
+    if action['owner'] not in DIAGNOSIS_OWNERS:
+        raise MasaError('invalid diagnosis owner')
+    out = {'owner': action['owner']}
+    for key in ('rationale', 'implementation_instructions', 'test_instructions'):
+        value = action[key]
+        if not isinstance(value, str) or len(value) > 2000 or '\x00' in value:
+            raise MasaError(f'invalid diagnosis {key}')
+        out[key] = value.strip()
+    if out['owner'] in ('implementation', 'both') and not out['implementation_instructions']:
+        raise MasaError('an implementation diagnosis needs implementation_instructions')
+    if out['owner'] in ('test', 'both') and not out['test_instructions']:
+        raise MasaError('a test diagnosis needs test_instructions')
+    return out

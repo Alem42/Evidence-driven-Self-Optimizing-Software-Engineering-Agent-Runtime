@@ -82,6 +82,11 @@ def validate_config(config):
     return values
 
 
+# 每个本地请求都带保活时间：就算进程崩溃，模型最多再占 2 分钟显存，而不是 Ollama 默认的 5 分钟或更久。
+# Every local request carries a keep-alive: after a crash the model holds VRAM for 2 minutes at most.
+LOCAL_KEEP_ALIVE = '120s'
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         """禁止将认证头重定向到其他地址。 Never redirect authorization to another endpoint."""
@@ -114,6 +119,23 @@ class ChatProvider:
         self.usage = None
         self.metrics = None
         self.contract_diagnostic = None
+        self.loaded = False  # 这个实例是否可能让本地模型驻留在显存里 / may this instance have left a local model resident in VRAM
+
+    def unload(self):
+        """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
+        Release the local model from VRAM right away (Ollama: keep_alive=0). Best effort: never raises."""
+        if self.config['model_type'] != 'local' or self.config['protocol'] != 'ollama':
+            return False
+        body = json.dumps({'model': self.config['model'], 'keep_alive': 0, 'stream': False}).encode()
+        request = urllib.request.Request(self.config['base_url'].rstrip('/') + '/api/generate', data=body,
+                                         headers={'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+                response.read(4096)
+            self.loaded = False
+            return True
+        except (OSError, urllib.error.URLError, ValueError):
+            return False
 
     def reachable(self, timeout=3):
         """本地服务是否在响应（Ollama: /api/version；兼容服务: /models）。 Is the local server answering?"""
@@ -172,10 +194,12 @@ class ChatProvider:
             # Native options bound context/output without streaming; role contracts remain shared.
             # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
             # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
-            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':False,
+            payload={'keep_alive':LOCAL_KEEP_ALIVE,'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':False,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
+        if self.config['model_type'] == 'local':
+            self.loaded = True  # 请求发出后模型就会被加载 / the request will load the model
         raw = canonical(payload).encode()
         if len(raw) > 262144:
             raise MasaError("model input byte limit exceeded")
