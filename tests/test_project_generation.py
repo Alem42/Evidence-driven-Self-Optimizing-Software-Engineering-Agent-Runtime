@@ -18,6 +18,10 @@ FILES = {'go.mod':'module example.com/task\n\ngo 1.27.0\n',
          'internal/app/app_test.go':'package app\n\nimport "testing"\n\nfunc TestValue(t *testing.T) {\n\tif Value() != 42 {\n\t\tt.Fatal("wrong value")\n\t}\n}\n'}
 
 
+# 缩进和空格不符合 gofmt 的实现文件。 An implementation file that is not gofmt-clean.
+MESSY_APP = 'package app\nfunc Value() int {\nreturn   42\n}\n'
+
+
 class DeveloperProvider(PlannerProvider):
     def respond(self, context):
         assert context['purpose'] == 'project_developer'
@@ -54,6 +58,62 @@ class ProjectGenerationTests(unittest.TestCase):
                 verified=service.approve(revised,{'files_ref':p['files_ref'],'files':files})
                 self.assertEqual(Runtime(store,runner).execute(verified)['status'],'succeeded')
                 self.assertEqual(store.run(original)['status'],'failed')
+            finally:store.close()
+
+    def _real_go(self):
+        root=Path(__file__).resolve().parents[1]
+        go=root/'.tools/go/bin/go.exe';binary=root/'.tools/bin/masa-runner.exe'
+        if not go.is_file() or not binary.is_file():self.skipTest('built Go runner unavailable')
+        return binary,go
+
+    def test_generated_drafts_are_gofmt_normalized_so_format_never_costs_a_repair(self):
+        """模型写出未格式化代码时，草稿阶段确定性规范化，验证不再因 gofmt 失败。 Normalize at draft time."""
+        binary,go=self._real_go()
+        messy={**FILES,'internal/app/app.go':MESSY_APP}
+        class MessyProvider(DeveloperProvider):
+            def respond(self,context):return dict(messy)
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp));runner=Runner(binary,go)
+            try:
+                planning=ProjectPlanning(store,runner)
+                parent=planning.generate(PlannerProvider(),'Build a small CLI')
+                p=store.run(parent)['data']['project_plan']
+                planning.approve(parent,{'spec_ref':p['spec_ref'],'checks_ref':p['checks_ref'],'spec':SPEC,'checks':CHECKS})
+                service=ProjectGeneration(store,runner)
+                draft=service.generate(parent,MessyProvider())
+                p=store.run(draft)['data']['project_plan']
+                files=store.read(p['files_ref'])
+                self.assertIn('\treturn 42',files['internal/app/app.go'])
+                verified=service.approve(draft,{'files_ref':p['files_ref'],'files':files})
+                self.assertEqual(Runtime(store,runner).execute(verified)['status'],'succeeded')
+            finally:store.close()
+
+    def test_format_only_failure_in_implementation_is_fixed_without_a_model(self):
+        """实现文件仅格式失败（如人工编辑）也可零模型调用修复。 Source-only gofmt failures need no model call."""
+        from masa.application.check_policy import format_only
+        binary,go=self._real_go()
+        messy={**FILES,'internal/app/app.go':MESSY_APP}
+        with tempfile.TemporaryDirectory() as temp:
+            store=Store(Path(temp));runner=Runner(binary,go)
+            try:
+                planning=ProjectPlanning(store,runner)
+                parent=planning.generate(PlannerProvider(),'Build a small CLI')
+                p=store.run(parent)['data']['project_plan']
+                planning.approve(parent,{'spec_ref':p['spec_ref'],'checks_ref':p['checks_ref'],'spec':SPEC,'checks':CHECKS})
+                service=ProjectGeneration(store,runner)
+                draft=service.generate(parent,DeveloperProvider())
+                p=store.run(draft)['data']['project_plan']
+                original=service.approve(draft,{'files_ref':p['files_ref'],'files':messy})
+                self.assertEqual(Runtime(store,runner).execute(original)['status'],'failed')
+                checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref'])) for t in store.tools(original) if t['result_ref']]
+                self.assertTrue(format_only(checks))
+                revised=service.format_test_files(original)
+                p=store.run(revised)['data']['project_plan']
+                self.assertEqual(p['revision_scope'],'implementation')
+                self.assertEqual(store.run(revised)['model_calls'],0)
+                files=store.read(p['files_ref'])
+                verified=service.approve(revised,{'files_ref':p['files_ref'],'files':files})
+                self.assertEqual(Runtime(store,runner).execute(verified)['status'],'succeeded')
             finally:store.close()
 
     def test_repair_context_keeps_early_compile_error_amid_long_test_output(self):

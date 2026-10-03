@@ -49,7 +49,29 @@ class ProjectGeneration:
         self.store, self.executor = store, executor
         self.planning = ProjectPlanning(store, executor)
 
-    def generate(self, parent, provider, on_created=None, resume_id=None):
+    def _gofmt(self, files, paths):
+        """用工具链 gofmt 规范指定的 Go 文件；失败（如语法错误）则保持原样，让真实编译检查暴露问题。
+        Normalize the given Go files with the toolchain gofmt; on failure (e.g. syntax errors) keep them as-is."""
+        go = getattr(self.executor, 'go_executable', None)
+        if not go:
+            return files
+        formatter = Path(go).parent / ('gofmt.exe' if os.name == 'nt' else 'gofmt')
+        if not formatter.is_file():
+            return files
+        out = dict(files)
+        for path in paths:
+            if not path.endswith('.go') or not isinstance(files.get(path), str):
+                continue
+            try:
+                process = subprocess.run([str(formatter)], input=files[path].encode('utf-8'),
+                                         capture_output=True, timeout=10, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if process.returncode == 0 and 0 < len(process.stdout) <= 60000:
+                out[path] = process.stdout.decode('utf-8')
+        return out
+
+    def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         original = self.store.run(parent)
         plan = original['data'].get('project_plan', {})
@@ -82,9 +104,14 @@ class ProjectGeneration:
             on_created(rid)
         try:
             if metadata.get('generation_mode') == 'files-v1':
-                files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata)
+                files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata, retry_feedback)
             else:
-                files = self.planning.call(rid, provider, 'project_developer', {'goal':original['data']['goal'], **approved})
+                values = {'goal':original['data']['goal'], **approved}
+                if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
+                files = self.planning.call(rid, provider, 'project_developer', values)
+            # 模型常写出不符合 gofmt 的代码；格式属于确定性工作，不应消耗修复调用。
+            # Models often emit non-gofmt code; formatting is deterministic and must not cost a repair call.
+            files = self._gofmt(files, list(files))
             validate_files(files, approved['spec'])
             metadata.update(status='awaiting_review', files_ref=self.store.put(files))
             self.planning.update(rid, metadata, 'paused', 'project_code_review_requested')
@@ -96,7 +123,7 @@ class ProjectGeneration:
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
             raise MasaError(f'project generation failed; run {rid}: {metadata["error"]}') from None
 
-    def _generate_local_files(self, rid, provider, goal, approved, metadata):
+    def _generate_local_files(self, rid, provider, goal, approved, metadata, retry_feedback=None):
         """逐文件落盘与恢复，不重放未知调用；合并后仍进行完整校验。 Checkpoint file calls without replaying unknown results; validate the final bundle."""
         from masa.runtime.roles import RoleRuntime
         spec = approved['spec']
@@ -115,6 +142,7 @@ class ProjectGeneration:
                 raise MasaError(metadata.get('error', 'project generation cancelled'))
             values = {'goal': goal, **approved, 'generation_mode': 'files-v1',
                       'target_path': path, 'previous_files': dict(files)}
+            if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
             invocation = 'initial' if ordinal == 0 else f'file:{ordinal + 1}'
             generated = roles.call(rid, provider, 'project_developer', values, invocation_id=invocation)
             validate_file_proposal(generated, spec, path)
@@ -166,9 +194,12 @@ class ProjectGeneration:
             if any(path not in original_files for path in changes):
                 raise MasaError('repair changed a file outside supplied context; request a broader revision')
             files=validate_repair(changes,base['files'])
+            # 冻结的测试与 go.mod 不动；其余 Go 文件统一格式化，修复不再被 gofmt 卡住。
+            # Frozen tests/go.mod stay untouched; format every other Go file so repairs are never blocked by gofmt.
+            files=self._gofmt(files,[p for p in files if p!='go.mod' and not p.endswith('_test.go')])
             validate_files(files,approved['spec'])
             metadata.update(status='awaiting_review',files_ref=self.store.put(files),
-                            changed_files=[p for p in changes if files[p]!=base['files'][p]])
+                            changed_files=[p for p in files if files[p]!=base['files'][p]])
             self.planning.update(rid,metadata,'paused','project_repair_review_requested')
             return rid
         except Exception as exc:
@@ -204,9 +235,11 @@ class ProjectGeneration:
             raise MasaError('repair changed a file outside supplied context; request a broader revision')
         validator=validate_test_revision if purpose=='project_test_revision' else validate_repair
         files=validator(changes,base['files'])
+        tests_scope=purpose=='project_test_revision'
+        files=self._gofmt(files,[p for p in files if (p.endswith('_test.go') if tests_scope else p!='go.mod' and not p.endswith('_test.go'))])
         validate_files(files,approved['spec'])
         metadata.update(status='awaiting_review',files_ref=self.store.put(files),
-                        changed_files=[p for p in changes if files[p]!=base['files'][p]])
+                        changed_files=[p for p in files if files[p]!=base['files'][p]])
         self.planning.update(rid,metadata,'paused',purpose+'_review_requested')
         return rid
 
@@ -243,9 +276,10 @@ class ProjectGeneration:
                 'goal':data['goal'],**approved,'original_files':base['files'],
                 'failure_evidence':evidence,'feedback':feedback})
             files=validate_test_revision(changes,base['files'])
+            files=self._gofmt(files,[p for p in files if p.endswith('_test.go')])
             validate_files(files,approved['spec'])
             metadata.update(status='awaiting_review',files_ref=self.store.put(files),
-                            changed_files=[p for p in changes if files[p]!=base['files'][p]])
+                            changed_files=[p for p in files if files[p]!=base['files'][p]])
             self.planning.update(rid,metadata,'paused','project_test_revision_review_requested')
             return rid
         except Exception as exc:
@@ -274,8 +308,14 @@ class ProjectGeneration:
             if operation!='go_fmt_check':
                 raise MasaError('format revision requires all other checks to pass')
             format_paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
-        if not format_paths or any(p not in base['files'] or not p.endswith('_test.go') for p in format_paths):
-            raise MasaError('format revision requires only existing test files')
+        if not format_paths or any(p not in base['files'] for p in format_paths):
+            raise MasaError('format revision requires existing files')
+        # 全是测试文件走测试修订范围，全是实现文件走实现范围；混合需要人来处理。
+        # Test-only paths use the test scope, source-only paths the implementation scope; mixed needs a human.
+        tests = [p.endswith('_test.go') for p in format_paths]
+        if any(tests) and not all(tests):
+            raise MasaError('format revision requires either only test files or only implementation files')
+        scope = 'tests' if all(tests) else 'implementation'
         formatter=self.executor.go_executable.parent / ('gofmt.exe' if os.name=='nt' else 'gofmt')
         if not formatter.is_file():
             raise MasaError('gofmt binary missing')
@@ -289,12 +329,12 @@ class ProjectGeneration:
             if process.returncode!=0 or len(process.stdout)>60000:
                 raise MasaError('gofmt rejected test file')
             changes[path]=process.stdout.decode('utf-8')
-        files=validate_test_revision(changes,base['files'])
+        files=validate_test_revision(changes,base['files']) if scope=='tests' else validate_repair(changes,base['files'])
         validate_files(files,approved['spec'])
         if all(files[p]==base['files'][p] for p in format_paths):
-            raise MasaError('gofmt made no test changes')
+            raise MasaError('gofmt made no changes')
         metadata={'kind':'code','status':'awaiting_review','spec_approval_ref':base['spec_approval_ref'],
-                  'base_approval_ref':base_ref,'repair_of':parent,'revision_scope':'tests',
+                  'base_approval_ref':base_ref,'repair_of':parent,'revision_scope':scope,
                   'format_only':True,'changed_files':format_paths,'files_ref':self.store.put(files)}
         rid=Runtime(self.store,self.executor).create(Path(data['workspace']),data['goal'],
             Budget(model_calls=1,tool_calls=3,deadline_seconds=86400),

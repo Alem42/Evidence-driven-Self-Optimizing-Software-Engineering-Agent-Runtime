@@ -34,6 +34,10 @@ def validate_spec(spec):
             or name.lower() in names or not (name == 'go.mod' or name.endswith('.go'))):
             raise MasaError('invalid or duplicate project path')
         names.add(name.lower())
+    # 根目录的 .go 文件会与 cmd/app 的 package main 冲突（"is a program, not an importable package"）。
+    # Root-level .go files collide with the cmd/app package main; code must live in subdirectories.
+    if any('/' not in n and n.endswith('.go') for n in names):
+        raise MasaError('Go files must live in subdirectories such as internal/<name>; only go.mod may be at the module root')
     exact_names = {f['path'] for f in files}
     if 'go.mod' not in exact_names or spec['entrypoint'] not in exact_names or not any(n.endswith('_test.go') for n in exact_names):
         raise MasaError('plan requires go.mod, entrypoint and acceptance tests')
@@ -158,6 +162,37 @@ def validate_file_proposal(files, spec, target_path):
     return files
 
 
+def _imports(source):
+    """提取 import 路径（只用于预检，语法仍由 Go 工具验证）。 Extract import paths for preflight; Go tools still own syntax."""
+    paths = []
+    for block in re.findall(r'(?m)^\s*import\s*\((.*?)\)', source, re.S):
+        paths += re.findall(r'"([^"\n]+)"', block)
+    paths += re.findall(r'(?m)^\s*import\s+(?:[A-Za-z_.][A-Za-z0-9_]*\s+)?"([^"\n]+)"', source)
+    return paths
+
+
+def preflight_go(files, module):
+    """部署前拦截确定性错误：第三方依赖、同目录包名冲突。让模型带着明确原因重试，而不是等编译失败后反复修。
+    Catch deterministic mistakes before verification: third-party imports and mixed packages in one directory."""
+    packages = {}
+    for path, source in files.items():
+        if not path.endswith('.go'):
+            continue
+        for imported in _imports(source):
+            first = imported.split('/')[0]
+            if '.' in first and imported != module and not imported.startswith(module + '/'):
+                raise MasaError(f'{path} imports third-party package "{imported}"; only the Go standard library and this module are allowed')
+        package = _entry_package(source)
+        if package:
+            directory = path.rpartition('/')[0]
+            # 同目录允许 foo 与 foo_test（外部测试包），其余不得混用。 foo and foo_test may share a directory.
+            packages.setdefault(directory, {}).setdefault(package[:-5] if package.endswith('_test') and path.endswith('_test.go') else package, path)
+    for directory, found in packages.items():
+        if len(found) > 1:
+            names = sorted(found)
+            raise MasaError(f'directory "{directory or "."}" mixes packages {names[0]} ({found[names[0]]}) and {names[1]} ({found[names[1]]}); every Go file in a directory must use the same package')
+
+
 def validate_files(files, spec):
     """文件集合必须严格匹配批准目录，限制内容与模块声明。 Bind bounded contents to the exact approved file set."""
     validate_spec(spec)
@@ -177,5 +212,6 @@ def validate_files(files, spec):
         raise MasaError('Go CLI entrypoint must declare package main')
     if files['go.mod'].strip() != f"module {spec['module']}\n\ngo 1.27.0":
         raise MasaError('go.mod must use the approved module and Go 1.27.0 without dependencies')
+    preflight_go(files, spec['module'])
     return files
 

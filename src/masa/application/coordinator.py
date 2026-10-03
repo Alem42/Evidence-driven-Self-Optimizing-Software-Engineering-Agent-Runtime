@@ -2,7 +2,7 @@
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.workflow import WorkflowCheckpoint
-from masa.application.check_policy import test_format_only, test_revision_needed, repeated_assertion_signature
+from masa.application.check_policy import format_only, test_revision_needed, repeated_assertion_signature
 from masa.runtime.engine import Runtime
 from masa.domain.models import MasaError
 import time
@@ -14,6 +14,34 @@ class WorkflowCoordinator:
         self.store,self.runner,self.provider,self.job=store,runner,provider,job
         self.resuming=resuming
         self.checkpoint=WorkflowCheckpoint(job)
+
+    def _retryable(self, run_id):
+        """响应已收到但被契约或业务校验拒绝时才值得带原因重试；网络、鉴权、截断、取消都不重试。
+        Retry only when a response was RECEIVED and then rejected; never for transport, auth, truncation or cancellation."""
+        if not run_id:
+            return None
+        run = self.store.run(run_id)
+        if run['cancel_requested'] or run['status'] == 'cancelled' or time.time() >= run['data']['deadline_at']:
+            return None
+        plan = run['data'].get('project_plan', {})
+        events = [e for e in self.store.events(run_id) if e['type'] in {'model_failed', 'model_completed'}]
+        if not events:
+            return None
+        last = events[-1]
+        received = last['type'] == 'model_completed' or bool(last['payload'].get('contract_diagnostic'))
+        return (plan.get('error') or 'response rejected by validation') if received else None
+
+    def _attempt(self, call, retries=1):
+        """调用 call(feedback)；校验被拒绝时最多带反馈重试 retries 次。 Retry a rejected stage with the rejection reason."""
+        feedback = None
+        for n in range(retries + 1):
+            try:
+                return call(feedback)
+            except MasaError:
+                reason = self._retryable(self.job.get('run_id')) if n < retries else None
+                if not reason:
+                    raise
+                feedback = 'Your previous attempt was rejected: ' + reason
 
     def run(self):
         """从持久检查点推进流程，等待用户时释放执行权。 Advance checkpoints and yield when user input is required."""
@@ -31,17 +59,19 @@ class WorkflowCoordinator:
             if saved.get('status') in {'awaiting_review','approved'}:
                 plan=checkpoint['run_id'];checkpoint['plan_id']=plan
         reuse=None
+        planner_feedback=None
+        retry_of=None
         for retry in range(3 if not plan else 0):
             try:
                 recover_id=checkpoint.get('run_id') if self.resuming and checkpoint['phase']=='planning' and retry==0 else None
-                plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id)
+                plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id,
+                                       retry_of=retry_of,retry_feedback=planner_feedback)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return
                 checkpoint['plan_id']=plan
                 break
             except MasaError:
-                if recover_id:raise
                 failed_id=self.job['run_id']
                 run=store.run(failed_id)
                 # 取消和过期是工作流边界，不应伪装成 Tester 契约失败重建任务。
@@ -49,7 +79,16 @@ class WorkflowCoordinator:
                 if run['cancel_requested'] or run['status']=='cancelled' or time.time()>=run['data']['deadline_at']:
                     raise
                 failed=run['data'].get('project_plan',{})
-                if retry==2 or not failed.get('spec_ref'):
+                if recover_id and failed.get('spec_ref'):raise
+                if not failed.get('spec_ref'):
+                    # Planner 的响应被契约拒绝：带原因重规划一次（新版本，旧失败保留）。
+                    # A Planner response rejected by the contract gets one corrected re-plan (new version; the failure is kept).
+                    reason=self._retryable(failed_id) if retry==0 else None
+                    if not reason:raise
+                    planner_feedback=reason;retry_of=failed_id
+                    phase('planning_retry',failed_id,retry+1)
+                    continue
+                if retry==2:
                     raise
                 # 仅复用已校验 Planner 结果，Tester 最多额外调用两次。
                 # Reuse validated Planner output and retry Tester at most twice.
@@ -73,7 +112,8 @@ class WorkflowCoordinator:
             if saved.get('status') in {'awaiting_review','approved'}:
                 draft=recover_id
             else:
-                draft=generation.generate(plan,provider,lambda rid:phase('generation',rid),resume_id=recover_id)
+                draft=self._attempt(lambda fb:generation.generate(plan,provider,lambda rid:phase('generation',rid),
+                                                                  resume_id=recover_id if fb is None else None,retry_feedback=fb))
             checkpoint['draft_id']=draft
         for attempt in range(checkpoint.get('attempt',0),5):
             meta=store.run(draft)['data']['project_plan']
@@ -105,16 +145,28 @@ class WorkflowCoordinator:
                 return
             outputs=[result for _,result in checks]
             evidence='\n'.join(str(o.get('stdout',''))+'\n'+str(o.get('stderr','')) for o in outputs)
-            if test_format_only(checks):
+            if format_only(checks):
                 phase('test_format',verified,attempt+1)
                 draft=generation.format_test_files(verified,
                     lambda rid:phase('test_format',rid,attempt+1))
             elif test_revision_needed(evidence,checks):
                 phase('test_revision',verified,attempt+1)
-                draft=generation.revise_tests(verified,provider,
-                    'Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.',
-                    lambda rid:phase('test_revision',rid,attempt+1))
+                draft=self._attempt(lambda fb:generation.revise_tests(verified,provider,
+                    'Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.'+(' '+fb if fb else ''),
+                    lambda rid:phase('test_revision',rid,attempt+1)))
+            elif assertion and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'):
+                # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
+                # 此后仍相同则由三次规则停止并交给人。 Same assertion survives an implementation repair: let the Tester
+                # arbitrate once against the approved spec; if it still repeats, the three-strike rule hands over to a human.
+                self.job.update(arbitrated=True)
+                phase('test_revision',verified,attempt+1)
+                draft=self._attempt(lambda fb:generation.revise_tests(verified,provider,
+                    'The same assertions kept failing after an implementation repair. Compare EACH failing assertion with the approved '
+                    'spec.acceptance and the goal text. If an expected value contradicts them, correct that expectation to follow the '
+                    'requirement; do not delete cases or weaken checks. If the test already follows the requirement, change nothing '
+                    'about that assertion.'+(' '+fb if fb else ''),
+                    lambda rid:phase('test_revision',rid,attempt+1)))
             else:
                 phase('repair',verified,attempt+1)
-                draft=generation.repair(verified,provider,'',lambda rid:phase('repair',rid,attempt+1),use_intelligence=True)
+                draft=self._attempt(lambda fb:generation.repair(verified,provider,fb or '',lambda rid:phase('repair',rid,attempt+1),use_intelligence=True))
             checkpoint.update(draft_id=draft,attempt=attempt+1)

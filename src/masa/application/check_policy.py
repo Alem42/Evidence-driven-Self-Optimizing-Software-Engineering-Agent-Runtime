@@ -39,8 +39,8 @@ def test_revision_needed(evidence, checks=()):
 
 def repair_advice(checks):
     """前端与自动流程复用同一修复分类。 Share evidence-based repair routing with the manual interface."""
-    if test_format_only(checks):
-        return {'action':'format_tests','message':'只有测试文件格式不合格，可直接格式化并重新验证，无需模型调用。'}
+    if format_only(checks):
+        return {'action':'format_tests','message':'只有 gofmt 格式检查不合格，可直接格式化并重新验证，无需模型调用。'}
     evidence='\n'.join(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')) for _,r in checks)
     if test_revision_needed(evidence,checks):
         return {'action':'revise_tests','message':'检测到测试源码或测试准备错误（如构建目录、常量溢出、导入）。请修订测试并保留行为断言。'}
@@ -55,6 +55,17 @@ def test_format_only(checks):
     if result.get('status')!='completed':return False
     paths=[p.strip().replace('\\','/') for p in result.get('stdout','').splitlines() if p.strip()]
     return bool(paths) and all(p.endswith('_test.go') for p in paths)
+
+
+def format_only(checks):
+    """只有 gofmt 检查失败，且涉及的文件全是测试或全是实现时，可无模型格式化。
+    Only gofmt failed, and the files are all tests or all implementation: format deterministically."""
+    failures=[(op,result) for op,result in checks if result.get('status')!='completed' or result.get('exit_code')!=0]
+    if len(failures)!=1 or failures[0][0]!='go_fmt_check' or failures[0][1].get('status')!='completed':return False
+    paths=[p.strip().replace('\\','/') for p in failures[0][1].get('stdout','').splitlines() if p.strip()]
+    if not paths or not all(p.endswith('.go') for p in paths):return False
+    tests=[p.endswith('_test.go') for p in paths]
+    return all(tests) or not any(tests)
 
 
 def repeated_assertion_signature(checks):

@@ -37,7 +37,7 @@ class ProjectPlanning:
                 status,reason,event='failed',plan['error'],'project_deadline_expired'
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
-    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None):
+    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         if resume_id:
@@ -52,8 +52,12 @@ class ProjectPlanning:
             (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
             plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
             plan['clarification_enabled']=True
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=3, deadline_seconds=86400),
-                                                           graph=harness_policy(), project_plan=plan, parent_run_id=reuse)
+            if retry_of:
+                old=self.store.run(retry_of)['data'].get('project_plan',{})
+                for key in ('clarification','clarification_id','clarification_answers','requirement_revision'):
+                    if key in old:plan[key]=old[key]
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4, deadline_seconds=86400),
+                                                           graph=harness_policy(), project_plan=plan, parent_run_id=reuse or retry_of)
         if on_created:
             on_created(rid)
         try:
@@ -65,6 +69,9 @@ class ProjectPlanning:
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
             else:
                 values={'goal':goal}
+                # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
+                # A received-but-rejected response is retried once with the concrete rejection reason.
+                if retry_feedback:values['previous_attempt_error']=str(retry_feedback)[:1000]
                 invocation='initial'
                 if plan.get('clarification_enabled'):
                     values['clarification_allowed']=not bool(plan.get('clarification_answers'))
