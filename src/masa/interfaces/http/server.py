@@ -121,6 +121,8 @@ def make_server(console, port=8765):
                 elif path == '/api/projects/plan' and write:
                     result = console.start_autonomous_project_job(body) if body.get('auto_verify') else console.start_project_job(body) if body.get('background') else console.plan_project(body)
                 elif len(parts)==3 and parts[:2]==['api','jobs'] and not write:
+                    if parts[2] not in console.jobs:
+                        self.send(404, {'error':'任务不存在，请查看保存的项目记录。'}); return
                     result = console.project_job(parts[2])
                 elif len(parts)==4 and parts[:2]==['api','jobs'] and parts[3]=='resume' and write:
                     result = console.start_autonomous_project_job({},resume_job=parts[2])

@@ -343,6 +343,7 @@ class WebTests(unittest.TestCase):
         for headers in ({'X-MASA-Token':''}, {'Origin':'https://evil.example'}, {'Host':'evil.example'}, {'Sec-Fetch-Site':'cross-site'}):
             self.assertEqual(self.request('/api/runs', headers=headers)[0], 403)
         self.assertEqual(self.request('/api/runs')[0], 200)
+        self.assertEqual(self.request('/api/jobs/missing-job')[0],404)
         self.assertEqual(self.request('/app.js')[0], 200)
         self.assertEqual(self.request('/style.css')[0], 200)
         self.assertEqual(self.request('/../provider.json')[0], 404)
