@@ -3,7 +3,7 @@ from masa.domain.proposals import text, validate_spec, validate_checks
 
 import time
 import uuid
-from masa.domain.models import Budget, MasaError, canonical
+from masa.domain.models import Budget, MasaError, canonical, stage_error
 from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
@@ -113,7 +113,7 @@ class ProjectPlanning:
             plan['status'] = 'failed'
             plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
             self.update(rid, plan, 'failed', 'project_planning_failed')
-            raise MasaError(f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+            raise stage_error(exc, f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
 
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""

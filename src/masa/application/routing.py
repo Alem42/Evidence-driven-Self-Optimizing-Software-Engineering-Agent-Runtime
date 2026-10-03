@@ -11,9 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# 估算 token：保守取每 token 2.5 字节（中文、代码都不会被低估太多）。注意这只是估算，不是服务端的真实分词。
-# Estimate tokens at 2.5 bytes per token: conservative for CJK and code. An estimate, NOT the server tokenizer.
-BYTES_PER_TOKEN = 2.5
+from masa.domain.tokens import estimate_tokens  # noqa: F401  (re-exported; coefficients are fitted on real calls)
 
 DEFAULT_POLICY = {
     'attempts_per_level': {'planning': 2, 'generation': 2, 'fix': 1},  # 初次 + 自修；fix 链的“初次”已是前面的生成 / initial + self-repair
@@ -48,13 +46,6 @@ class Decision:
     reason: str = ''
     detail: str = ''
     escalated: bool = False
-
-
-def estimate_tokens(value) -> int:
-    """估算对象/文本的 token 数。 Estimate the token count of text or a JSON-able object."""
-    import json
-    raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-    return int(len(raw.encode('utf-8')) / BYTES_PER_TOKEN) + 1
 
 
 def validate_budget(budget) -> dict:

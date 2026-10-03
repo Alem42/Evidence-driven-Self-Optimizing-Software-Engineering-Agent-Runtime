@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 import os
-from masa.domain.models import Budget, MasaError, canonical
+from masa.domain.models import Budget, MasaError, canonical, stage_error
 from masa.runtime.engine import Runtime
 from masa.application.planning import ProjectPlanning, validate_spec
 from masa.infrastructure.workspaces import verify_snapshot
@@ -121,7 +121,7 @@ class ProjectGeneration:
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'generation failed')
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
-            raise MasaError(f'project generation failed; run {rid}: {metadata["error"]}') from None
+            raise stage_error(exc, f'project generation failed; run {rid}: {metadata["error"]}') from None
 
     def _generate_local_files(self, rid, provider, goal, approved, metadata, retry_feedback=None):
         """逐文件落盘与恢复，不重放未知调用；合并后仍进行完整校验。 Checkpoint file calls without replaying unknown results; validate the final bundle."""
@@ -205,7 +205,7 @@ class ProjectGeneration:
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'repair generation failed')
             self.planning.update(rid,metadata,'failed','project_repair_failed')
-            raise MasaError(f'repair failed; run {rid}: {metadata["error"]}') from None
+            raise stage_error(exc, f'repair failed; run {rid}: {metadata["error"]}') from None
 
     def resume_revision(self, rid, provider):
         """重新校验已保存的修复结果，不重复请求模型。 Revalidate a saved revision without replaying model requests."""
@@ -285,7 +285,7 @@ class ProjectGeneration:
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'test revision generation failed')
             self.planning.update(rid,metadata,'failed','project_test_revision_failed')
-            raise MasaError(f'test revision failed; run {rid}: {metadata["error"]}') from None
+            raise stage_error(exc, f'test revision failed; run {rid}: {metadata["error"]}') from None
 
     def format_test_files(self, parent, on_created=None):
         """仅格式检查失败时无模型地修订测试快照。 Format test-only failures deterministically in a new reviewable snapshot."""
@@ -344,6 +344,27 @@ class ProjectGeneration:
         self.store.event(rid,'test_format_applied',{'files_ref':metadata['files_ref'],'paths':format_paths})
         self.planning.update(rid,metadata,'paused','project_test_format_review_requested')
         return rid
+
+    def reverify(self, interrupted):
+        """被中断的验证（进程崩溃时工具正在运行）在恢复后会被引擎保守地标为 needs_attention 且不重放工具。
+        检查工具在隔离副本里运行、结果幂等，所以对同一份已发布快照新建一个验证 run 是安全的（与手动“重新验证”相同）。
+        An interrupted verification is conservatively marked needs_attention and never replayed in place. The check tools are
+        idempotent and run in an isolated copy, so a NEW verification run of the same published snapshot is safe."""
+        original = self.store.run(interrupted)
+        data = original['data']
+        if original['status'] != 'needs_attention' or not data.get('project_bundle'):
+            raise MasaError('re-verification requires an interrupted generated-project verification')
+        if not str(original['reason']).startswith('uncertain_tool_state'):
+            raise MasaError('only an interrupted tool state can be re-verified automatically')
+        verify_snapshot(Path(data['workspace']), data['snapshot_id'])
+        from masa.domain.models import Graph
+        new_id = Runtime(self.store, self.executor).create(Path(data['workspace']), data['goal'], Budget(tool_calls=3, deadline_seconds=1800),
+                                                           graph=Graph.from_dict(data['graph']), parent_run_id=interrupted,
+                                                           project_bundle=data['project_bundle'])
+        if self.store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:
+            self.store.set_status(new_id, 'needs_attention', 'snapshot_mismatch')
+            raise MasaError('snapshot changed while preparing re-verification')
+        return new_id
 
     def approve(self, rid, body):
         """先准备完整目录再创建可运行快照；重试复用已发布运行。 Prepare all files before publishing a run; retries reuse it."""

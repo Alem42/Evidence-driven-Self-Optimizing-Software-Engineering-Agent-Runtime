@@ -7,7 +7,8 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
-from masa.domain.models import MasaError, canonical
+from masa.domain.models import MasaError, canonical, ContextOverflow
+from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
 from masa.agents.schemas import response_schema
 
@@ -155,6 +156,14 @@ class ChatProvider:
         raw = canonical(payload).encode()
         if len(raw) > 262144:
             raise MasaError("model input byte limit exceeded")
+        # 本地服务（Ollama 等）在输入超出窗口时静默截断而不是报错，所以必须在发出前拦截。云端 API 会明确报错，不需要。
+        # 只在“几乎一定溢出”（下界估算仍超过窗口）时拒绝，避免误杀本来能跑的请求。
+        # Local servers silently truncate an over-long prompt, so guard before sending (cloud APIs fail loudly and need no guard).
+        # Reject only when even the LOWER-bound estimate exceeds the window.
+        if self.config['model_type'] == 'local':
+            low = estimate_tokens_lower(payload['messages'][0]['content'] + payload['messages'][1]['content'])
+            if low > self.config['context_limit']:
+                raise ContextOverflow(low, self.config['context_limit'], self.config['model'])
         request = urllib.request.Request(
             self.config["base_url"].rstrip("/") + endpoint,
             data=raw,

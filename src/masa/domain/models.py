@@ -10,6 +10,24 @@ class MasaError(Exception):
     """An actionable configuration, policy, or integrity error."""
 
 
+class ContextOverflow(MasaError):
+    """输入几乎一定放不进模型的上下文窗口；在发出请求之前拒绝（不计费、不被服务端静默截断）。
+    The input will almost certainly not fit the model's context window; rejected BEFORE sending (no cost, no silent truncation)."""
+
+    def __init__(self, estimated_tokens, limit, model=''):
+        self.estimated_tokens, self.limit, self.model = estimated_tokens, limit, model
+        super().__init__(f'context overflow: input needs at least ~{estimated_tokens} tokens but {model or "the model"} has a {limit}-token window; '
+                         'rejected before sending because local servers silently truncate instead of failing')
+
+
+def stage_error(exc, message):
+    """阶段包装器用它构造要抛出的异常：上下文溢出必须保持类型（路由器据此升级），其余沿用带 run 编号的 MasaError。
+    Stage wrappers raise this: a context overflow keeps its type so the router can act on it; everything else is the usual MasaError."""
+    if isinstance(exc, ContextOverflow):
+        return ContextOverflow(exc.estimated_tokens, exc.limit, exc.model)
+    return MasaError(message)
+
+
 def canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 

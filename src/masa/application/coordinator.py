@@ -5,7 +5,7 @@ from masa.application.workflow import WorkflowCheckpoint
 from masa.application.check_policy import format_only, test_revision_needed, repeated_assertion_signature
 from masa.application.router import Router, RoutingStop
 from masa.runtime.engine import Runtime
-from masa.domain.models import MasaError
+from masa.domain.models import ContextOverflow, MasaError
 import time
 
 
@@ -105,6 +105,16 @@ class WorkflowCoordinator:
                 return call(provider,feedback)
             except RoutingStop:
                 raise
+            except ContextOverflow as overflow:
+                # 这个候选的窗口放不下输入：记一次失败，并用估算的真实输入量重新选择，路由器会跳过放不下的候选。
+                # 固定模式没有别的候选可选，直接把明确的错误交给用户。
+                # This candidate's window cannot hold the input: record it and re-route with the measured need so too-small
+                # candidates are skipped. Fixed mode has no alternative, so the explicit error surfaces.
+                if not self._ladder:
+                    raise
+                self._fail(chain,decision)
+                need=overflow.estimated_tokens
+                continue
             except MasaError:
                 reason=self._retryable(self.job.get('run_id')) if n<self._attempts_allowed(chain)-1 else None
                 if not reason:
@@ -217,6 +227,18 @@ class WorkflowCoordinator:
                                                'review_mode':'automatic'})
             phase('verification',verified,attempt)
             result=Runtime(store,runner).execute(verified)
+            # 验证在进程崩溃时被中断：引擎保守地标 needs_attention 且不重放。工具幂等，所以新建一次验证（最多两次），
+            # 而不是把它当成“验证失败”去修复。A verification interrupted by a crash is re-run as a new run (at most twice).
+            reverified=0
+            while result['status']=='needs_attention' and reverified<2 and str(store.run(verified)['reason']).startswith('uncertain_tool_state'):
+                reverified+=1
+                verified=generation.reverify(verified)
+                phase('verification',verified,attempt)
+                result=Runtime(store,runner).execute(verified)
+            if result['status']=='needs_attention':
+                self.job.update(status='completed',result={'id':verified},
+                                note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
+                return
             if result['status']=='succeeded':
                 self.job.update(status='completed',result={'id':verified})
                 return

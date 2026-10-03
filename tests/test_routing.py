@@ -260,3 +260,52 @@ class SnapshotTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OverflowRoutingTests(unittest.TestCase):
+    """本地候选放不下输入：升级到窗口更大的候选；固定模式则明确报错。 A too-small window escalates; fixed mode surfaces the error."""
+
+    def run_with(self, local, cloud, mode='ladder'):
+        from masa.domain.models import ContextOverflow  # noqa: F401
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = Store(Path(temp.name))
+        self.addCleanup(store.close)
+        providers = {'local': local, 'cloud': cloud}
+        snapshot = {'version': 1, 'mode': 'ladder', 'policy': dict(DEFAULT_POLICY), 'budget': dict(BUDGET),
+                    'candidates': [fake_entry('local', 1, 'small', 'local', context_limit=16384), fake_entry('cloud', 2, 'big', 'cloud')]}
+        jobs = Jobs(Path(temp.name))
+        jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0,
+                       'request': {'goal': 'Build a CLI'}}
+        router = Router(store, snapshot, lambda entry: providers[entry['id']]) if mode == 'ladder' else Router.fixed(store, local)
+        WorkflowCoordinator(store, FakeExecutor(), None if mode == 'ladder' else local, jobs['job'], router=router).run()
+        return store, jobs['job']
+
+    def test_overflowing_local_model_is_skipped_for_a_bigger_window(self):
+        from masa.domain.models import ContextOverflow
+
+        class TooSmall(ScriptedProvider):
+            def respond(self, context):
+                if context['purpose'] == 'project_developer':
+                    raise ContextOverflow(20_000, 16_384, 'small')
+                return super().respond(context)
+
+        local, cloud = TooSmall('small', lambda: None), ScriptedProvider('big', lambda: None)
+        store, job = self.run_with(local, cloud)
+        self.assertEqual(job['status'], 'completed')
+        self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded')
+        generation = [d for r in store.all_runs() for e in store.events(r['id']) if e['type'] == 'route_decided'
+                      for d in [e['payload']] if d['chain'] == 'generation']
+        self.assertEqual([(d['model'], d['reason']) for d in generation], [('small', 'start_lowest_eligible'), ('big', 'escalate')])
+
+    def test_fixed_mode_surfaces_the_explicit_overflow(self):
+        from masa.domain.models import ContextOverflow
+
+        class TooSmall(ScriptedProvider):
+            def respond(self, context):
+                if context['purpose'] == 'project_developer':
+                    raise ContextOverflow(20_000, 16_384, 'small')
+                return super().respond(context)
+
+        with self.assertRaises(ContextOverflow):
+            self.run_with(TooSmall('small', lambda: None), None, mode='fixed')

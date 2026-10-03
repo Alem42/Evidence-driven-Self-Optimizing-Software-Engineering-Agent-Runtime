@@ -108,7 +108,7 @@ class Router:
 
     def decide(self, role, chain, history, *, anchor_run=None, need=None):
         """返回 (Decision, provider|None, spend)。stop 时 provider 为 None。 Provider is None on a stop decision."""
-        need_tokens = estimate_tokens(need) if need is not None else 0
+        need_tokens = need if isinstance(need, int) else (estimate_tokens(need) if need is not None else 0)
         spend = self.spend(anchor_run)
         decision = route(role, chain, self.candidates, history, spend, self.budget, self.policy, need_tokens, self.unavailable)
         provider = self.provider(decision.candidate) if decision.action == 'use' else None
