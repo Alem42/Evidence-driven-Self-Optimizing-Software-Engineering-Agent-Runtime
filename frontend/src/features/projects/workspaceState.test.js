@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultPanel,taskSummary,currentStage,pollTarget,codeReference,displayStatus} from './workspaceState.js';
+import {defaultPanel,taskSummary,currentStage,pollTarget,codeReference,displayStatus,liveStatus} from './workspaceState.js';
 const detail=(status,data={})=>({run:{status,data}});
 test('successful verification opens code; drafts and failures remain actionable',()=>{
   assert.equal(defaultPanel(detail('succeeded',{project_bundle:{approval_ref:'saved'}})),'code');
@@ -34,4 +34,16 @@ test('business waits and model-stage failures are not mislabeled as tool failure
   assert.equal(displayStatus(detail('paused',{project_plan:{status:'waiting_for_input'}})),'等待回答');
   assert.equal(displayStatus(detail('paused',{project_plan:{kind:'code',status:'awaiting_review'}})),'等待确认代码');
   assert.equal(taskSummary(detail('failed',{project_plan:{kind:'code',status:'failed'}})).title,'模型阶段未完成');
+});
+test('live status stops old Planning and distinguishes clarification, review, failure and interruption',()=>{
+  assert.deepEqual(liveStatus({status:'waiting_for_input',stage:'project_planner'},false),{title:'等待你补充需求',active:false});
+  assert.equal(liveStatus({status:'completed',stage:'project_planner'},false,detail('paused',{project_plan:{kind:'spec',status:'awaiting_review'}})).title,'等待你确认方案');
+  assert.equal(liveStatus({status:'failed',stage:'planning'},false).title,'流程失败 · 查看失败记录');
+  assert.equal(liveStatus({status:'interrupted',stage:'project_planner'},false).active,false);
+  assert.equal(liveStatus({status:'running',stage:'project_tester'},true).title,'Tester 测试方案');
+});
+test('a background job keeps reporting execution while an unrelated historical run is inspected',()=>{
+  const old={run:{id:'old',status:'paused',data:{project_plan:{status:'waiting_for_input'}}}};
+  assert.equal(liveStatus({run_id:'live',status:'running',stage:'project_developer'},true,old).title,'Developer 生成');
+  assert.equal(liveStatus({run_id:'live',status:'failed'},false,{run:{id:'new',status:'succeeded',data:{}}}).title,'验证通过');
 });

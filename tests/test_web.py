@@ -16,6 +16,36 @@ from test_runtime import FakeExecutor
 
 
 class WebTests(unittest.TestCase):
+    def test_unexpected_fault_returns_traceable_safe_diagnostic(self):
+        """程序错误返回可追踪 JSON，而不是断开连接或泄露异常原文。 Faults return traceable JSON without disconnecting or exposing raw messages."""
+        with patch.object(self.console,'projects',side_effect=AttributeError('synthetic-secret-body')):
+            status,result=self.request('/api/projects')
+        self.assertEqual(status,500,result)
+        self.assertTrue(result['request_id'])
+        status,logs=self.request('/api/diagnostics')
+        self.assertEqual(status,200,logs)
+        self.assertEqual(logs['errors'][-1]['request_id'],result['request_id'])
+        self.assertEqual(logs['errors'][-1]['error_type'],'AttributeError')
+        self.assertTrue(logs['errors'][-1]['frames'])
+        self.assertNotIn('synthetic-secret-body',self.console.diagnostics.path.read_text())
+        self.assertEqual(self.request('/api/diagnostics',headers={'X-MASA-Token':''})[0],403)
+
+    def test_hardware_endpoint_and_active_worker_bootstrap(self):
+        """只读硬件路由需认证；跨标签忙碌来自真实线程。 Hardware stays authenticated and worker liveness crosses tabs."""
+        with patch.object(self.console.hardware,'snapshot',return_value={'gpu':{'available':False}}):
+            self.assertEqual(self.request('/api/hardware')[1]['gpu']['available'],False)
+            self.assertEqual(self.request('/api/hardware',headers={'X-MASA-Token':''})[0],403)
+        done=threading.Event()
+        self.console.jobs['active']={'status':'running','run_id':None,'mode':'ollama','phase':'load','started':time.time()}
+        self.console.job_thread=threading.Thread(target=lambda:done.wait(10))
+        self.console.job_thread.start()
+        try:
+            _,boot=self.request('/api/bootstrap')
+            self.assertEqual(boot['active_job']['job_id'],'active')
+        finally:
+            done.set();self.console.job_thread.join(10)
+        self.assertIsNone(self.request('/api/bootstrap')[1]['active_job'])
+
     def test_real_profile_snapshot_and_legacy_event_preserve_clarification(self):
         """真实配置快照与旧标量事件不得隐藏澄清。 Real profile snapshots and legacy scalar events must not hide questions."""
         from masa.infrastructure.llm import ChatProvider

@@ -12,6 +12,7 @@ import webbrowser
 
 from masa.domain.models import MasaError
 from masa.application.console import Console
+from masa.infrastructure.locking import owner_lock
 
 
 STATIC = Path(__file__).parent / "static"
@@ -111,6 +112,10 @@ def make_server(console, port=8765):
                     result = OllamaControl().catalog()
                 elif path == '/api/ollama/action' and write:
                     result = console.ollama_action(body)
+                elif path == '/api/hardware' and not write:
+                    result = console.hardware.snapshot()
+                elif path == '/api/diagnostics' and not write:
+                    result = console.diagnostics.recent()
                 elif path == '/api/generate' and write:
                     result = console.generate(body)
                 elif path == '/api/projects/plan' and write:
@@ -178,27 +183,46 @@ def make_server(console, port=8765):
                 self.send(200, result)
             except (MasaError, ValueError, TypeError) as exc:
                 self.send(400, {"error": str(exc)})
-            except (OSError, sqlite3.Error):
-                self.send(500, {"error": "local storage or tool access failed"})
+            except (BrokenPipeError, ConnectionResetError):
+                return  # The client left; no second response or request replay.
+            except Exception as exc:
+                # 用固定路由类别记录调用位置，不把请求/密钥/异常文字落日志。
+                # Record safe frame locations, never requests, credentials or raw exception text.
+                group = next((g for g in ('projects','runs','jobs','settings','ollama','hardware','diagnostics','bootstrap')
+                              if path.startswith('/api/'+g)), 'other')
+                request_id = console.diagnostics.record(('POST' if write else 'GET')+' /api/'+group, exc)
+                self.send(500, {"error": "后台处理失败，请在本地模型控制的后台诊断中查看。", "request_id": request_id})
 
     return LocalHTTPServer(("127.0.0.1", port), Handler)
 
 
 def serve(state_dir, runner, go, project, port=8765, open_browser=False):
+    """先取得状态目录独占权再恢复任务，失败启动也释放资源。 Own state before recovery and clean up failed starts."""
     if not 0 <= port <= 65535:
         raise MasaError("port must be 0..65535")
     if not all((STATIC / name).is_file() for name in ("index.html", "app.js", "style.css")):
         raise MasaError("frontend missing: run scripts/build-ui.ps1 first")
-    console = Console(state_dir, runner, go, project)
-    server = make_server(console, port)
-    url = f"http://127.0.0.1:{server.server_port}"
-    print(f"MASA console: {url}\nLocal-only; Ctrl+C stops the console and cancels its active run.", flush=True)
-    if open_browser:
-        webbrowser.open(url)
-    try:
-        server.serve_forever(poll_interval=0.2)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-        console.close()
+    # Console 初始化会恢复 Jobs；第二个服务必须在触碰任务状态之前被拒绝。
+    # Console initialization recovers Jobs; reject another server before it mutates jobs.
+    # 独立锁不与 Runtime 的短期工具锁混用，所有端口共享同一目录独占权。
+    # A separate lifetime lock leaves Runtime tool locks free and covers every port.
+    with owner_lock(Path(state_dir).resolve() / "console.lock"):
+        console = Console(state_dir, runner, go, project)
+        server = None
+        try:
+            server = make_server(console, port)
+            url = f"http://127.0.0.1:{server.server_port}"
+            print(f"MASA console: {url}\nLocal-only; Ctrl+C stops the console and cancels its active run.", flush=True)
+            if open_browser:
+                webbrowser.open(url)
+            server.serve_forever(poll_interval=0.2)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            # 端口绑定或 server_close 失败，也必须关闭 Console，再由 OS 释放锁。
+            # Close Console even after bind/server-close failures, then release the OS lock.
+            try:
+                if server is not None:
+                    server.server_close()
+            finally:
+                console.close()

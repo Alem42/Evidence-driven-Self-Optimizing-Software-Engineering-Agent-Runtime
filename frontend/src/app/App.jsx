@@ -29,7 +29,7 @@ export default function App(){
     <div className="sidebar-bottom"><button onClick={()=>setOllama(true)}>本地模型控制</button><button onClick={()=>setSettings(true)}>API 与模型</button><small>{w.online?'● 服务已连接':'○ 正在连接'}</small></div></aside>
     <main className="workspace"><header className="workspace-header"><div><span className="eyebrow">PROJECT WORKBENCH</span><h1 title={w.view?.title}>{w.view?.title||'新建项目'}</h1></div><div className="actions"><button onClick={()=>setOllama(true)}>本地模型</button><button onClick={()=>setSettings(true)}>模型设置</button></div></header>
       {w.error&&<div className="error global-error" role="alert">{w.error}<button onClick={()=>w.setError('')}>关闭</button></div>}
-      <LiveStatus job={w.job} working={w.working}/>
+      <LiveStatus job={w.job} detail={w.detail} working={w.working}/>
       {w.job?.status==='running'&&!w.following&&<div className="background-job">后台任务仍在继续。<button onClick={()=>w.track(w.job)}>返回执行中的项目</button></div>}
       {w.boot?.active_run&&w.boot.active_run!==w.selected&&<div className="background-job">另一个版本正在运行工具检查。<button onClick={()=>w.select(w.boot.active_run)}>查看当前验证</button></div>}
       {!w.working&&w.boot?.interrupted_jobs?.length>0&&<details className="recovery-list"><summary>{w.boot.interrupted_jobs.length} 个任务可检查恢复</summary>{w.boot.interrupted_jobs.map(j=><div className="action-bar" key={j.job_id}><code>{j.job_id.slice(0,8)}</code><span>{j.phase}</span><button onClick={()=>resume(j.job_id)}>恢复</button>{j.run_id&&<button onClick={()=>w.select(j.run_id)}>查看</button>}</div>)}</details>}

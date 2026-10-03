@@ -24,6 +24,8 @@ from masa.application.projects import Projects
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
+from masa.infrastructure.hardware import HardwareMonitor
+from masa.infrastructure.diagnostics import DiagnosticLog
 
 
 from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, repeated_assertion_signature
@@ -39,6 +41,8 @@ class Console:
             Path(project),
         )
         self.settings = Settings(self.root)
+        self.hardware = HardwareMonitor()
+        self.diagnostics = DiagnosticLog(self.root)
         self.lock = threading.RLock()
         self.active = None
         self.worker = None
@@ -52,11 +56,21 @@ class Console:
 
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
+        # 持久 running 不足以代表活着；以当前进程的 worker 为准。
+        # A persisted running row does not prove liveness; consult this process's worker.
+        active_job = None
+        if self.job_thread and self.job_thread.is_alive():
+            for ident, job in list(self.jobs.items()):
+                if job.get('status') == 'running':
+                    active_job = {k: job.get(k) for k in ('run_id','mode','phase','started','model','provider')}
+                    active_job.update(job_id=ident,status='running',stage=job.get('phase'))
+                    break
         return {
             "console_version": "workspace-console-v2",
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
+            "active_job": active_job,
             "interrupted_jobs": [{'job_id':ident,'run_id':job.get('run_id'),'phase':job.get('phase')}
                                  for ident,job in self.jobs.items() if job['status']=='interrupted' and job.get('mode')=='auto'],
             "provider": "scripted-v1",
@@ -343,6 +357,7 @@ class Console:
                     result=self.resume_project(rid,body,created) if body.get('resume_project') else (self.revise_project_tests(rid,body,created) if body.get('test_revision') else self.repair_project(rid,body,created) if body.get('repair') else self.generate_project(rid,body,created)) if rid else self.plan_project(body,created)
                     self.jobs[ident].update(status='completed',result=result)
                 except Exception as exc:
+                    self.diagnostics.record('worker:project',exc)
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'project job failed')
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
             self.job_thread.start()
@@ -384,6 +399,7 @@ class Console:
                     result=run_application(store,Runner(self.runner_path,self.go_path),rid,body.get('argv',[]),self.app_cancel.is_set)
                     self.jobs[ident].update(status='completed',result={'id':rid,'app_result':result})
                 except Exception as exc:
+                    self.diagnostics.record('worker:application',exc)
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'application execution interrupted; inspect saved evidence')
                 finally:
                     self.app_run_id=None;store.close()
@@ -434,6 +450,7 @@ class Console:
                 try:
                     WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job)).run()
                 except Exception as exc:
+                    self.diagnostics.record('worker:auto',exc)
                     self.jobs[ident].update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'automatic project job failed')
                 finally:store.close()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-auto-project-job')
