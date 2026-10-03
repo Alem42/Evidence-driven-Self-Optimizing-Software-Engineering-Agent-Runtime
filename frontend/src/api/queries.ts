@@ -2,7 +2,7 @@
 // Server state with adaptive polling; revisiting a task shows cached data instantly.
 import { useQuery, type Query } from '@tanstack/react-query';
 import { api } from './client';
-import type { Bootstrap, CheckResult, Detail, Job, ProjectSummary, ProjectView, Profiles, RepairAdvice } from './types';
+import type { Bootstrap, CheckResult, TaskReport, Detail, Job, ProjectSummary, ProjectView, Profiles, RepairAdvice } from './types';
 
 export const qk = {
   bootstrap: ['bootstrap'] as const,
@@ -15,6 +15,7 @@ export const qk = {
   results: (id: string, rev: string) => ['results', id, rev] as const,
   logs: (id: string) => ['logs', id] as const,
   ollama: ['ollama'] as const,
+  report: (id: string) => ['report', id] as const,
 };
 
 const isLive = (d?: Detail): boolean => Boolean(d && (d.active || d.role_active));
@@ -71,3 +72,12 @@ export const useResults = (detail?: Detail) => {
     enabled: Boolean(detail),
   });
 };
+
+/** 任务报告：token、耗时、工具调用。执行中 2 秒刷新，空闲时 10 秒。 Task report, polled faster while live. */
+export const useReport = (runId?: string, live = false) =>
+  useQuery({
+    queryKey: qk.report(runId ?? ''),
+    queryFn: ({ signal }) => api<TaskReport>('/projects/' + runId + '/report', undefined, signal),
+    enabled: Boolean(runId),
+    refetchInterval: live ? 2000 : 10_000,
+  });

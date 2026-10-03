@@ -192,3 +192,72 @@ export interface SourceFinding {
   line?: number;
   message: string;
 }
+
+// ───────── 任务报告（/api/projects/:id/report）Task report ─────────
+export interface ModelCall {
+  run_id: string;
+  step_id: string | null;
+  invocation_id: string | null;
+  attempt_no: number | null;
+  status: 'completed' | 'failed' | 'pending';
+  model: string;
+  provider?: string | null;
+  kind: 'local' | 'cloud' | 'unknown';
+  started: number | null;
+  finished: number | null;
+  duration_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  tokens_per_second?: number | null;
+  error?: string | null;
+}
+
+export interface ToolCallRow {
+  run_id: string;
+  step_id: string;
+  operation: string;
+  kind: 'tool' | 'gate' | 'app';
+  status: string;
+  started: number | null;
+  finished: number | null;
+  duration_ms: number | null;
+  exit_code: number | null;
+  isolated: boolean;
+}
+
+export interface UsageRow {
+  calls: number;
+  failed: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  model_ms: number;
+}
+
+export interface TaskReport {
+  project_id: string;
+  selected_run_id: string;
+  latest_run_id: string;
+  title: string;
+  outcome: 'succeeded' | 'failed' | 'cancelled' | 'waiting' | 'running';
+  started_at: number | null;
+  ended_at: number | null;
+  wall_seconds: number | null;
+  totals: {
+    calls: number;
+    failed_calls: number;
+    unknown_usage_calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    local_tokens: number;
+    cloud_tokens: number;
+    model_ms: number;
+  };
+  by_model: (UsageRow & { model: string; kind: 'local' | 'cloud' | 'unknown' })[];
+  by_step: (UsageRow & { step_id: string | null })[];
+  calls: ModelCall[];
+  tools: ToolCallRow[];
+  versions: { run_id: string; status: string; kind: string }[];
+}

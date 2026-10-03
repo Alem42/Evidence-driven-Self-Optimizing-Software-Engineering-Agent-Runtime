@@ -1,4 +1,4 @@
-import { lazy, Suspense, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useRef, type CSSProperties } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { TABS, type TaskTab } from '../../app/nav';
@@ -27,6 +27,17 @@ export function TaskPage() {
   const view = useView(runId, live);
   const inspectorOpen = useUi((s) => s.inspectorOpen);
   const inspectorWidth = useUi((s) => s.inspectorWidth);
+
+  // 手动流程里的验证没有后台任务：由“执行中 → 空闲”的转变触发报告。必须在任何提前 return 之前调用 hook。
+  // Manual verification has no job: trigger on live→idle. Hooks must run before any early return.
+  const wasLive = useRef(false);
+  const dd = detail.data;
+  const nowLive = Boolean(dd?.active || dd?.role_active);
+  useEffect(() => {
+    if (wasLive.current && !nowLive && dd?.run.data.project_bundle && ['succeeded', 'failed'].includes(dd.run.status) && !useUi.getState().reportFor)
+      useUi.getState().set({ reportFor: dd.run.id });
+    wasLive.current = nowLive;
+  }, [nowLive, dd?.run.id, dd?.run.status, dd?.run.data.project_bundle]);
 
   if (detail.isError && (detail.error as { status?: number }).status === 404)
     return <Empty title="找不到这个任务" action={<Button onClick={() => navigate('/')}>返回新任务</Button>}>它可能已被清理，或后端状态目录不同。</Empty>;

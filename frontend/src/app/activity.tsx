@@ -9,6 +9,8 @@ import { qk, useBootstrap } from '../api/queries';
 import type { Bootstrap, Job } from '../api/types';
 import { useToasts, useUi } from '../stores/ui';
 import { stageLabels } from '../entities/status';
+import { isTerminal } from '../entities/report';
+import type { TaskReport } from '../api/types';
 
 interface Activity {
   bootstrap?: Bootstrap;
@@ -72,6 +74,12 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       qc.invalidateQueries({ queryKey: qk.bootstrap });
       qc.invalidateQueries({ queryKey: ['results'] });
       hooks?.onDone?.(job);
+      // 任务进入终态时自动弹出报告（等待你处理的不弹）。 Auto-open the report once the task reaches a terminal outcome.
+      const reportRun = job.result?.id ?? job.run_id;
+      if (reportRun && job.status !== 'failed' && job.status !== 'interrupted')
+        api<TaskReport>('/projects/' + reportRun + '/report')
+          .then((r) => { qc.setQueryData(qk.report(reportRun), r); if (isTerminal(r.outcome)) useUi.getState().set({ reportFor: reportRun }); })
+          .catch(() => undefined);
       const newRun: string | undefined = job.result?.id;
       if (job.status === 'failed') push({ tone: 'bad', text: `${label}失败：${job.error ?? '未知错误'}`, to: job.run_id ? '/task/' + job.run_id : undefined, action: '查看记录' });
       else if (job.status === 'interrupted') push({ tone: 'bad', text: `${label}被中断，可在侧栏恢复。` });

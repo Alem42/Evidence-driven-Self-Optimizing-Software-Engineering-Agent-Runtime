@@ -124,6 +124,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = console.bootstrap()
                 elif path == '/api/projects' and not write:
                     result = console.projects()
+                elif len(parts)==4 and parts[:2]==['api','projects'] and parts[3]=='report' and not write:
+                    result = console.project_report(parts[2])
                 elif len(parts)==3 and parts[:2]==['api','projects'] and not write:
                     result = console.projects(parts[2])
                 elif path == "/api/settings":

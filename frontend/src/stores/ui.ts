@@ -13,6 +13,8 @@ interface UiState {
   graphExpanded: boolean;
   /** 跟随执行：开启时自动切到正在执行的版本；手动选择会关闭。 Follow the executing version; manual picks turn it off. */
   follow: boolean;
+  /** 正在展示任务报告的版本；不持久化。 Run whose report dialog is open (transient). */
+  reportFor: string | null;
   set: (patch: Partial<Omit<UiState, 'set'>>) => void;
 }
 
@@ -25,9 +27,10 @@ export const useUi = create<UiState>()(
       inspectorOpen: true,
       graphExpanded: false,
       follow: true,
+      reportFor: null,
       set: (patch) => set(patch),
     }),
-    { name: 'masa.ui.v1' },
+    { name: 'masa.ui.v1', partialize: ({ reportFor: _r, ...rest }) => rest },
   ),
 );
 

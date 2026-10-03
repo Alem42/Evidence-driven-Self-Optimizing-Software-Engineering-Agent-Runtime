@@ -7,6 +7,7 @@
 - 新 Ollama 草稿逐文件生成并保存恢复点；旧草稿/云端 bulk 兼容。单文件和修复有路径契约，CLI 入口须 package main；未知响应不自动重发。
 - 测试私有包导入及编译器类型错误正确走测试修订；普通断言失败不因此自动修测试，实现修复仍冻结测试。
 - 前端 v3（2026-10-03）：与后端彻底分离，TypeScript 重写；后端 `masa serve` 只提供 API。任务历史、顶栏真实状态、可展开的执行图（含版本分支）、对话·决策流、CodeMirror 代码页（出错行标红）、验证、日志、独立设置中心。详见 [PLAN_FRONTEND_REDESIGN](PLAN_FRONTEND_REDESIGN.md)。
+- 任务报告（2026-10-03）：`GET /api/projects/:id/report` 汇总 token/耗时/工具调用，前端顶栏常驻并在任务终态自动弹窗；自动流程新增 gofmt 规范化、带原因的契约重试、测试-规格仲裁、Go 预检。详见 [进展007](progress/PROGRESS_2026-10-03_007_usage-report-and-auto-fixes.md)。
 - 前端常驻阶段/时间/最近实际速率/文件进度，明确待答、待审、取消收尾和失败。Ollama 控制页已有硬件与后台诊断折叠面板。硬件只读有界缓存、不提权；故障日志不保存请求正文或密钥。
 - 已有标准库 Go CLI 规划、单轮澄清、审批、发布快照、真实检查、独立 Gate、运行与关联修订。Coordinator 串行，RoleRuntime/Jobs 持久化；没有任意动态图或并行决策 Agent。
 

@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { ActivityProvider } from './activity';
 import { Sidebar } from '../features/sidebar/Sidebar';
 import { Toasts } from '../shared/Toasts';
+import { ReportDialog } from '../features/report/ReportDialog';
 import { useUi } from '../stores/ui';
 
 /** 拖动分隔条调整面板宽度。 Drag handle for resizing a pane. */
@@ -43,6 +44,7 @@ export function Shell() {
           <Outlet />
         </main>
       </div>
+      <ReportDialog />
       <Toasts />
     </ActivityProvider>
   );

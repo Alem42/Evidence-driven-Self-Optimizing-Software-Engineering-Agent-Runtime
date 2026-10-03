@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-03 晚**：新增任务报告（usage.py）与自动化修复（gofmt 规范化/契约重试/测试规格仲裁/Go 预检），见进展007；`scripts/e2e_live.py` 可用任意 profile 做真实端到端并打印逐次用量，`scripts/show_failures.py` 打印版本链失败证据。
+
 **2026-10-03 前端 v3**：前后端已分离。后端 `python -m masa serve`（纯 API，/api/session 发令牌，CORS 白名单），前端在 `frontend/`（React19+TS+Vite+TanStack Query+zustand+CodeMirror），`npm run dev` 或 `scripts/dev.ps1`。旧 `frontend/src` 与 `interfaces/http/static` 已删除。结构、扩展点、已知后端卡顿根因与待办见 [PLAN_FRONTEND_REDESIGN](../PLAN_FRONTEND_REDESIGN.md)（第 5、6 节）。下一步后端优先：只读连接/增量接口/变更游标，再做路由与预算；前端按扩展点接入。
 
 2026-10-03。先 git status，读 MEMORY/STATUS/PLAN_NEXT_STAGE 和 [进展005](../progress/PROGRESS_2026-10-03_005_local-recovery.md)。代码讲解在 guides/USER_LOCAL_RUNTIME_AND_RECOVERY。

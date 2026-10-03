@@ -21,6 +21,7 @@ from masa.infrastructure.workspaces import verify_snapshot
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
+from masa.application.usage import task_report
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
@@ -28,7 +29,7 @@ from masa.infrastructure.hardware import HardwareMonitor
 from masa.infrastructure.diagnostics import DiagnosticLog
 
 
-from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, repeated_assertion_signature
+from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature
 
 
 class Console:
@@ -99,6 +100,15 @@ class Console:
             store.db.execute('BEGIN')
             return Projects(store).view(rid) if rid else {'projects':Projects(store).catalog()}
         finally:store.close()
+
+    def project_report(self, rid):
+        """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""
+        store = Store(self.root)
+        try:
+            store.db.execute('BEGIN')
+            return task_report(store, rid)
+        finally:
+            store.close()
 
     def list_runs(self):
         store = Store(self.root)
