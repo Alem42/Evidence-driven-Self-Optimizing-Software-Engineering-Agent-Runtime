@@ -23,6 +23,8 @@ export const stageLabels: Record<string, string> = {
   verification: 'Go 验证',
   repair: '修复实现',
   project_repair: '修复实现',
+  project_diagnoser: 'Diagnoser 诊断',
+  project_triage: '可行性初筛',
   test_revision: '修订测试',
   project_test_revision: '修订测试',
   planning_retry: '重试测试方案',

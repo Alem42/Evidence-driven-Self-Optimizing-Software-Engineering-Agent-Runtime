@@ -159,6 +159,9 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                 elif path == '/api/ollama/orphans/clean' and write:
                     from masa.infrastructure import orphans
                     result = orphans.clean_orphans()
+                elif path == '/api/workflows/fix-v1' and not write:
+                    from masa.application.workflows import FIX_V1
+                    result = FIX_V1
                 elif path == '/api/hardware' and not write:
                     result = console.hardware.snapshot()
                 elif path == '/api/diagnostics' and not write:
@@ -191,6 +194,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                         action = parts[3]
                         if action == "resume":
                             result = console.resume(rid, body.get('pause_after'))
+                        elif action == 'auto-fix':
+                            result = console.auto_fix(rid, body)
                         elif action == 'rerun':
                             result = console.rerun(rid)
                         elif action == 'approve-project':

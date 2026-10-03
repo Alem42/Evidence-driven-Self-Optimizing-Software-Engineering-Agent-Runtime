@@ -299,7 +299,10 @@ class Console:
                  'result': store.read(row['result_ref']) if row['result_ref'] else None}
                 for row in store.tools(rid)]
             completed=[(c['operation'],c['result']) for c in checks if c['result']]
-            return {'checks':checks,'repair_advice':repair_advice(completed)}
+            from masa.application import ownership
+            analysis=ownership.analyse(completed)
+            return {'checks':checks,'repair_advice':repair_advice(completed),
+                    'ownership':{'primary':analysis['primary'],'lines':ownership.describe(analysis)}}
         finally:
             store.close()
 
@@ -387,6 +390,7 @@ class Console:
                     self.jobs[ident].update(status=status,result=result)
                 except Exception as exc:
                     self._fail_job(ident,exc,'worker:project')
+                finally:self._release_local_models()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
             self.job_thread.start()
             return {'job_id':ident}
@@ -441,6 +445,29 @@ class Console:
         self.app_cancel.set()
         return {'id':rid}
 
+    def _release_local_models(self):
+        """手动任务结束后释放所有已启用的本地 Ollama 模型：不留空挂的模型，显卡随时可还给用户。尽力而为。
+        After a manual job, unload every enabled local Ollama model so no model idles in VRAM. Best effort."""
+        try:
+            for ident,_ in self.settings.ready_profiles():
+                profile=self.settings.profiles.get(ident,{})
+                if profile.get('model_type')=='local':
+                    try:self.settings.provider(ident).unload()
+                    except Exception:pass
+        except Exception:pass
+
+    def auto_fix(self, rid, body):
+        """从一次失败的验证继续自动修复：跳过规划与生成，沿用任务的路由与预算设置。
+        Continue the automatic repair from a failed verification (no re-planning); history is rebuilt from the version lineage."""
+        store=Store(self.root)
+        try:
+            run=store.run(rid)
+            goal=run['data'].get('goal')
+        finally:store.close()
+        request=dict(body or {})
+        request.update(goal=goal,continue_from=rid,auto_verify=True)
+        return self.start_autonomous_project_job(request)
+
     def start_autonomous_project_job(self, body, resume_job=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
@@ -481,7 +508,7 @@ class Console:
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
+                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
             from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)

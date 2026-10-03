@@ -299,6 +299,9 @@ class ChatProvider:
             except json.JSONDecodeError as exc:
                 # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
                 # Distinguish a received invalid response from uncertain transport, without exposing content.
+                # 标记“已收到”，协调器才会带原因重试/升级，而不是把它当成网络失败直接中止（真实模拟中 DeepSeek 返回截断 JSON 即因此中止）。
+                # Mark it as RECEIVED so the coordinator retries/escalates instead of aborting as if it were a transport failure.
+                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[]}
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
             # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
             # Record response shape only, never code, thinking or raw exception text.

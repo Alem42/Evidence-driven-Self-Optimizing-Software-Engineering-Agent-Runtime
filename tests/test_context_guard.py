@@ -107,5 +107,29 @@ class CalibrationTests(unittest.TestCase):
             self.assertEqual(tokens.HIGH, (0.4, 0.7))  # 坏文件不改变已加载的系数 / bad files never change loaded values
 
 
+class InvalidJsonTests(unittest.TestCase):
+    """真实模拟（c903b2b7 之后）：DeepSeek 返回截断 JSON，协调器把它当成网络失败而中止，没有升级到下一等级。
+    A received-but-malformed response must be marked RECEIVED so the coordinator retries/escalates instead of aborting."""
+    def test_a_malformed_json_answer_is_flagged_as_received(self):
+        import io, json as _json
+
+        class Response(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read1(self, n=-1): return self.read(n)
+
+        body = _json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': '{"files": [{"path": "a.go", "content": "x'}}],
+                            'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}}).encode()
+
+        class Open:
+            def open(self, *a, **k): return Response(body)
+
+        with patch('masa.infrastructure.llm.urllib.request.build_opener', lambda *a: Open()):
+            p = provider('cloud', 100000)
+            with self.assertRaisesRegex(MasaError, 'JSON invalid'):
+                p.respond(context(200))
+        self.assertTrue(p.contract_diagnostic)  # coordinator._retryable() 据此判定“已收到、可带原因重试/升级”
+
+
 if __name__ == '__main__':
     unittest.main()
