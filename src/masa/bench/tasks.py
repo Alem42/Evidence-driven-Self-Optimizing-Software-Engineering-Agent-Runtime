@@ -418,6 +418,33 @@ TASKS = (
           ([], 'x?y?z?\t\nx?y?z?\txz\n(a(b|c)d)+\tabdacd\n(a(b|c)d)+\tabdac\n[a-z]+[0-9]?\tabc7\n[a-z]+[0-9]?\tabc77\n')), ref_regex, ('parser', 'recursion')),
 )
 
+from masa.bench import tasks_mid as _mid  # noqa: E402
+
+# 补充任务：在 L6–L9 之间加梯度（云端模型到 L8 都能做，需要更细的区分）。
+# Extra tasks adding gradient between L6 and L9 (cloud models clear L8, so finer separation was needed).
+_EXTRA = (
+    Task('coins', 6, '硬币凑数', '写一个 CLI：标准输入第一行是整数 amount，第二行是若干个互不相同的正整数面额（空格分隔，每种面额数量不限）。'
+         '输出一行两个整数（空格分隔）：凑出 amount 所需的最少硬币数（无法凑出输出 -1），以及凑出 amount 的不同组合数（组合与顺序无关）。amount 为 0 时输出 0 1。',
+         (([], '11\n1 2 5\n'), ([], '3\n2\n'), ([], '0\n1 2\n'), ([], '10\n10\n'), ([], '7\n2 4 6\n')), _mid.ref_coins, ('dp',)),
+    Task('intervals', 7, '区间合并', '写一个 CLI：标准输入每行两个整数“start end”（start ≤ end，闭区间）。把有重叠或首尾相接的区间合并（[1,3] 与 [3,5] 合并成 [1,5]；'
+         '[1,2] 与 [3,4] 只是整数相邻，不合并）。按 start 升序每行输出一个合并后的区间“start end”，最后一行输出“total N”，N 是合并后所有区间覆盖的整数个数。没有输入时只输出 total 0。',
+         (([], '1 3\n2 6\n8 10\n15 18\n'), ([], '1 2\n3 4\n'), ([], '5 5\n1 10\n'), ([], ''), ([], '4 6\n1 4\n')), _mid.ref_intervals, ('sorting', 'edge_semantics')),
+    Task('flat', 7, 'JSON 展平', '写一个 CLI：标准输入是一个 JSON 对象（可嵌套对象和数组，值只有字符串、整数、true、false、null）。把它展平成多行，每行“路径=值”：'
+         '对象成员用点连接，数组元素用[下标]（例如 a.b[0].c）；字符串值去掉引号输出，整数、true、false 原样输出，null 输出 null；空对象或空数组输出“路径=<empty>”（顶层空对象不输出任何内容）。'
+         '所有行按路径字典序升序。输入不是合法 JSON，或顶层不是对象时，向标准错误输出 error，标准输出为空，退出码为 1。',
+         (([], '{"a":{"b":[1,{"c":"x"}]},"d":true}'), ([], '{"k":null,"e":{},"l":[],"n":[[1,2],[3]]}'), ([], '{}'), ([], '[1,2]'), ([], '{"a":'), ([], '{"b":"two words","a":-5}')),
+         _mid.ref_flat, ('parser', 'sorting', 'stdlib')),
+    Task('bigint', 8, '大整数运算', '写一个 CLI：不使用 math/big 包。标准输入有两行，各是一个不含前导零的非负十进制整数（可能有几十到几百位）。输出两行：先是它们的和，再是它们的积。',
+         (([], '12\n34\n'), ([], '999\n1\n'), ([], '0\n12345\n'), ([], '123456789012345678901234567890\n987654321098765432109876543210\n'),
+          ([], '99999999999999999999999999999999999999999999999999\n99999999999999999999999999999999999999999999999999\n')), _mid.ref_bigint, ('arithmetic', 'edge_semantics')),
+    Task('sched', 8, '任务调度', '写一个 CLI：每行描述一个任务“任务名 耗时 依赖任务名……”（空格分隔，耗时是正整数，可以没有依赖，任务名不含空格）。任务必须等所有依赖完成才能开始，可以同时执行任意多个任务。'
+         '输出：第一行是全部任务完成所需的最短总时间；之后每个任务一行“任务名 最早完成时间”，按任务名字典序升序。存在循环依赖或依赖了不存在的任务时只输出一行 error；没有任务时输出 0。',
+         (([], 'a 3\nb 2 a\nc 4 a\nd 1 b c\n'), ([], 'x 1 y\ny 1 x\n'), ([], 'a 2 ghost\n'), ([], ''), ([], 'p 5\nq 2\nr 1 p q\n')), _mid.ref_sched, ('graph', 'dp', 'errors')),
+    Task('sudoku', 9, '数独求解', '写一个 CLI：标准输入是 9 行，每行 9 个字符，数字 1–9 表示已填，. 表示空格。解这个数独（题目保证最多只有一个解）：有解输出 9 行完整的解（每行 9 个数字，没有空格）；'
+         '已填的数字本身冲突或者无解则输出一行 NO SOLUTION。',
+         (([], _mid._grid(_mid.PUZZLE)), ([], _mid._grid(_mid.CONFLICT)), ([], _mid._grid(_mid.DEAD_END))), _mid.ref_sudoku, ('search', 'recursion')),
+)
+TASKS = tuple(sorted(TASKS + _EXTRA, key=lambda t: t.level))  # 稳定排序：同级保持原顺序 / stable: same level keeps order
 BY_ID = {t.id: t for t in TASKS}
 
 # 套餐：从“几分钟的金丝雀”到“跑很久的完整评测”。caps 是默认上限，界面里都可以改。
@@ -427,9 +454,9 @@ SUITES = {
                'total_cloud_tokens': 120_000, 'total_minutes': 15},
     'quick': {'title': '快速（约 20 分钟）', 'desc': '覆盖 L0–L5 的代表任务，各 1 次，能看出能力大致落在哪一级。', 'tasks': ['hello', 'upper', 'sum', 'wc', 'csv_sum', 'lcs'], 'repeats': 1,
               'total_cloud_tokens': 400_000, 'total_minutes': 45},
-    'standard': {'title': '标准（约 1.5 小时）', 'desc': 'L0–L6 的 13 个任务，各 2 次，用来比较 runtime 改动前后的通过率。', 'tasks': [t.id for t in TASKS if t.level <= 6], 'repeats': 2,
+    'standard': {'title': '标准（约 1.5 小时）', 'desc': 'L0–L6 的全部任务，各 2 次，用来比较 runtime 改动前后的通过率。', 'tasks': [t.id for t in TASKS if t.level <= 6], 'repeats': 2,
                  'total_cloud_tokens': 1_500_000, 'total_minutes': 180},
-    'full': {'title': '完整（数小时）', 'desc': '全部 10 个等级的 17 个任务，各 3 次；高等级任务当前的模型多半做不出来，用来观察上限。', 'tasks': [t.id for t in TASKS], 'repeats': 3,
+    'full': {'title': '完整（数小时）', 'desc': '全部 10 个等级的任务，各 3 次；高等级任务当前的模型多半做不出来，用来观察上限。', 'tasks': [t.id for t in TASKS], 'repeats': 3,
              'total_cloud_tokens': 4_000_000, 'total_minutes': 480},
 }
 

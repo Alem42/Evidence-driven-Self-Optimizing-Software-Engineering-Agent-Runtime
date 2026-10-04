@@ -70,6 +70,40 @@ class ReferenceTests(unittest.TestCase):
         rx = NL.join(['a*b\taaab', 'a*b\tb', 'a.c\tac', '(ab)+\taba', 'cat|dog\tcow']) + NL
         self.assertEqual(ref('regex', stdin=rx)[0], NL.join(['match', 'match', 'no match', 'no match', 'no match']) + NL)
 
+    def test_the_mid_level_tasks_match_hand_computed_answers(self):
+        self.assertEqual(ref('coins', stdin='11' + NL + '1 2 5' + NL)[0], '3 11' + NL)  # 5+5+1；11 种组合（经典结论） / classic: 11 ways
+        self.assertEqual(ref('coins', stdin='3' + NL + '2' + NL)[0], '-1 0' + NL)
+        self.assertEqual(ref('coins', stdin='0' + NL + '1 2' + NL)[0], '0 1' + NL)
+        merged = ref('intervals', stdin=NL.join(['1 3', '2 6', '8 10', '15 18']) + NL)[0]
+        self.assertEqual(merged, NL.join(['1 6', '8 10', '15 18', 'total 13']) + NL)  # 6 + 3 + 4 个整数 / 6+3+4 integers
+        self.assertEqual(ref('intervals', stdin='1 2' + NL + '3 4' + NL)[0], NL.join(['1 2', '3 4', 'total 4']) + NL)  # 整数相邻不合并 / adjacent integers do not merge
+        self.assertEqual(ref('intervals', stdin='4 6' + NL + '1 4' + NL)[0], '1 6' + NL + 'total 6' + NL)  # 首尾相接要合并 / touching ends merge
+        self.assertEqual(ref('flat', stdin='{"a":{"b":[1,{"c":"x"}]},"d":true}')[0], NL.join(['a.b[0]=1', 'a.b[1].c=x', 'd=true']) + NL)
+        self.assertEqual(ref('flat', stdin='{"e":{},"l":[]}')[0], NL.join(['e=<empty>', 'l=<empty>']) + NL)
+        self.assertEqual(ref('flat', stdin='[1]'), ('', 1))
+        self.assertEqual(ref('flat', stdin='{"a":'), ('', 1))
+        self.assertEqual(ref('bigint', stdin='999' + NL + '1' + NL)[0], '1000' + NL + '999' + NL)
+        self.assertEqual(ref('bigint', stdin='12' + NL + '34' + NL)[0], '46' + NL + '408' + NL)
+        self.assertEqual(ref('sched', stdin=NL.join(['a 3', 'b 2 a', 'c 4 a', 'd 1 b c']) + NL)[0], NL.join(['8', 'a 3', 'b 5', 'c 7', 'd 8']) + NL)
+        self.assertEqual(ref('sched', stdin='x 1 y' + NL + 'y 1 x' + NL)[0], 'error' + NL)  # 环 / cycle
+        self.assertEqual(ref('sched', stdin='a 2 ghost' + NL)[0], 'error' + NL)  # 依赖不存在 / missing dependency
+        self.assertEqual(ref('sched', stdin='')[0], '0' + NL)
+
+    def test_sudoku_solves_the_wikipedia_puzzle_and_rejects_bad_grids(self):
+        from masa.bench import tasks_mid
+        solved = ref('sudoku', stdin=tasks_mid._grid(tasks_mid.PUZZLE))[0].split(NL)
+        self.assertEqual(solved[0], '534678912')  # 维基百科上这道题的已知解 / the known solution of this puzzle
+        self.assertEqual(solved[8], '345286179')
+        self.assertTrue(all(sorted(row) == list('123456789') for row in solved[:9]))  # 每行 1–9 各一次 / each row is a permutation
+        self.assertEqual(ref('sudoku', stdin=tasks_mid._grid(tasks_mid.CONFLICT))[0], 'NO SOLUTION' + NL)
+        self.assertEqual(ref('sudoku', stdin=tasks_mid._grid(tasks_mid.DEAD_END))[0], 'NO SOLUTION' + NL)
+
+    def test_the_gap_between_l6_and_l9_now_has_gradient(self):
+        levels = [t.level for t in TASKS]
+        for level in (6, 7, 8):
+            self.assertGreaterEqual(levels.count(level), 2)  # 每个中间等级至少两题，避免单题运气 / at least two tasks per middle level
+        self.assertEqual(levels, sorted(levels))
+
     def test_the_library_is_well_formed(self):
         self.assertEqual(len({t.id for t in TASKS}), len(TASKS))
         self.assertEqual({t.level for t in TASKS}, set(range(10)))  # 10 个等级都有题 / every level has a task

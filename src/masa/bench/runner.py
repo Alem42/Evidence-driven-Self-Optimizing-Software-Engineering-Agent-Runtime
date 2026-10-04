@@ -105,8 +105,10 @@ class BenchRunner:
 
     # ───────────── 外部接口 / public ─────────────
     def snapshot(self):
+        # server_time：让前端用本地时钟每秒走表（不必等下一次轮询），并校正本地与服务端的时间差。
+        # server_time lets the UI tick every second on its own clock and correct for clock skew.
         with self.lock:
-            return {**self.state, 'records': list(self.records), 'aggregate': aggregate(self.records)}
+            return {**self.state, 'records': list(self.records), 'aggregate': aggregate(self.records), 'server_time': self.clock()}
 
     def stop(self):
         self.stop_flag.set()
@@ -117,12 +119,15 @@ class BenchRunner:
             self._set(state='running')
             plan = [(BY_ID[t], i) for i in range(self.config['repeats']) for t in self.config['task_ids']]
             plan.sort(key=lambda item: (item[1], item[0].level))  # 先一轮、等级从低到高：预算不够时先保住低等级的数据 / low levels first when budget runs out
+            self._set(plan=[{'task': t.id, 'level': t.level, 'repeat': r + 1} for t, r in plan])  # 完整队列，界面据此显示“做完/正在做/待做” / the whole queue for the UI
             for index, (task, repeat) in enumerate(plan):
                 reason = self._cap_reason()
                 if reason or self.stop_flag.is_set():
                     self._add(self._skipped(task, repeat, reason or '用户停止'))
                     continue
-                self._set(current={'task': task.id, 'level': task.level, 'repeat': repeat + 1, 'index': index + 1, 'started': self.clock()})
+                limits = self._limits(task)
+                self._set(current={'task': task.id, 'level': task.level, 'repeat': repeat + 1, 'index': index + 1, 'started': self.clock(), 'stage': 'starting',
+                                   'model': None, 'kind': None, 'run_cloud_tokens': 0, 'limit_seconds': limits['seconds'], 'limit_cloud_tokens': limits['cloud_tokens']})
                 record = self._guarded(task, repeat)
                 self._add(record)
                 self._save()
@@ -137,6 +142,13 @@ class BenchRunner:
     def _set(self, **fields):
         with self.lock:
             self.state.update(fields)
+        self.on_change(self.state)
+
+    def _patch_current(self, **fields):
+        """更新“正在跑的任务”的实时信息（阶段、模型、本次已用 token）。 Update live info about the running task (stage, model, tokens so far)."""
+        with self.lock:
+            if self.state.get('current'):
+                self.state['current'] = {**self.state['current'], **fields}
         self.on_change(self.state)
 
     def _add(self, record):
@@ -237,6 +249,7 @@ class BenchRunner:
         job_id = console.start_autonomous_project_job(body)['job_id']
         deadline = started + limits['seconds'] + 30  # 路由层按“活跃秒数”停，这里是不依赖它的硬性墙钟线 / hard wall clock independent of the routing budget
         timed_out = False
+        polls = 0
         while True:
             job = console.project_job(job_id)
             if job['status'] == 'waiting_for_input':
@@ -251,6 +264,8 @@ class BenchRunner:
                     if console.project_job(job_id)['status'] != 'running':
                         break
                 break
+            self._live(console, job, started, polls)
+            polls += 1
             time.sleep(POLL_SECONDS)
         job = console.project_job(job_id)
         record['seconds'] = round(self.clock() - started, 1)
@@ -286,6 +301,23 @@ class BenchRunner:
             return record
         finally:
             store.close()
+
+    def _live(self, console, job, started, polls):
+        """每次轮询：当前阶段与模型；每 3 次轮询再算一次本次已用的云端 token（算账要读账本，不必每次都做）。
+        On every poll: current stage and model; the cloud tokens used so far are recomputed every 3rd poll (it reads the ledger)."""
+        fields = {'stage': job.get('stage') or job.get('phase'), 'model': job.get('current_model'), 'kind': job.get('current_kind')}
+        if polls % 3 == 0 and job.get('run_id'):
+            try:
+                from masa.application.usage import task_report
+                from masa.infrastructure.store import Store
+                store = Store(console.root)
+                try:
+                    fields['run_cloud_tokens'] = task_report(store, job['run_id'])['totals']['cloud_tokens']
+                finally:
+                    store.close()
+            except Exception:
+                pass
+        self._patch_current(**fields)
 
     @staticmethod
     def _answer_first(console, job):

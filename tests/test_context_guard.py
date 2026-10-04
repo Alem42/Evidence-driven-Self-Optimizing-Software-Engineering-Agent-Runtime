@@ -131,5 +131,27 @@ class InvalidJsonTests(unittest.TestCase):
         self.assertTrue(p.contract_diagnostic)  # coordinator._retryable() 据此判定“已收到、可带原因重试/升级”
 
 
+    def test_a_cut_off_answer_is_flagged_as_received_so_it_can_be_retried(self):
+        # 真实评测：云端一次生成整包时输出被截断（finish_reason=length），系统把它当成不可重试的错误直接中止。
+        import io, json as _json
+
+        class Response(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read1(self, n=-1): return self.read(n)
+
+        body = _json.dumps({'choices': [{'finish_reason': 'length', 'message': {'content': '{"files": {"a.go": "package a'}}],
+                            'usage': {'prompt_tokens': 1, 'completion_tokens': 8192, 'total_tokens': 8193}}).encode()
+
+        class Open:
+            def open(self, *a, **k): return Response(body)
+
+        with patch('masa.infrastructure.llm.urllib.request.build_opener', lambda *a: Open()):
+            p = provider('cloud', 100000)
+            with self.assertRaisesRegex(MasaError, 'incomplete output'):
+                p.respond(context(200))
+        self.assertEqual(p.contract_diagnostic['action_type'], 'incomplete')
+
+
 if __name__ == '__main__':
     unittest.main()

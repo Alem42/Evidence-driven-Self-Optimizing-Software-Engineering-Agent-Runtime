@@ -58,11 +58,12 @@ class AutomaticProjectTests(unittest.TestCase):
     def test_auto_retries_tester_without_repeating_planner(self):
         """复用已验证规格，只重试失败的 Tester 响应。 Reuse a validated spec and retry only Tester failures."""
         class FlakyTester(CompositeProvider):
-            def __init__(self):self.planner_calls=0;self.tester_calls=0
+            def __init__(self):self.planner_calls=0;self.tester_calls=0;self.tester_contexts=[]
             def respond(self,context):
                 if context['purpose']=='project_planner':self.planner_calls+=1
                 if context['purpose']=='project_tester':
                     self.tester_calls+=1
+                    self.tester_contexts.append(dict(context))
                     if self.tester_calls<3:return [{'invalid':'shape'}]
                 return super().respond(context)
         with tempfile.TemporaryDirectory() as temp:
@@ -75,6 +76,12 @@ class AutomaticProjectTests(unittest.TestCase):
             job=console.project_job(started['job_id'])
             self.assertEqual(job['status'],'completed')
             self.assertEqual((provider.planner_calls,provider.tester_calls),(1,3))
+            # 重试时必须告诉 Tester 上次为什么被拒绝（评测里 hello 因为三次完全相同的上下文而连续失败）。
+            # A retry must tell the Tester why the last answer was rejected (a benchmark task failed on three identical contexts).
+            self.assertNotIn('previous_attempt_error',provider.tester_contexts[0])
+            for context in provider.tester_contexts[1:]:
+                self.assertIn('previous_attempt_error',context)
+                self.assertIn('EXACTLY the fields operation, purpose',context['previous_attempt_error'])
 
     def test_failed_test_source_requires_test_revision(self):
         """冻结测试导致的编译错误不能反复交给实现修复。 A frozen test compile error cannot be fixed by implementation-only repair."""

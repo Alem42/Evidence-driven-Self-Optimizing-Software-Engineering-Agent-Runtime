@@ -305,6 +305,20 @@ class VacuousTestDeveloper(LocalDeveloper):
         return super().respond(context)
 
 
+
+class ReadingMainDeveloper(LocalDeveloper):
+    """第一次的 main.go 自己读 stdin（评测里 wc/lru 的真实问题）；之后写成薄入口。 The first main.go reads stdin itself (the real wc/lru bug); later answers are thin."""
+    def respond(self, context):
+        path = context.get('target_path')
+        if path == 'cmd/app/main.go' and not [c for c in self.contexts if c.get('target_path') == path]:
+            self.contexts.append(copy.deepcopy(context))
+            nl = chr(10)
+            source = 'package main' + nl + nl + 'import (' + nl + chr(9) + '"bufio"' + nl + chr(9) + '"fmt"' + nl + chr(9) + '"os"' + nl + ')' + nl + nl
+            source += 'func main() {' + nl + chr(9) + 's := bufio.NewScanner(os.Stdin)' + nl + chr(9) + 'for s.Scan() {' + nl + chr(9) + chr(9) + 'fmt.Println(s.Text())' + nl + chr(9) + '}' + nl + '}' + nl
+            return validate_response(context, {'files': {path: source}}, '')
+        return super().respond(context)
+
+
 @unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
 class SyntaxGateTests(unittest.TestCase):
     approved_parent = LocalGenerationTests.approved_parent
@@ -370,6 +384,20 @@ class SyntaxGateTests(unittest.TestCase):
                 self.assertEqual(len(tries), 2)
                 self.assertIn('no test ever fails', tries[1]['previous_attempt_error'])
                 self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref']), FILES)
+            finally:
+                store.close()
+
+    def test_a_main_go_that_reads_input_itself_is_rewritten_before_it_can_pass_unnoticed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = ReadingMainDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                tries = [c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']
+                self.assertEqual(len(tries), 2)
+                self.assertIn('reads or parses input', tries[1]['previous_attempt_error'])
+                self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref'])['cmd/app/main.go'], FILES['cmd/app/main.go'])
             finally:
                 store.close()
 

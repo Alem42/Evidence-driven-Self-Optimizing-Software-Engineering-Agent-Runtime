@@ -22,7 +22,9 @@ export interface BenchAggregate { overall: BenchOverall; by_level: Record<string
 export interface BenchConfig { suite: string; task_ids: string[]; repeats: number; total_cloud_tokens: number; total_minutes: number; per_run_scale: number }
 export interface BenchResult {
   id: string; state: 'starting' | 'running' | 'done' | 'stopped' | 'error' | 'idle'; config: BenchConfig; started: number; total: number; message?: string | null;
-  current: { task: string; level: number; repeat: number; index: number; started: number } | null;
+  current: { task: string; level: number; repeat: number; index: number; started: number; stage?: string | null; model?: string | null; kind?: 'local' | 'cloud' | null; run_cloud_tokens?: number; limit_seconds?: number; limit_cloud_tokens?: number } | null;
+  plan?: { task: string; level: number; repeat: number }[];
+  server_time?: number;
   used: { cloud_tokens: number; seconds: number }; records: BenchRecord[]; aggregate: BenchAggregate; commit?: string | null; models?: string[];
 }
 export interface BenchSummary {

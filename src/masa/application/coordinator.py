@@ -641,9 +641,14 @@ class WorkflowCoordinator:
                     continue
                 if retry==2:
                     raise
-                # 仅复用已校验 Planner 结果，Tester 最多额外调用两次。
-                # Reuse validated Planner output and retry Tester at most twice.
+                # 仅复用已校验 Planner 结果，Tester 最多额外调用两次；重试时把被拒绝的原因和契约要求告诉它。
+                # Reuse validated Planner output and retry Tester at most twice, telling it why the last answer was rejected and what the contract requires.
                 self._fail('planning',decision)
+                rejected=self._retryable(failed_id) or str(failed.get('error') or 'response rejected by validation')
+                planner_feedback=(rejected+'. Contract reminder: return {"checks":[...]} with 1 to 3 checks; each check has EXACTLY the fields operation, purpose, '
+                                  'acceptance_indices (a list of zero-based integers that are valid acceptance indices) and, only when concrete cases are given, cases; '
+                                  'operation is go_test (required), go_vet or go_fmt_check, each at most once; every case has exactly name, input, expected, level '
+                                  '(unit, integration or cli), where input is a string (may be empty) and name and expected are non-empty strings.')[:1000]
                 reuse=failed_id
                 phase('planning_retry',failed_id)
         meta=store.run(plan)['data']['project_plan']
@@ -677,8 +682,14 @@ class WorkflowCoordinator:
                         candidate,_=self._pick('project_tester','gen_tests',need=[goal,approved],stage='generation')
                         if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local':
                             test_provider=candidate
+                    # 云端整包生成被截断后，本任务的生成改为逐文件（记在 job 里，之后的重试不再回到整包）。
+                    # After a cloud whole-bundle answer was cut off, generation for this task goes file by file (remembered in the job).
+                    if fb and 'incomplete output' in str(fb) and not self.job.get('per_file'):
+                        self.job['per_file']=True
+                        self._emit('generation_per_file',{'reason':'cloud output was cut off'},always=True)
                     return generation.generate(plan,provider,lambda rid:phase('generation',rid),
-                                               resume_id=resume,retry_feedback=fb,test_provider=test_provider)
+                                               resume_id=resume,retry_feedback=fb,test_provider=test_provider,
+                                               per_file=bool(self.job.get('per_file')))
                 # 逐文件生成时 previous_files 会随文件数增长：按每个已生成文件约 4000 字符估计（启发式，写在文档里）。
                 # previous_files grows with each file call: roughly 4000 chars per already generated file (a documented heuristic).
                 growth='x'*4000*max(0,len(approved['spec']['files'])-1)

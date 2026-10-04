@@ -4,6 +4,7 @@ Reproduces the real task c903b2b7: a test import cycle AND an implementation syn
 no-op revisions must not waste rounds, the Diagnoser judges when stuck, a stopped run can be continued, and no model idles."""
 import tempfile
 import unittest
+from masa.domain.models import MasaError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -535,3 +536,31 @@ class RepairWantsTestsTests(FixFlowCase):
         self.assertTrue(self.events(store, 'repair_wants_tests'))
         nodes = [step['node'] for step in self.trace(store)]
         self.assertLess(nodes.index('repair'), nodes.index('revise'))
+
+
+class TruncatingCloud(Model):
+    """整包生成时输出被截断（真实评测：L9 的 regex）；逐文件生成时正常。 Whole-bundle output is cut off; per-file output is fine."""
+    def respond(self, context):
+        if context['purpose'] == 'project_developer':
+            self.contexts.append(context)
+            self.world.log.append(f'project_developer {self.name} {context.get("target_path") or "bundle"}')
+            if not context.get('target_path'):
+                self.contract_diagnostic = {'action_type': 'incomplete', 'top_keys': []}  # 真实提供方在抛错前就这样标记 / the real provider marks it before raising
+                raise MasaError('model refused or returned incomplete output')
+            return {context['target_path']: FILES[context['target_path']]}
+        return super().respond(context)
+
+
+class CloudPerFileTests(FixFlowCase):
+    def test_a_cut_off_cloud_bundle_switches_generation_to_one_file_per_call(self):
+        world = World(impl_ok=True, test_ok=True)
+        local, cloud = Model('local-m', 'local', world), TruncatingCloud('cloud-m', 'cloud', world)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'start_level_by_role': {'project_developer': 2}})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, WorldExecutor(world), None, jobs['job'], router=router).run()
+        calls = [entry for entry in world.log if entry.startswith('project_developer cloud-m')]
+        self.assertTrue(calls[0].endswith('bundle'))  # 第一次整包，被截断 / the first call is the whole bundle and is cut off
+        self.assertTrue(all(not c.endswith('bundle') for c in calls[1:]) and len(calls) > 2)  # 之后逐文件 / then file by file
+        self.assertTrue(self.events(store, 'generation_per_file'))
+        self.assertTrue(jobs['job'].get('per_file'))
+        self.assertEqual(jobs['job'].get('status'), 'completed')  # 生成成功，任务走完 / generation succeeded, the task finished

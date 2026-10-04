@@ -290,6 +290,9 @@ class ChatProvider:
             if choice.get("finish_reason") != "stop" or choice["message"].get(
                 "refusal"
             ):
+                # 输出被截断（或被拒绝）也是“已收到响应”：标记出来，协调器才会重试/升级/切到逐文件，而不是当成传输失败直接中止。
+                # A cut-off (or refused) answer was RECEIVED too: mark it so the coordinator retries, escalates or switches to per-file generation instead of aborting.
+                self.contract_diagnostic = {'action_type': 'incomplete', 'top_keys': []}
                 raise MasaError("model refused or returned incomplete output")
             content = choice["message"]["content"]
             if not isinstance(content, str):

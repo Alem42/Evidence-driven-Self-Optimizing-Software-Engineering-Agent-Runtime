@@ -18,6 +18,7 @@ from masa.application.snippets import source_snippets  # noqa: E402
 from masa.application.goimports import fix_imports, fix_module_imports  # noqa: E402
 from masa.application.leaks import leak_messages  # noqa: E402
 from masa.application.testlint import test_problem_messages  # noqa: E402
+from masa.application.entrypoint import entry_problem_messages  # noqa: E402
 
 
 def concise_failure_evidence(result, files=None):
@@ -99,10 +100,17 @@ class ProjectGeneration:
         return out
 
     @staticmethod
-    def _refuse_leaks(changes):
+    def _refuse_leaks(changes, base=None):
         """修复/测试修订的产物里出现提示词片段就当作被拒绝（协调器会带原因重试或升级）。
         A repair or test revision that contains prompt text is rejected (the coordinator retries or escalates with the reason)."""
-        leaked = leak_messages(changes)
+        # 入口规则只拦“新引入”的违规：原来的 main.go 已经读输入时，修复不该因为保留原样而被拒绝，否则已有的问题会把整个修复卡死。
+        # The entrypoint rule only blocks NEWLY introduced violations: when the original main.go already reads input, a repair must not be refused for keeping it
+        # (an existing problem would otherwise block the whole repair).
+        entry = entry_problem_messages(changes)
+        if base:
+            already = set(entry_problem_messages(base))
+            entry = {path: message for path, message in entry.items() if path not in already}
+        leaked = {**leak_messages(changes), **entry}
         if leaked:
             raise MasaError('generated Go files contain harness prompt text (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(leaked.items())[:3]))
 
@@ -110,7 +118,7 @@ class ProjectGeneration:
         """用 gofmt -e 做确定性语法检查（不需要编译整个项目），返回 {路径: 带行列号的错误}。工具链缺失时视为无错误。
         Deterministic parse check with `gofmt -e` (no project build needed): {path: error text with line:column}. Missing toolchain = no errors."""
         found = dict(leak_messages(files, paths))  # 提示词泄漏不需要工具链 / prompt leaks need no toolchain
-        for path, message in test_problem_messages(files, paths).items():  # 空转的测试同理 / so do vacuous tests
+        for path, message in {**test_problem_messages(files, paths), **entry_problem_messages(files, paths)}.items():  # 空转的测试、读输入的 main.go 同理 / so do vacuous tests and a main.go that reads input
             found[path] = (found[path] + chr(10) if path in found else '') + message
         go = getattr(self.executor, 'go_executable', None)
         if not go:
@@ -131,7 +139,7 @@ class ProjectGeneration:
                 found[path] = (found[path] + chr(10) if path in found else '') + chr(10).join(text.strip().splitlines()[:5])[:600]
         return found
 
-    def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None, test_provider=None):
+    def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None, test_provider=None, per_file=False):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         original = self.store.run(parent)
         plan = original['data'].get('project_plan', {})
@@ -154,6 +162,11 @@ class ProjectGeneration:
             frozen_config = snapshot.get('config', {}) if isinstance(snapshot, dict) else {}
             local_files = (config.get('model_type') == 'local'
                            and frozen_config.get('protocol', snapshot.get('protocol')) == 'ollama')
+            # 云端默认一次生成全部文件（省调用）；一旦输出被截断（项目大、超过单次输出上限），就改成逐文件生成：
+            # 每次只写一个文件，不再受整包输出上限约束（评测里 L9 的 regex 因此死在生成阶段）。
+            # Cloud models generate everything in one call by default (fewer calls); once the output is cut off (a big project over the single-call limit)
+            # switch to one file per call so the whole-bundle limit no longer applies (a benchmark L9 task died at generation for exactly this).
+            local_files = local_files or bool(per_file)
             if local_files:
                 metadata['generation_mode'] = 'files-v1'
             calls = (len(approved['spec']['files']) - 1) * (1 + SYNTAX_RETRIES) if local_files else 2
@@ -273,7 +286,7 @@ class ProjectGeneration:
                 'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report})
             if any(path not in original_files for path in changes):
                 raise MasaError('repair changed a file outside supplied context; request a broader revision')
-            self._refuse_leaks(changes)
+            self._refuse_leaks(changes,base['files'])
             files=validate_repair(changes,base['files'])
             # 冻结的测试与 go.mod 不动；其余 Go 文件统一格式化，修复不再被 gofmt 卡住。
             # Frozen tests/go.mod stay untouched; format every other Go file so repairs are never blocked by gofmt.
@@ -319,7 +332,7 @@ class ProjectGeneration:
         if purpose=='project_repair' and any(path not in context['original_files'] for path in changes):
             raise MasaError('repair changed a file outside supplied context; request a broader revision')
         validator=validate_test_revision if purpose=='project_test_revision' else validate_repair
-        self._refuse_leaks(changes)
+        self._refuse_leaks(changes,base['files'])
         files=validator(changes,base['files'])
         tests_scope=purpose=='project_test_revision'
         files=self._gofmt(files,[p for p in files if (p.endswith('_test.go') if tests_scope else p!='go.mod' and not p.endswith('_test.go'))],rid)
@@ -361,7 +374,7 @@ class ProjectGeneration:
             changes=self.planning.call(rid,provider,'project_test_revision',{
                 'goal':data['goal'],**approved,'original_files':base['files'],
                 'failure_evidence':evidence,'feedback':feedback})
-            self._refuse_leaks(changes)
+            self._refuse_leaks(changes,base['files'])
             files=validate_test_revision(changes,base['files'])
             files=self._gofmt(files,[p for p in files if p.endswith('_test.go')],rid)
             validate_files(files,approved['spec'])

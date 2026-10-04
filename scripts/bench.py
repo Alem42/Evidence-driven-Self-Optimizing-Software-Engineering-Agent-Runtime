@@ -22,6 +22,9 @@ from masa.bench.tasks import SUITES, TASKS  # noqa: E402
 
 
 def main():
+    # Windows 终端默认 GBK，打不出 ✓ ≠ 等符号：统一用 UTF-8 输出。 Windows consoles default to GBK and cannot print the result glyphs.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser()
     ap.add_argument('--suite', default='canary', choices=sorted(SUITES) + ['custom'])
     ap.add_argument('--tasks', help='逗号分隔的任务 id（覆盖套餐的任务） / comma separated task ids')

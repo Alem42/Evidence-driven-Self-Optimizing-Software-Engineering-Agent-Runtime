@@ -4,6 +4,11 @@ import { api } from '../../api/client';
 import type { BenchCatalog, BenchRecord, BenchResult, BenchRow, BenchStatus, BenchSummary } from '../../api/bench-types';
 import { Badge, Button, Card, Field, Notice, Segmented } from '../../shared/ui';
 import { fmtDuration, fmtTokens } from '../../entities/report';
+import { stageLabels } from '../../entities/status';
+import { useUi } from '../../stores/ui';
+import { useProfiles } from '../../api/queries';
+import { byRouting, profileLevel } from '../../entities/profiles';
+import { Link } from 'react-router-dom';
 
 // 一键评测：套餐 + 三层上限（单次运行 / 整个评测 / 随时停止）+ 结果表 + 与历史对比。
 // One-click benchmark: presets, three layers of limits, a results table and comparison with history.
@@ -47,6 +52,11 @@ export function BenchSection() {
   const [picked, setPicked] = useState<string[]>([]);
   const [shown, setShown] = useState<string | null>(null);
   const [baseId, setBaseId] = useState('');
+  // 评测用“模型与次序”里勾选的模型（和新任务一致）；没有勾选就用全部已启用的。
+  // The benchmark uses the models ticked in "Model order" (same as new tasks); all enabled models when nothing is ticked.
+  const selectedModels = useUi((x) => x.selectedModels);
+  const profiles = useProfiles().data?.profiles ?? [];
+  const chosen = profiles.filter((p) => p.enabled && (!selectedModels || selectedModels.includes(p.id))).sort(byRouting);
 
   const preset = cat?.suites[suite];
   useEffect(() => {
@@ -59,7 +69,7 @@ export function BenchSection() {
 
   const running = ['running', 'starting'].includes(status.data?.state ?? '');
   const start = useMutation({
-    mutationFn: () => api('/bench/start', { suite, task_ids: picked, repeats, total_cloud_tokens: tokens, total_minutes: minutes, per_run_scale: scale }),
+    mutationFn: () => api('/bench/start', { suite, task_ids: picked, repeats, total_cloud_tokens: tokens, total_minutes: minutes, per_run_scale: scale, ...(selectedModels ? { model_ids: selectedModels } : {}) }),
     onSuccess: () => {
       setShown(null);
       qc.invalidateQueries({ queryKey: ['bench'] });
@@ -104,6 +114,10 @@ export function BenchSection() {
             <input type="number" min={20} max={400} step={10} value={scale} disabled={running} onChange={(e) => setScale(Number(e.target.value))} />
           </Field>
         </div>
+        <p className="hint">
+          使用的模型与次序：{chosen.map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '（没有可用模型）'}。
+          <Link to="/settings/order?from=new"> 在“模型与次序”里调整</Link>
+        </p>
         <details>
           <summary>任务（{picked.length} 个）与各自的等级</summary>
           <ul className="bench-tasks">
@@ -179,25 +193,70 @@ export function BenchSection() {
   );
 }
 
+/** 每秒走一次的本地时钟，并用服务端时间校正偏差：数字在两次轮询之间也会动。 A 1 s local clock corrected by the server time, so numbers move between polls. */
+function useClock(serverTime?: number) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  const [skew, setSkew] = useState(0);
+  useEffect(() => {
+    if (serverTime) setSkew(serverTime - Date.now() / 1000);
+  }, [serverTime]);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now + skew;
+}
+
 function Progress({ r, cat }: { r: BenchResult; cat: BenchCatalog }) {
+  const now = useClock(r.server_time);
   const cur = r.current;
   const title = cur ? cat.tasks.find((t) => t.id === cur.task)?.title : null;
+  const elapsed = Math.max(0, now - r.started);
+  const runElapsed = cur ? Math.max(0, now - cur.started) : 0;
+  const finished = new Map(r.records.map((x) => [x.task + '#' + x.repeat, x]));
+  const doneCount = r.records.length;
   return (
     <Card title="进行中" tone="running">
-      <div className="budget">
-        <Bar label="进度" used={r.records.length} limit={r.total} fmt={String} />
-        <Bar label="云端 token" used={r.used.cloud_tokens} limit={r.config.total_cloud_tokens} fmt={fmtTokens} />
-        <Bar label="时间" used={r.used.seconds} limit={r.config.total_minutes * 60} fmt={(n) => fmtDuration(n * 1000)} />
+      <div className="bench-live">
+        <span className="spin" aria-hidden />
+        <strong>已用 {fmtDuration(elapsed * 1000)}</strong>
+        <span className="muted">/ 上限 {r.config.total_minutes} 分钟</span>
+        <span className="muted">· 已完成 {doneCount}/{r.total}</span>
       </div>
-      <p>
-        {cur ? (
-          <>
-            正在跑 <Badge>L{cur.level}</Badge> <strong>{title}</strong> 第 {cur.repeat} 次（{cur.index}/{r.total}）
-          </>
-        ) : (
-          '准备中…'
-        )}
-      </p>
+      <div className="budget">
+        <Bar label="总进度" used={doneCount} limit={r.total} fmt={String} />
+        <Bar label="总时间" used={elapsed} limit={r.config.total_minutes * 60} fmt={(n) => fmtDuration(n * 1000)} />
+        <Bar label="云端 token（累计）" used={r.used.cloud_tokens + (cur?.run_cloud_tokens ?? 0)} limit={r.config.total_cloud_tokens} fmt={fmtTokens} />
+      </div>
+      {cur && (
+        <div className="bench-current">
+          <p>
+            正在跑 <Badge>L{cur.level}</Badge> <strong>{title}</strong> 第 {cur.repeat} 次 · 已 <b>{fmtDuration(runElapsed * 1000)}</b>
+            {cur.stage && <> · 阶段 <b>{stageLabels[cur.stage] ?? cur.stage}</b></>}
+            {cur.model && <> · <span className="chip-static">{cur.kind === 'local' ? '本地 ' : cur.kind === 'cloud' ? 'API ' : ''}{cur.model}</span></>}
+          </p>
+          <div className="budget">
+            {cur.limit_seconds ? <Bar label="本次时间" used={runElapsed} limit={cur.limit_seconds} fmt={(n) => fmtDuration(n * 1000)} /> : null}
+            {cur.limit_cloud_tokens ? <Bar label="本次云端 token" used={cur.run_cloud_tokens ?? 0} limit={cur.limit_cloud_tokens} fmt={fmtTokens} /> : null}
+          </div>
+        </div>
+      )}
+      {r.plan && (
+        <ol className="bench-queue">
+          {r.plan.map((p, i) => {
+            const rec = finished.get(p.task + '#' + p.repeat);
+            const isCur = cur?.task === p.task && cur.repeat === p.repeat;
+            const mark = rec ? GLYPH[rec.status][0] : isCur ? '▶' : '○';
+            return (
+              <li key={i} className={rec ? 'run-' + rec.status : isCur ? 'q-now' : 'q-wait'} title={rec ? `${GLYPH[rec.status][1]} · ${rec.seconds}s · 云端 ${rec.cloud_tokens} tok` : isCur ? '正在进行' : '等待中'}>
+                <span className="q-mark">{mark}</span> L{p.level} {cat.tasks.find((t) => t.id === p.task)?.title ?? p.task}
+                {p.repeat > 1 || r.config.repeats > 1 ? ` #${p.repeat}` : ''}
+                {rec && <small className="muted"> {fmtDuration(rec.seconds * 1000)}</small>}
+              </li>
+            );
+          })}
+        </ol>
+      )}
       <p className="hint">每个任务完成后会立即保存结果；关闭页面不会中断评测。</p>
     </Card>
   );

@@ -103,7 +103,11 @@ class ProjectPlanning:
             validate_spec(spec)
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
-            checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
+            tester_values = {'goal':goal, 'spec':spec}
+            # 复用 Planner 结果重试 Tester 时，带上上次被拒绝的原因：否则上下文和第一次完全一样，同样的输出会连续被拒三次（评测里 hello 因此失败）。
+            # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
+            if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
+            checks = self.call(rid, provider, 'project_tester', tester_values)
             validate_checks(checks,spec,require_coverage=False)
             # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
