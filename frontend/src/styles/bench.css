@@ -1,0 +1,25 @@
+/* ───────── benchmark ───────── */
+.bench { display: flex; flex-direction: column; gap: 14px; }
+.bench .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
+.bench-tasks { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.bench-kpis { gap: 10px; }
+.kpi { display: flex; flex-direction: column; min-width: 130px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.kpi strong { font-size: 20px; }
+.kpi small { font-size: 11px; }
+.bench-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bench-table th, .bench-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.bench-table .runs span { display: inline-block; min-width: 18px; text-align: center; font-weight: 700; cursor: help; }
+.run-pass { color: var(--ok, #2e7d32); }
+.run-gate_fail, .run-error { color: var(--bad, #c0392b); }
+.run-false_pass { color: #d35400; }
+.run-stopped, .run-timeout { color: #b9770e; }
+.run-skipped { color: var(--muted); }
+.rate-bar { display: inline-block; width: 70px; height: 8px; background: var(--line); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.rate-bar i { display: block; height: 100%; }
+.rate-bar .ok { background: var(--ok, #2e7d32); }
+.rate-bar .mid { background: #d4a017; }
+.rate-bar .bad { background: var(--bad, #c0392b); }
+.delta-good { color: var(--ok, #2e7d32); font-size: 12px; }
+.delta-bad { color: var(--bad, #c0392b); font-size: 12px; }
+.chip-static.dim { opacity: 0.5; }
+.scroll-x { overflow-x: auto; }

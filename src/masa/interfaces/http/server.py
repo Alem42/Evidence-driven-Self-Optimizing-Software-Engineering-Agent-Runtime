@@ -162,6 +162,18 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                 elif path == '/api/workflows/fix-v1' and not write:
                     from masa.application.workflows import FIX_V1
                     result = FIX_V1
+                elif path == '/api/bench/tasks' and not write:
+                    result = console.bench_tasks()
+                elif path == '/api/bench/status' and not write:
+                    result = console.bench_status()
+                elif path == '/api/bench/results' and not write:
+                    result = console.bench_results()
+                elif len(parts) == 4 and parts[:3] == ['api', 'bench', 'results'] and not write:
+                    result = console.bench_result(parts[3])
+                elif path == '/api/bench/start' and write:
+                    result = console.bench_start(body)
+                elif path == '/api/bench/stop' and write:
+                    result = console.bench_stop()
                 elif path == '/api/hardware' and not write:
                     result = console.hardware.snapshot()
                 elif path == '/api/diagnostics' and not write:
