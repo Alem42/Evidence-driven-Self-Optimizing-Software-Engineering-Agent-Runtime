@@ -245,6 +245,17 @@ class RunnerTests(unittest.TestCase):
         runner.run()
         self.assertEqual([r['status'] for r in runner.snapshot()['records']], [PASS, 'error', PASS])
 
+    def test_the_ledger_of_a_failed_benchmark_is_kept_but_a_clean_one_is_removed(self):
+        def failing(task, repeat, limits):
+            record = self.passing(task, repeat, limits)
+            return {**record, 'status': GATE_FAIL} if task.id == 'upper' else record
+
+        for run_task, expect_kept in ((failing, True), (self.passing, False)):
+            runner, temp = self.build(run_task)
+            runner.scratch.mkdir(parents=True)
+            runner.run()
+            self.assertEqual(runner.scratch.exists(), expect_kept)
+
     def test_config_validation(self):
         for bad in ({'suite': 'nope'}, {'task_ids': ['ghost']}, {'repeats': 0}, {'total_cloud_tokens': 5}, {'per_run_scale': 1000}, {'repeats': '2'}):
             with self.subTest(bad=bad), self.assertRaises(MasaError):

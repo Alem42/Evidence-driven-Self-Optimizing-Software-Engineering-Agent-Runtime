@@ -393,6 +393,15 @@ class WorkflowCoordinator:
                 return {'noop':True,'halted':False,'noop_count':int(facts.get('noop_count',0))+1}
             except NoProgress as exc:
                 return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+            except MasaError as exc:
+                # 修复实现的模型一再想改冻结的测试/go.mod/文件结构（被校验拒绝）：说明它认为问题在测试里。别让整个任务失败，
+                # 按“最强模型不改实现”同样处理——转去修订测试一次（真实评测里 wc 因此失败过一次）。
+                # A model asked to repair the implementation keeps trying to change frozen files (rejected by validation): it believes the problem is in the tests.
+                # Do not fail the whole task; treat it like "the strongest model will not change the implementation" and revise the tests once (a real benchmark run failed this way).
+                if chain=='fix:implementation' and 'repair cannot change tests' in str(exc) and not facts.get('flipped'):
+                    self._emit('repair_wants_tests',{'reason':str(exc)[:200]},verified,always=True)
+                    return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+                raise
             if used:self.job['pending_fix']={**used,'chain':chain}
             self._log_fix(stage,draft,used)
             return {'draft':draft,'noop':False,'halted':False,'halt_kind':None}

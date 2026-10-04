@@ -492,3 +492,46 @@ class DiagnoserChecksTests(FixFlowCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TouchesFrozenTestsModel(Model):
+    """修复实现时总是改测试文件（会被校验拒绝）。 Always edits the test file when asked to repair the implementation (rejected by validation)."""
+    def respond(self, context):
+        if context['purpose'] == 'project_repair':
+            self.contexts.append(context)
+            self.world.log.append(f'project_repair {self.name}')
+            self.calls += 1
+            return {TEST: context['original_files'][TEST] + chr(10) + '// edited by the repairer'}
+        return super().respond(context)
+
+
+class MisattributedExecutor(FakeExecutor):
+    """失败行看起来属于实现，但真正的问题在测试：只有测试修订之后才消失。 Looks like an implementation error but is cured only by a test revision."""
+    def __init__(self, world):
+        super().__init__(exit_code=1)
+        self.world = world
+
+    def execute(self, request, workspace, cancelled):
+        result = super().execute(request, workspace, cancelled)
+        if request['operation'] == 'go_test':
+            self.world.verifications += 1
+            result['exit_code'] = 0 if self.world.test_ok else 1
+            result['stdout'] = '' if self.world.test_ok else './internal/app/app.go:9:2: undefined: helper'
+        else:
+            result['exit_code'] = 0
+            result['stdout'] = ''
+        return result
+
+
+class RepairWantsTestsTests(FixFlowCase):
+    def test_a_repairer_that_keeps_editing_frozen_tests_sends_the_task_to_test_revision_instead_of_failing_it(self):
+        world = World()
+        local, cloud = TouchesFrozenTestsModel('local-m', 'local', world), TouchesFrozenTestsModel('cloud-m', 'cloud', world)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'prefer_highest_roles': ['project_diagnoser', 'project_test_revision']})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, MisattributedExecutor(world), None, jobs['job'], router=router).run()
+        self.assertTrue(world.test_ok)  # 测试被修订后通过 / passes once the tests are revised
+        self.assertNotEqual(jobs['job'].get('status'), 'failed')
+        self.assertTrue(self.events(store, 'repair_wants_tests'))
+        nodes = [step['node'] for step in self.trace(store)]
+        self.assertLess(nodes.index('repair'), nodes.index('revise'))

@@ -199,6 +199,14 @@ class BenchRunner:
                 self.console.close()
             except Exception:
                 pass
+        # 有未通过的运行就保留这次评测的账本（否则失败的证据随临时目录一起消失，没法排查）；只留最近 3 份。
+        # Keep the ledger when any run did not pass (otherwise the evidence of a failure vanishes with the scratch directory); keep only the newest 3.
+        failed = any(r['status'] not in (PASS, SKIPPED) for r in self.records)
+        if failed and not self.config.get('discard_state'):
+            kept = sorted((p for p in self.scratch.parent.iterdir() if p.is_dir()), key=lambda p: p.name) if self.scratch.parent.exists() else []
+            for old in kept[:-3]:
+                shutil.rmtree(old, ignore_errors=True)
+            return
         shutil.rmtree(self.scratch, ignore_errors=True)
 
     # ───────────── 真实运行一个任务 / run one task for real ─────────────
