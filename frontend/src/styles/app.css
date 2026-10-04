@@ -353,3 +353,15 @@ td.best { font-weight: 700; color: var(--ok); }
 /* ───────── triage ───────── */
 .triage { gap: 6px; } .triage .finding { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px dashed var(--line-strong); }
 .triage-preview { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+
+/* ───────── models strip / process / settings close ───────── */
+.models-strip { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--panel); font-size: 13px; }
+.models-strip summary { cursor: pointer; color: var(--muted); }
+.models-strip dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 0; }
+.models-strip dl > div { display: contents; }
+.models-strip dt { color: var(--muted); } .models-strip dd { margin: 0; font-family: var(--mono); font-size: 12px; }
+.process { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.process li { display: flex; gap: 8px; } .process time { color: var(--muted); font-family: var(--mono); min-width: 54px; }
+.process .p-bad { color: var(--bad, #c0392b); } .process .p-ok { color: var(--ok, #2e7d32); }
+.settings-close { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0; background: var(--bg, transparent); }
+.settings-nav .nav-actions { display: flex; gap: 6px; margin-bottom: 10px; }

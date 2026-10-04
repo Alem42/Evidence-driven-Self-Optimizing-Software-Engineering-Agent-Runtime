@@ -14,7 +14,11 @@ from masa.application.planning import ProjectPlanning, validate_spec
 from masa.infrastructure.workspaces import verify_snapshot
 
 
-def concise_failure_evidence(result):
+from masa.application.snippets import source_snippets  # noqa: E402
+from masa.application.goimports import fix_imports  # noqa: E402
+
+
+def concise_failure_evidence(result, files=None):
     """保留测试输出前后文并提取关键编译/断言诊断。 Preserve bounded context and extract actionable compiler/assertion diagnostics."""
     stdout=result.get('stdout','')
     stderr=result.get('stderr','')
@@ -34,7 +38,7 @@ def concise_failure_evidence(result):
         item=line.strip()
         if item and markers.search(item) and item not in diagnostics:
             diagnostics.append(item[:400])
-    return {'diagnostics':diagnostics[:24],
+    return {'diagnostics':diagnostics[:24],'snippets':source_snippets(diagnostics[:24],files),
             'stdout':stdout if len(stdout)<=8000 else stdout[:3000]+'\n...[middle omitted; see diagnostics]...\n'+stdout[-5000:],
             'stderr':stderr[-5000:],
             'output_may_be_truncated':len(stdout)>8000 or len(stderr)>5000 or bool(result.get('truncated'))}
@@ -54,9 +58,11 @@ class ProjectGeneration:
         self.store, self.executor = store, executor
         self.planning = ProjectPlanning(store, executor)
 
-    def _gofmt(self, files, paths):
+    def _gofmt(self, files, paths, rid=None, imports=True):
         """用工具链 gofmt 规范指定的 Go 文件；失败（如语法错误）则保持原样，让真实编译检查暴露问题。
-        Normalize the given Go files with the toolchain gofmt; on failure (e.g. syntax errors) keep them as-is."""
+        Normalize the given Go files with the toolchain gofmt; on failure (e.g. syntax errors) keep them as-is.
+        imports=True 时先做确定性的 import 修复（补缺失/删多余，见 goimports），不调用模型。
+        With imports=True, deterministic import fixing (goimports.py) runs first, with no model call."""
         go = getattr(self.executor, 'go_executable', None)
         if not go:
             return files
@@ -64,16 +70,22 @@ class ProjectGeneration:
         if not formatter.is_file():
             return files
         out = dict(files)
+        fixed_imports = {}
         for path in paths:
             if not path.endswith('.go') or not isinstance(files.get(path), str):
                 continue
+            source, changes = fix_imports(files[path]) if imports else (files[path], [])
             try:
-                process = subprocess.run([str(formatter)], input=files[path].encode('utf-8'),
+                process = subprocess.run([str(formatter)], input=source.encode('utf-8'),
                                          capture_output=True, timeout=10, check=False, **NO_WINDOW)
             except (OSError, subprocess.TimeoutExpired):
                 continue
             if process.returncode == 0 and 0 < len(process.stdout) <= 60000:
                 out[path] = process.stdout.decode('utf-8')
+                if changes:
+                    fixed_imports[path] = [f'{kind} {name}' for kind, name in changes]
+        if fixed_imports and rid:
+            self.store.event(rid, 'imports_fixed', {'files': fixed_imports})
         return out
 
     def _syntax_errors(self, files, paths):
@@ -139,7 +151,7 @@ class ProjectGeneration:
                 files = self.planning.call(rid, provider, 'project_developer', values)
             # 模型常写出不符合 gofmt 的代码；格式属于确定性工作，不应消耗修复调用。
             # Models often emit non-gofmt code; formatting is deterministic and must not cost a repair call.
-            files = self._gofmt(files, list(files))
+            files = self._gofmt(files, list(files), rid)
             # 语法错误的草稿不值得验证：直接让本阶段带精确诊断重试（云端单次生成走协调器的阶段重试/升级）。
             # A draft that does not even parse is not worth verifying: fail the stage with exact diagnostics so it is retried/escalated.
             broken = self._syntax_errors(files, list(files))
@@ -187,7 +199,7 @@ class ProjectGeneration:
             # 模型刚写完、上下文还在：语法错误就地带行列号重写（本地免费、确定性），不留给验证阶段去“修实现”。
             # Right after the write, with context still warm: rewrite on a parse error using line:column (free locally, deterministic).
             for retry in range(1, SYNTAX_RETRIES + 1):
-                candidate = self._gofmt({**files, **generated}, [path])
+                candidate = self._gofmt({**files, **generated}, [path], rid)
                 broken = self._syntax_errors(candidate, [path])
                 if not broken:
                     break
@@ -220,7 +232,7 @@ class ProjectGeneration:
             result=self.store.read(call['result_ref'])
             evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
                 'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
-                **concise_failure_evidence(result)})
+                **concise_failure_evidence(result,base['files'])})
         if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
             raise MasaError('repair requires a recorded failed check; unknown results need inspection')
         metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
@@ -244,7 +256,7 @@ class ProjectGeneration:
             files=validate_repair(changes,base['files'])
             # 冻结的测试与 go.mod 不动；其余 Go 文件统一格式化，修复不再被 gofmt 卡住。
             # Frozen tests/go.mod stay untouched; format every other Go file so repairs are never blocked by gofmt.
-            files=self._gofmt(files,[p for p in files if p!='go.mod' and not p.endswith('_test.go')])
+            files=self._gofmt(files,[p for p in files if p!='go.mod' and not p.endswith('_test.go')],rid)
             validate_files(files,approved['spec'])
             metadata.update(status='awaiting_review',files_ref=self.store.put(files),
                             changed_files=[p for p in files if files[p]!=base['files'][p]])
@@ -288,7 +300,7 @@ class ProjectGeneration:
         validator=validate_test_revision if purpose=='project_test_revision' else validate_repair
         files=validator(changes,base['files'])
         tests_scope=purpose=='project_test_revision'
-        files=self._gofmt(files,[p for p in files if (p.endswith('_test.go') if tests_scope else p!='go.mod' and not p.endswith('_test.go'))])
+        files=self._gofmt(files,[p for p in files if (p.endswith('_test.go') if tests_scope else p!='go.mod' and not p.endswith('_test.go'))],rid)
         validate_files(files,approved['spec'])
         metadata.update(status='awaiting_review',files_ref=self.store.put(files),
                         changed_files=[p for p in files if files[p]!=base['files'][p]])
@@ -313,7 +325,7 @@ class ProjectGeneration:
             result=self.store.read(call['result_ref'])
             evidence.append({'operation':self.store.read(call['request_ref'])['operation'],
                 'result_ref':call['result_ref'],'status':result['status'],'exit_code':result.get('exit_code'),
-                **concise_failure_evidence(result)})
+                **concise_failure_evidence(result,base['files'])})
         if not any(e['status']=='completed' and e['exit_code']!=0 for e in evidence):
             raise MasaError('test revision requires a recorded failed check')
         metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
@@ -328,7 +340,7 @@ class ProjectGeneration:
                 'goal':data['goal'],**approved,'original_files':base['files'],
                 'failure_evidence':evidence,'feedback':feedback})
             files=validate_test_revision(changes,base['files'])
-            files=self._gofmt(files,[p for p in files if p.endswith('_test.go')])
+            files=self._gofmt(files,[p for p in files if p.endswith('_test.go')],rid)
             validate_files(files,approved['spec'])
             metadata.update(status='awaiting_review',files_ref=self.store.put(files),
                             changed_files=[p for p in files if files[p]!=base['files'][p]])

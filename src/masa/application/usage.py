@@ -121,13 +121,14 @@ def task_report(store, run_id):
     root = Projects.root_id(run_id, runs)
     members = [r for r in runs.values() if Projects.root_id(r['id'], runs) == root]
     calls, tools, versions = [], [], []
-    budget_events, decisions = [], []
+    budget_events, decisions, process = [], [], []
     for run in members:
         events = store.events(run['id'])
         calls += _model_calls(store, run, events)
         tools += _tool_calls(store, run, events)
         budget_events += [e for e in events if e['type'] == 'task_budget']
         decisions += [{**e['payload'], 'run_id': run['id'], 'at': e['created']} for e in events if e['type'] == 'route_decided']
+        process += [{'kind': e['type'], 'run_id': run['id'], 'at': e['created'], 'data': _process_data(e)} for e in events if e['type'] in _PROCESS_EVENTS]
         plan = run['data'].get('project_plan')
         versions.append({'run_id': run['id'], 'status': run['status'], 'plan_status': (plan or {}).get('status'),
                          'kind': 'verification' if run['data'].get('project_bundle') else 'code' if (plan or {}).get('kind') == 'code' else 'plan',
@@ -184,7 +185,19 @@ def task_report(store, run_id):
         'wall_seconds': round(ended_at - started_at, 2) if started_at and ended_at else None,
         'totals': totals, 'by_model': sorted(models, key=lambda m: -m['total_tokens']), 'by_step': steps,
         'calls': calls, 'tools': tools, 'versions': versions, 'routing': routing,
+        'process': sorted(process, key=lambda p: p['at']),
     }
+
+
+# 修复过程里值得在报告里展示的事件：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收、停止原因。
+# Events shown as the "process" of a task: workflow steps, diagnoses, model releases, extended rounds, rejected no-op fixes, stop reasons.
+_PROCESS_EVENTS = {'workflow_node', 'diagnosis', 'diagnosis_failed', 'models_released', 'rounds_extended', 'noop_revision', 'task_stopped', 'transport_retry'}
+
+
+def _process_data(event):
+    """只保留短字段，避免把大段诊断原文塞进报告。 Keep short fields only."""
+    return {k: (v[:600] if isinstance(v, str) else v) for k, v in event['payload'].items()
+            if isinstance(v, (str, int, float, bool, list)) and k not in {'prompt', 'files'}}
 
 
 def _routing_section(report_calls, tools, totals, budget_events, decisions):

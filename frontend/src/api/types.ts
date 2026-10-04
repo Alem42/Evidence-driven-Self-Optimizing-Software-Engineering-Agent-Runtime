@@ -122,6 +122,9 @@ export interface Job {
   started?: number;
   created_at?: number;
   model?: string | null;
+  /** 此刻真正在用的模型（来自账本事件），不是选择框里的默认模型。 The model in use right now, from ledger events. */
+  current_model?: string | null;
+  current_kind?: 'local' | 'cloud' | null;
   error?: string;
   result?: any;
   run_status?: string;
@@ -201,7 +204,7 @@ export interface ModelCall {
   step_id: string | null;
   invocation_id: string | null;
   attempt_no: number | null;
-  status: 'completed' | 'failed' | 'pending';
+  status: 'completed' | 'failed' | 'pending' | 'abandoned';
   model: string;
   provider?: string | null;
   kind: 'local' | 'cloud' | 'unknown';
@@ -264,6 +267,15 @@ export interface TaskReport {
   versions: { run_id: string; status: string; kind: string }[];
   /** 旧任务没有路由信息，为 null。 Null for legacy tasks. */
   routing: RoutingReport | null;
+  /** 修复过程事件：子图节点、诊断、模型释放、轮数延长等。 Repair-process events. */
+  process?: ProcessEvent[];
+}
+
+export interface ProcessEvent {
+  kind: string;
+  run_id: string;
+  at: number;
+  data: Record<string, any>;
 }
 
 // ───────── 路由与预算 Routing & budget ─────────

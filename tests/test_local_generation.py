@@ -268,6 +268,18 @@ class TestsFirstTests(unittest.TestCase):
             finally:
                 store.close()
 
+
+class SloppyImportsDeveloper(LocalDeveloper):
+    """main.go 漏了 import "fmt" 还多 import 了 "bufio"——弱模型最常见的两种编译错误。
+    main.go forgets "fmt" and imports an unused "bufio": the two most common weak-model compile errors."""
+    def respond(self, context):
+        if context.get('target_path') == 'cmd/app/main.go':
+            self.contexts.append(copy.deepcopy(context))
+            nl = chr(10)
+            source = 'package main' + nl + nl + 'import "bufio"' + nl + nl + 'func main() { fmt.Println("hello") }' + nl
+            return validate_response(context, {'files': {'cmd/app/main.go': source}}, '')
+        return super().respond(context)
+
 @unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
 class SyntaxGateTests(unittest.TestCase):
     approved_parent = LocalGenerationTests.approved_parent
@@ -287,6 +299,22 @@ class SyntaxGateTests(unittest.TestCase):
                 meta = store.run(rid)['data']['project_plan']
                 self.assertEqual(store.read(meta['files_ref']), FILES)
                 self.assertIn('initial:syntax1', [row['invocation_id'] for row in RoleRuntime(store).states(rid)])
+            finally:
+                store.close()
+
+    def test_missing_and_unused_imports_are_fixed_without_asking_the_model_again(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = SloppyImportsDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                files = store.read(store.run(rid)['data']['project_plan']['files_ref'])
+                self.assertIn('"fmt"', files['cmd/app/main.go'])  # 补上 fmt、删掉 bufio / fmt added, bufio removed
+                self.assertNotIn('bufio', files['cmd/app/main.go'])
+                self.assertEqual(len([c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']), 1)  # 没有再问模型 / no second model call
+                fixed = [e['payload'] for e in store.events(rid) if e['type'] == 'imports_fixed']
+                self.assertEqual(fixed[0]['files']['cmd/app/main.go'], ['remove bufio', 'add fmt'])
             finally:
                 store.close()
 

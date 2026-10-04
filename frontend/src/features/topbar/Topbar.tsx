@@ -39,7 +39,11 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
         <div className="topbar-meta">
           <Badge tone={status.tone} dot>{status.label}</Badge>
           <span className="meta">{status.headline}</span>
-          {job?.model && <span className="chip-static">{job.model}</span>}
+          {job?.current_model ? (
+            <span className="chip-static" title="此刻真正在用的模型（来自账本）">{job.current_kind === 'local' ? '本地 ' : job.current_kind === 'cloud' ? 'API ' : ''}{job.current_model}</span>
+          ) : (
+            job?.model && <span className="chip-static">{job.model}</span>
+          )}
           {status.live && started && <span className="meta">{fmtSeconds(Math.max(0, now / 1000 - started))}</span>}
           {gen && status.live && <span className="meta" title={gen.current}>文件 {gen.completed}/{gen.total}</span>}
           {rate != null && <span className="meta">最近调用 {rate} tok/s</span>}

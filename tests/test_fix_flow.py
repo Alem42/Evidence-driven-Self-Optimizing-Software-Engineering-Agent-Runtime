@@ -337,6 +337,19 @@ class ProgressRoundsTests(FixFlowCase):
         self.assertGreater(world.verifications, 5)
         self.assertGreaterEqual(len(self.events(store, 'rounds_extended')), 1)
 
+    def test_later_rounds_receive_a_ledger_based_summary_of_what_earlier_rounds_did(self):
+        world = World()
+        world.remaining = 4
+        local, cloud = ProgressModel('local-m', 'local', world, 1), ProgressModel('cloud-m', 'cloud', world, 1)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'stuck_after': 10})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, ProgressExecutor(world), None, jobs['job'], router=router).run()
+        feedback = [str(c.get('feedback', '')) for m in (local, cloud) for c in m.contexts if c['purpose'] == 'project_repair']
+        self.assertFalse(any('Previous repair rounds' in f for f in feedback[:1]))
+        later = [f for f in feedback if 'Previous repair rounds' in f]
+        self.assertTrue(later)
+        self.assertTrue(any('unresolved 4 -> 3 (improved)' in f for f in later))
+
     def test_a_task_that_makes_no_progress_still_stops_at_the_base_limit(self):
         world, job, store = self.run_progress(start=3, step=0)
         self.assertEqual(world.verifications, 5)

@@ -5,6 +5,7 @@ import type { Detail, ProjectView, Stage } from '../../api/types';
 import { useOpenRun } from '../../app/nav';
 import { statusText, stageLabels } from '../../entities/status';
 import { fmtSeconds } from '../../entities/text';
+import { modelsByRole, modelText, ranModel } from '../../entities/models';
 import { Badge, Button } from '../../shared/ui';
 
 const toneOf = (s: string) => (s === 'succeeded' ? 'ok' : s === 'failed' ? 'bad' : s === 'running' ? 'running' : s === 'blocked' ? 'wait' : 'neutral');
@@ -23,6 +24,7 @@ function RawResponse({ runId, refId }: { runId: string; refId: string }) {
 // Inspector：选中节点的事实——角色调用、模型事件、产物与跳转。以后模型/升级/预算信息放在这里扩展。
 // Inspector: facts about the selected node. Model routing/escalation/budget details extend here later.
 export function Inspector({ detail, view }: { detail: Detail; view?: ProjectView }) {
+  const ran = modelsByRole(detail);
   const [params] = useSearchParams();
   const open = useOpenRun();
   const stage: Stage | undefined = view?.stages.find((s) => s.id === params.get('node'));
@@ -45,7 +47,7 @@ export function Inspector({ detail, view }: { detail: Detail; view?: ProjectView
             {detail.role_calls.map((c) => (
               <li key={c.purpose + c.invocation_id}>
                 <strong>{stageLabels[c.purpose] ?? c.purpose}</strong>
-                <span className="muted">第 {c.attempt_no ?? 1} 次 · {c.status} · {c.output_ref ? '结果已保存' : '结果未保存'}</span>
+                <span className="muted">第 {c.attempt_no ?? 1} 次 · {c.status} · {c.output_ref ? '结果已保存' : '结果未保存'}{modelText(ran[c.purpose]) ? ' · ' + modelText(ran[c.purpose]) : ''}</span>
               </li>
             ))}
           </ul>
@@ -76,7 +78,7 @@ export function Inspector({ detail, view }: { detail: Detail; view?: ProjectView
           <ul className="calls">
             {events.map((e) => (
               <li key={e.seq}>
-                <strong>{e.type === 'model_requested' ? '发起请求' : e.type === 'model_completed' ? '响应完成' : '调用失败'}</strong>
+                <strong>{e.type === 'model_requested' ? '发起请求' : e.type === 'model_completed' ? '响应完成' : '调用失败'}{ranModel(e) ? ' · ' + (ranModel(e)!.local ? '本地 ' : 'API ') + ranModel(e)!.model : ''}</strong>
                 <span className="muted">
                   +{fmtSeconds(Math.max(0, e.created - t0))}
                   {e.payload.metrics?.generation_tokens_per_second != null && ` · ${e.payload.metrics.generation_tokens_per_second} tok/s`}

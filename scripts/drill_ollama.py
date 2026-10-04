@@ -60,7 +60,9 @@ def restart_server():
             return 'restarted by the tray app'
         time.sleep(1)
     subprocess.Popen([str(OLLAMA), 'serve'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0))
+                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0))
+    # 不要用 DETACHED_PROCESS：服务没有控制台时，它每次加载/卸载模型拉起的 llama-server 都会各自弹出一个控制台窗口（真实发现，见进展 013）。
+    # Never DETACHED_PROCESS: a console-less server makes every llama-server it spawns open its own console window (real finding, progress 013).
     for _ in range(30):
         if healthy():
             return 'restarted by this script'

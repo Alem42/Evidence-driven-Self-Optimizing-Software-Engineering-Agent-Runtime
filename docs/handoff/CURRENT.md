@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-04（深夜）**：见进展013。**cmd 弹窗根因**：我的 Ollama 演练脚本用 DETACHED_PROCESS 重启了 `ollama serve`，无控制台的服务每次加载/卸载模型拉起的 3 个子进程各弹一个窗口；已用隐藏窗口重启并实机复测，脚本已改；监控工具 `scripts/watch_procs.py`。前端：各角色实际使用的模型（取自账本）、默认自动+有界升级且不再选模型、设置返回/关闭、随机建议任务、报告“修复过程”。后端：证据源码片段、前几轮账本摘要、确定性 import 修复、Planner 钉死边界语义。M2 已细化为 W0–W7（PLAN_MULTI_MODEL_RUNTIME §10）。**重启 API 服务**后新 runner/前端才生效。
+
 **2026-10-04（晚）**：见进展012 与 PLAN_LOW_MODEL_QUALITY。新增：逐文件语法门、测试先行（强模型写测试）、Planner/Tester/测试修订最高等级、按进展延长轮数、实现无改动⇒转修订测试、子进程不弹 cmd（需重启 API 服务）。文本统计 CLI 仍未稳定通过（规格边界语义/弱模型方案）；下一步见 PLAN §5：尝试摘要、证据带源码片段、约束解码、冻结前红灯检查、Planner 钉死边界语义。M1 不推进 M2，路线待重新明确。
 
 **2026-10-04 M1 后半完成**：见进展011。新增 application/{ownership,flow,workflows}.py（归属分析、声明式引擎、fix-v1）、Diagnoser 角色、无进展拒收、`POST /api/runs/<id>/auto-fix`（失败后一键继续）、`GET /api/workflows/fix-v1`、失败卡“自动修复（推荐）”。真实模拟暴露并修复：云端返回截断 JSON 被当成传输失败而不升级。下一步：Worker 租约/自动续跑、报告页显示修复子图轨迹、M2。显卡归用户，跑完确认 /api/ps 为空。

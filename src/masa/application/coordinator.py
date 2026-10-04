@@ -4,7 +4,7 @@ from masa.application.generation import ProjectGeneration
 from masa.application.workflow import WorkflowCheckpoint
 from masa.application.check_policy import failure_signature, format_only, test_revision_needed, repeated_assertion_signature
 from masa.application.router import Router, RoutingStop
-from masa.application import ownership
+from masa.application import attempts, ownership
 from masa.application.flow import FlowEngine
 from masa.application.workflows import FIX_V1
 from masa.application.triage import assess
@@ -263,6 +263,7 @@ class WorkflowCoordinator:
             checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
                     for t in store.tools(verified) if t['result_ref']]
             analysis=ownership.analyse(checks)
+            self._close_attempt(analysis)
             # 上一次由模型产出的修复：只有“它负责的那一类问题还在”才算失败。本地模型修好了实现、剩下的是测试的问题，
             # 这不是它的失败，也不该因此升级。A model-made fix fails only if ITS class of problem is still present:
             # a local model that fixed the implementation must not be escalated because a test defect remains.
@@ -361,7 +362,7 @@ class WorkflowCoordinator:
             return {'diagnosed':True,'diagnosis':diagnosis,'can_diagnose':False}
 
         def instructions(owner):
-            parts=[ownership.hint(analysis,owner)]
+            parts=[ownership.hint(analysis,owner),self._attempt_summary()]
             diagnosis=ctx_diagnosis()
             if diagnosis:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
@@ -434,8 +435,18 @@ class WorkflowCoordinator:
         Log what each fix did (who, which files) so the Diagnoser knows what was already tried."""
         changed=(self.store.run(draft)['data'].get('project_plan',{}).get('changed_files') or []) if draft else []
         log=list(self.job.get('fix_log',[]))[-5:]
-        log.append({'stage':stage,'changed':changed[:6],'level':used.get('level'),'candidate':used.get('candidate')})
+        model=next((c.model for c in self.router.candidates if c.id==used.get('candidate')),None) if used else None
+        log.append({'stage':stage,'changed':changed[:6],'level':used.get('level'),'candidate':used.get('candidate'),'model':model,
+                    'before':self.job.get('unresolved_now')})
         self.job['fix_log']=log
+
+    def _close_attempt(self, analysis):
+        """新一轮验证出来之后，把上一次修复的结果补进日志（见 attempts.close_attempt）。 Record the previous fix's outcome (see attempts.close_attempt)."""
+        attempts.close_attempt(self.job,analysis)
+
+    def _attempt_summary(self):
+        """前几轮“试过什么、结果如何”的摘要（见 attempts.summary）。 Summary of earlier rounds (see attempts.summary)."""
+        return attempts.summary(self.job)
 
     def _extend_deadline(self, run_id):
         """用户明确要求继续时，已过期的验证 run 需要延长期限才能再做角色调用。 Extend an expired run's deadline for an explicit continuation."""

@@ -5,6 +5,8 @@ import type { DerivedStatus } from '../../entities/status';
 import { Button, Card, Notice } from '../../shared/ui';
 import { TriageView } from './TriageView';
 import { ActivityLog } from './ActivityLog';
+import { modelsByRole, modelText } from '../../entities/models';
+import { stageLabels } from '../../entities/status';
 import { ModelSelect, useModelChoice } from './ModelSelect';
 import { useAction } from './useAction';
 import { ClarificationCard } from './cards/ClarificationCard';
@@ -26,6 +28,8 @@ export function Thread({ detail, status }: { detail: Detail; status: DerivedStat
       <Card title="需求" className="req">
         <p className="goal">{run.data.goal}</p>
       </Card>
+
+      <ModelsStrip detail={detail} />
 
       {plan?.triage && <TriageView triage={plan.triage} />}
 
@@ -60,5 +64,28 @@ export function Thread({ detail, status }: { detail: Detail; status: DerivedStat
 
       <ActivityLog detail={detail} />
     </div>
+  );
+}
+
+// 每个角色实际由哪个模型执行（来自账本）。选择框里的默认模型不代表实际调用，所以在这里直接展示事实。
+// Which model actually ran each role (from the ledger). A selector's default is not what ran, so show the facts here.
+const ROLE_ORDER = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];
+
+function ModelsStrip({ detail }: { detail: Detail }) {
+  const ran = modelsByRole(detail);
+  const rows = ROLE_ORDER.filter((r) => ran[r]?.length);
+  if (!rows.length) return null;
+  return (
+    <details className="models-strip" open>
+      <summary>本任务各角色实际使用的模型</summary>
+      <dl>
+        {rows.map((r) => (
+          <div key={r}>
+            <dt>{stageLabels[r] ?? r}</dt>
+            <dd>{modelText(ran[r])}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }

@@ -70,6 +70,38 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
   );
 }
 
+const NODE_TEXT: Record<string, string> = {
+  classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: 'gofmt 格式化',
+  repair: '修复实现', revise: '修订测试', arbitrate: '测试↔规格仲裁', drafted: '得到新草稿，去验证', halt: '停止并交给人',
+};
+const OWNER_TEXT: Record<string, string> = { implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' };
+
+/** 修复过程：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收。 Repair process events. */
+function ProcessBlock({ items, t0 }: { items: NonNullable<TaskReport['process']>; t0: number }) {
+  const rows = items.flatMap((p, i) => {
+    const d = p.data;
+    let text = '';
+    let tone = '';
+    if (p.kind === 'workflow_node') text = `修复子图 · ${NODE_TEXT[d.node] ?? d.node} → ${NODE_TEXT[d.to] ?? d.to}（${d.why}）`;
+    else if (p.kind === 'diagnosis') text = `Diagnoser（${d.by}）：${OWNER_TEXT[d.owner] ?? d.owner} · ${d.rationale ?? ''}`;
+    else if (p.kind === 'diagnosis_failed') text = 'Diagnoser 未能给出诊断，按规则继续';
+    else if (p.kind === 'models_released') { text = `释放本地模型：${(d.models ?? []).join('、')}${d.reason === 'switching' ? '（切换模型）' : '（任务结束）'}`; tone = 'p-ok'; }
+    else if (p.kind === 'rounds_extended') { text = `仍在收敛（未解决 ${d.was} → ${d.unresolved}），多给一轮修复`; tone = 'p-ok'; }
+    else if (p.kind === 'noop_revision') { text = '修复没有任何改动，已拒收（不验证）并换更强的模型'; tone = 'p-bad'; }
+    else if (p.kind === 'task_stopped') { text = `任务停止：${d.detail ?? d.reason}`; tone = 'p-bad'; }
+    else if (p.kind === 'transport_retry') text = '本地服务暂不可达，等待恢复后重试';
+    else return [];
+    return [<li key={i} className={tone}><time>{t0 ? '+' + fmtDuration((p.at - t0) * 1000) : '—'}</time><span>{text}</span></li>];
+  });
+  if (!rows.length) return null;
+  return (
+    <>
+      <h3>修复过程 <span className="muted">{rows.length} 步</span></h3>
+      <ul className="process">{rows}</ul>
+    </>
+  );
+}
+
 function Body({ r }: { r: TaskReport }) {
   const t = r.totals;
   const [copied, setCopied] = useState(false);
@@ -98,6 +130,7 @@ function Body({ r }: { r: TaskReport }) {
       {t.unknown_usage_calls > 0 && <p className="hint">有 {t.unknown_usage_calls} 次调用服务端没有返回用量，已计为“未知”，没有当作 0。</p>}
 
       {r.routing && <RoutingBlock r={r.routing} />}
+      {r.process && r.process.length > 0 && <ProcessBlock items={r.process} t0={t0} />}
 
       <h3>按模型</h3>
       <div className="table-wrap">
