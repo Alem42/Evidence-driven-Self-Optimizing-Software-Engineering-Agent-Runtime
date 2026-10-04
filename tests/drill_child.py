@@ -97,7 +97,7 @@ console._local_digests = lambda: None
 with patch('masa.application.console.Runner', lambda *args: executor), \
         patch('masa.intelligence.repair_context.build_repair_context', lambda store, ex, rid, files, ev, fb: (files, None)):
     if phase == 'start':
-        job_id = console.start_autonomous_project_job({'goal': 'Build a CLI', 'routing': 'ladder'})['job_id']
+        job_id = console.start_autonomous_project_job({'goal': 'Build a CLI', 'routing': 'ladder', 'policy': {'prefer_highest_roles': ['project_diagnoser', 'project_test_revision']}})['job_id']
         (state / 'drill-job.txt').write_text(job_id, encoding='utf-8')
     else:
         job_id = (state / 'drill-job.txt').read_text(encoding='utf-8')

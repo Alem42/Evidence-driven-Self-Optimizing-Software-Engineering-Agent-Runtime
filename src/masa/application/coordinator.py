@@ -24,6 +24,11 @@ class NoProgress(MasaError):
     The fix returned the files unchanged and no stronger model is left; re-verifying identical content is pointless."""
 
 
+# 自动修复的基础轮数，以及“持续有进展”时最多额外多给几轮。
+# Base number of automatic repair rounds, and how many extra rounds steady progress can earn.
+BASE_ROUNDS = 4
+MAX_PROGRESS_BONUS = 4
+
 class WorkflowCoordinator:
     def __init__(self, store, runner, provider, job, *, resuming=False, router=None):
         """共享持久任务与角色服务，不拥有 HTTP 或线程。无 router 时保持原有“固定单模型”行为。
@@ -224,7 +229,7 @@ class WorkflowCoordinator:
             if draft is None:
                 return
         resume_failed=continue_from
-        for attempt in range(checkpoint.get('attempt',0),5):
+        for attempt in range(checkpoint.get('attempt',0),BASE_ROUNDS+MAX_PROGRESS_BONUS+1):
             if resume_failed:
                 verified=resume_failed
                 resume_failed=None
@@ -272,7 +277,16 @@ class WorkflowCoordinator:
                 if still:
                     self._fail(pending.get('chain') or 'fix',type('D',(),{'action':'use','candidate':pending['candidate'],'level':pending['level']})())
                 self.job['pending_fix']=None
-            if attempt==4:
+            # 轮数上限随“真实进展”延长：未解决条目数每创新低一次，多给一轮（最多再加 MAX_PROGRESS_BONUS 轮）。
+            # 没有进展就按基础轮数停下；正在收敛的任务不该被固定上限截断。
+            # The round limit stretches with real progress: each new low in unresolved items earns one more round (capped); no progress stops at the base limit.
+            score=len(analysis['items'])
+            best=self.job.get('best_score')
+            if best is None or score<best:
+                self.job['best_score']=score
+                if best is not None:self.job['bonus']=min(MAX_PROGRESS_BONUS,int(self.job.get('bonus',0))+1)
+                if best is not None:self._emit('rounds_extended',{'unresolved':score,'was':best,'bonus':self.job['bonus']},verified,always=True)
+            if attempt>=BASE_ROUNDS+int(self.job.get('bonus',0)):
                 self.job.update(status='completed',result={'id':verified},
                                         note='automatic repair limit reached; inspect failed checks')
                 return
@@ -364,12 +378,12 @@ class WorkflowCoordinator:
                                     need=need,stage=stage,reject_noop=True)
             except NoChange:
                 self._log_fix(stage,None,{})
-                return {'noop':True,'noop_count':int(facts.get('noop_count',0))+1}
+                return {'noop':True,'halted':False,'noop_count':int(facts.get('noop_count',0))+1}
             except NoProgress as exc:
-                return {'halted':True,'halt_reason':str(exc)}
+                return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
             if used:self.job['pending_fix']={**used,'chain':chain}
             self._log_fix(stage,draft,used)
-            return {'draft':draft,'noop':False}
+            return {'draft':draft,'noop':False,'halted':False,'halt_kind':None}
 
         def format_files(ctx):
             phase('test_format',verified,attempt+1)
@@ -384,9 +398,18 @@ class WorkflowCoordinator:
         def revise_tests(ctx):
             phase('test_revision',verified,attempt+1)
             base='Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.'
-            return run_fix('fix:test','project_test_revision','test_revision',lambda provider,fb:generation.revise_tests(
+            flipped=not facts.get('flipped') and (facts.get('halt_kind')=='noop' or int(facts.get('noop_count',0))>=3)
+            if flipped:
+                # 最强模型多次审视后认为实现无需改动：逐条重新手算期望值（字节数要把换行和多字节字符算进去），只改算错的期望。
+                # The strongest model reviewed the implementation repeatedly and changed nothing: recompute EVERY expected value by hand and change only the wrong ones.
+                base=('The implementation was reviewed several times by the strongest model and judged correct, yet these assertions still fail. '
+                      'Suspect the test expectations: recompute each failing expected value by hand from the input and the requirement '
+                      '(count newline characters and multi-byte characters in byte counts), fix only expectations that are wrong, '
+                      'and never delete cases or weaken checks.')
+            out=run_fix('fix:test','project_test_revision','test_revision',lambda provider,fb:generation.revise_tests(
                 verified,provider,'\n'.join(x for x in (base,instructions('test'),fb) if x),
                 lambda rid:phase('test_revision',rid,attempt+1)))
+            return {**out,'flipped':True} if flipped else out
 
         def arbitrate_tests(ctx):
             # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
@@ -589,8 +612,15 @@ class WorkflowCoordinator:
                     resume=recover_id if (fb is None and first[0]) else None
                     first[0]=False
                     if resume:provider=self._provider_of(resume)
+                    # 测试由更强的模型先写（Tester 等级），实现由低等级模型对着冻结的测试写。固定模式与全本地时保持原行为。
+                    # A stronger model writes the tests first (Tester level); the weaker model implements against the frozen tests.
+                    test_provider=None
+                    if self._ladder and (getattr(provider,'config',None) or {}).get('model_type')=='local':
+                        candidate,_=self._pick('project_tester','gen_tests',need=[goal,approved],stage='generation')
+                        if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local':
+                            test_provider=candidate
                     return generation.generate(plan,provider,lambda rid:phase('generation',rid),
-                                               resume_id=resume,retry_feedback=fb)
+                                               resume_id=resume,retry_feedback=fb,test_provider=test_provider)
                 # 逐文件生成时 previous_files 会随文件数增长：按每个已生成文件约 4000 字符估计（启发式，写在文档里）。
                 # previous_files grows with each file call: roughly 4000 chars per already generated file (a documented heuristic).
                 growth='x'*4000*max(0,len(approved['spec']['files'])-1)

@@ -74,7 +74,7 @@ class LocalGenerationTests(unittest.TestCase):
                 run = store.run(rid)
                 meta = run['data']['project_plan']
                 self.assertEqual(meta['generation_mode'], 'files-v1')
-                self.assertEqual(run['data']['budget']['model_calls'], 3)
+                self.assertEqual(run['data']['budget']['model_calls'], 3 * 3)  # 上限 = 文件数 ×(1+语法就地重写次数) / ceiling = files x (1 + in-stage syntax rewrites)
                 self.assertEqual(run['model_calls'], 3)
                 self.assertEqual(run['tool_calls'], 0)
                 self.assertEqual(meta['gen_progress'], {'completed': 3, 'total': 3, 'current': None})
@@ -225,5 +225,73 @@ class LocalGenerationTests(unittest.TestCase):
                 store.close()
 
 
-if __name__ == '__main__':
-    unittest.main()
+GOFMT_HOME = Path(__file__).resolve().parents[1] / '.tools' / 'go' / 'bin'
+
+
+BROKEN_MAIN = 'package main' + chr(10) * 2 + 'func main() {' + chr(10) + chr(9) + 'println("oops' + chr(10) + '}' + chr(10)
+
+
+class SyntaxExecutor(FakeExecutor):
+    go_executable = GOFMT_HOME / 'go.exe'
+
+
+class BrokenOnceDeveloper(LocalDeveloper):
+    """第一次给 main.go 写出“字符串没结束”的文件（真实任务里弱模型把提示词抄进了字符串），之后写对。
+    The first main.go has an unterminated string (a weak model once copied prompt text into a literal); later answers are right."""
+    def respond(self, context):
+        path = context.get('target_path')
+        broken = [c for c in self.contexts if c.get('target_path') == path]
+        if path == 'cmd/app/main.go' and not broken:
+            self.contexts.append(copy.deepcopy(context))
+            return validate_response(context, {'files': {path: BROKEN_MAIN}}, '')
+        return super().respond(context)
+
+
+class TestsFirstTests(unittest.TestCase):
+    approved_parent = LocalGenerationTests.approved_parent
+
+    def test_a_stronger_test_author_writes_the_tests_first_and_the_implementer_sees_them(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                weak, strong = LocalDeveloper(), LocalDeveloper()
+                strong.profile = {'provider': 'cloud', 'model': 'fake-strong'}
+                strong.config = {'model_type': 'cloud', 'protocol': 'openai'}
+                strong.snapshot = {'version': 1, 'mode': 'fixed', 'profile_id': 'strong', 'config': strong.config}  # 不同的冻结配置：真实任务里曾因此被拒绝 / a different frozen config was rejected in a real task
+                rid = ProjectGeneration(store, FakeExecutor()).generate(parent, weak, test_provider=strong)
+                self.assertEqual([c['target_path'] for c in strong.contexts], ['internal/app/app_test.go'])
+                self.assertTrue(all(not c['target_path'].endswith('_test.go') for c in weak.contexts))
+                first_impl = weak.contexts[0]
+                self.assertIn('internal/app/app_test.go', first_impl['previous_files'])  # 实现者看得到冻结的测试 / the implementer sees the frozen tests
+                self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref']), FILES)
+            finally:
+                store.close()
+
+@unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
+class SyntaxGateTests(unittest.TestCase):
+    approved_parent = LocalGenerationTests.approved_parent
+
+    def test_a_file_that_does_not_parse_is_rewritten_in_stage_with_the_exact_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = BrokenOnceDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                tries = [c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']
+                self.assertEqual(len(tries), 2)
+                self.assertNotIn('previous_attempt_error', tries[0])
+                self.assertRegex(tries[1]['previous_attempt_error'], r'cmd/app/main\.go:\d+:\d+')
+                self.assertIn('not terminated', tries[1]['previous_attempt_error'])
+                meta = store.run(rid)['data']['project_plan']
+                self.assertEqual(store.read(meta['files_ref']), FILES)
+                self.assertIn('initial:syntax1', [row['invocation_id'] for row in RoleRuntime(store).states(rid)])
+            finally:
+                store.close()
+
+    def test_the_final_bundle_check_refuses_unparseable_files(self):
+        generation = ProjectGeneration(None, SyntaxExecutor())
+        nl = chr(10)
+        self.assertIn('a.go', generation._syntax_errors({'a.go': 'package a' + nl + 'func ('}, ['a.go']))
+        self.assertEqual(generation._syntax_errors({'a.go': 'package a' + nl}, ['a.go', 'go.mod']), {})

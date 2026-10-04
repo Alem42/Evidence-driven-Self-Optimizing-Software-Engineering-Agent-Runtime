@@ -27,7 +27,9 @@ DEFAULT_POLICY = {
     'retry_unknown_local': True,
     'diagnose': True,  # 修复前允许 Diagnoser 诊断 / allow the Diagnoser before fixing
     'diagnose_max': 2,  # 每个任务最多诊断几次 / diagnoses per task
-    'prefer_highest_roles': ['project_diagnoser'],  # 这些角色直接用最高等级 / these roles start at the top level
+    # 规格与测试决定后面一切（测试写坏了，再多轮“修实现”也无效），且 token 很少：用最高等级；代码实现由低等级起步、逐级上推。
+    # Spec and tests decide everything downstream (broken tests make any number of implementation repairs useless) and cost few tokens: use the top level; implementation starts low and escalates.
+    'prefer_highest_roles': ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'],
     'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
     'transport_retries': 6,

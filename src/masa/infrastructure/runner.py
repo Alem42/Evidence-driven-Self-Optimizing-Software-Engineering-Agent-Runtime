@@ -1,5 +1,6 @@
 """Bounded stdio protocol with explicit cancellation and parent-loss cleanup."""
 
+from masa.infrastructure.proc import NO_WINDOW
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ class Runner:
         env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
         env["GOROOT"] = str(self.go_executable.parent.parent)
         proc = subprocess.Popen([str(self.executable), "--workspace", str(workspace), "--go", str(self.go_executable)],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **NO_WINDOW)
         output: queue.Queue = queue.Queue()
         limit = request["max_output_bytes"] * 12 + 65536
 

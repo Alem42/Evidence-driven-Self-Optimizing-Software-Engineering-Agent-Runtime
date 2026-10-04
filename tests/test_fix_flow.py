@@ -100,7 +100,7 @@ class FixFlowCase(unittest.TestCase):
         store = Store(Path(temp.name))
         self.addCleanup(store.close)
         providers = {'local': local, 'cloud': cloud}
-        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, **(policy or {})}), 'budget': dict(BUDGET),
+        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, 'prefer_highest_roles': ['project_diagnoser'], **(policy or {})}), 'budget': dict(BUDGET),
                     'candidates': [fake_entry('local', 1, local.name, 'local'), fake_entry('cloud', 2, cloud.name, 'cloud')]}
         jobs = Jobs(Path(temp.name))
         jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0,
@@ -245,7 +245,7 @@ class ContinueTests(FixFlowCase):
         mark = len(world.log)  # 继续之前的日志长度 / the log length before continuing
 
         local, cloud = Model('small', 'local', world, fixes_impl=False, fixes_test=False), Model('big', 'cloud', world)
-        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy(DEFAULT_POLICY), 'budget': dict(BUDGET),
+        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, 'prefer_highest_roles': ['project_diagnoser']}), 'budget': dict(BUDGET),
                     'candidates': [fake_entry('local', 1, 'small', 'local'), fake_entry('cloud', 2, 'big', 'cloud')]}
         jobs['again'] = {'status': 'running', 'run_id': failed, 'mode': 'auto', 'phase': 'verification', 'attempt': 0, 'started': 0,
                          'request': {'goal': 'Build a CLI', 'continue_from': failed}}
@@ -287,6 +287,111 @@ class ResidencyTests(FixFlowCase):
         local.loaded = True
         WorkflowCoordinator(store, WorldExecutor(world), None, jobs['job'], router=router).run()
         self.assertFalse(local.loaded)  # 即使任务一开始就被拦下，也不会留下模型 / nothing is left behind even when blocked
+
+
+class ProgressExecutor(FakeExecutor):
+    """每次验证都有 world.remaining 条互不相同的实现编译错误。 Each verification reports world.remaining distinct implementation compile errors."""
+    def __init__(self, world):
+        super().__init__(exit_code=1)
+        self.world = world
+
+    def execute(self, request, workspace, cancelled):
+        result = super().execute(request, workspace, cancelled)
+        if request['operation'] == 'go_test':
+            self.world.verifications += 1
+            lines = [f'./internal/app/app.go:{10 + n}:1: undefined: name{n}' for n in range(self.world.remaining)]
+            result['exit_code'] = 1 if lines else 0
+            result['stdout'] = chr(10).join(lines)
+        else:
+            result['exit_code'] = 0
+            result['stdout'] = ''
+        return result
+
+
+class ProgressModel(Model):
+    def __init__(self, name, kind, world, step):
+        super().__init__(name, kind, world)
+        self.step = step
+
+    def respond(self, context):
+        if context['purpose'] == 'project_repair':
+            self.world.remaining = max(0, self.world.remaining - self.step)
+        return super().respond(context)
+
+
+class ProgressRoundsTests(FixFlowCase):
+    def run_progress(self, start, step):
+        world = World()
+        world.remaining = start
+        local, cloud = ProgressModel('local-m', 'local', world, step), ProgressModel('cloud-m', 'cloud', world, step)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'stuck_after': 10})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, ProgressExecutor(world), None, jobs['job'], router=router).run()
+        return world, jobs['job'], store
+
+    def test_a_task_that_keeps_converging_gets_more_rounds_than_the_base_limit(self):
+        # 真实任务（文本统计 CLI）在第 4 轮时只差 1 个断言，却被固定上限截断。
+        # A real task was one assertion away when the fixed limit cut it off.
+        world, job, store = self.run_progress(start=7, step=1)
+        self.assertEqual(world.remaining, 0)
+        self.assertGreater(world.verifications, 5)
+        self.assertGreaterEqual(len(self.events(store, 'rounds_extended')), 1)
+
+    def test_a_task_that_makes_no_progress_still_stops_at_the_base_limit(self):
+        world, job, store = self.run_progress(start=3, step=0)
+        self.assertEqual(world.verifications, 5)
+        self.assertIn('repair limit', job.get('note') or '')
+        self.assertEqual(self.events(store, 'rounds_extended'), [])
+
+
+WRONG_EXPECTATION = 'internal/app/app_test.go:12: bytes = 20, want 19'
+
+
+class WrongTestExecutor(FakeExecutor):
+    """实现是对的，只有测试的一个期望值算错；测试修订之后才通过。The implementation is right; one expected value in the test is wrong until the tests are revised."""
+    def __init__(self, world):
+        super().__init__(exit_code=1)
+        self.world = world
+
+    def execute(self, request, workspace, cancelled):
+        result = super().execute(request, workspace, cancelled)
+        if request['operation'] == 'go_test':
+            self.world.verifications += 1
+            result['exit_code'] = 0 if self.world.test_ok else 1
+            result['stdout'] = '' if self.world.test_ok else WRONG_EXPECTATION
+        else:
+            result['exit_code'] = 0
+            result['stdout'] = ''
+        return result
+
+
+class UnchangedImplementationModel(Model):
+    """认为实现没错：修复实现时原样返回文件。 Believes the implementation is right: returns it unchanged."""
+    def respond(self, context):
+        if context['purpose'] == 'project_repair':
+            self.contexts.append(context)
+            self.world.log.append(f"project_repair {self.name}")
+            self.calls += 1
+            return {IMPL: context['original_files'][IMPL]}
+        return super().respond(context)
+
+
+class FlipToTestsTests(FixFlowCase):
+    def test_when_the_strongest_model_will_not_change_the_implementation_the_tests_are_revised_once(self):
+        world = World()
+        local, cloud = UnchangedImplementationModel('local-m', 'local', world), UnchangedImplementationModel('cloud-m', 'cloud', world)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'prefer_highest_roles': ['project_diagnoser', 'project_test_revision']})  # 与默认策略一致 / matches the default policy
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, WrongTestExecutor(world), None, jobs['job'], router=router).run()
+        job = jobs['job']
+        self.assertTrue(world.test_ok)  # 测试被修订，任务通过 / the test was revised and the task passed
+        self.assertNotIn('halted', job.get('note') or '')
+        nodes = [step['node'] for step in self.trace(store)]
+        self.assertIn('revise', nodes)
+        self.assertLess(nodes.index('repair'), nodes.index('revise'))
+        revised = [c for c in cloud.contexts + local.contexts if c['purpose'] == 'project_test_revision']
+        self.assertTrue(any('recompute' in str(c.get('feedback', '')) for c in revised))
+        self.assertTrue(any(c['purpose'] == 'project_test_revision' for c in cloud.contexts))  # 最高等级改测试 / the top level revises tests
 
 
 if __name__ == '__main__':

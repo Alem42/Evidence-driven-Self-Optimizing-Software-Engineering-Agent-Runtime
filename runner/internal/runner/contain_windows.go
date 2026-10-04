@@ -4,6 +4,7 @@ package runner
 
 import (
 	"fmt"
+	"os/exec"
 	"syscall"
 	"unsafe"
 )
@@ -47,6 +48,12 @@ func ContainCurrentProcess() error {
 		return fmt.Errorf("AssignProcessToJobObject: %w", err)
 	}
 	return nil
+}
+
+// HideWindow 让子进程不弹出控制台窗口（go build/test/vet、被验证的程序）。
+// HideWindow keeps child processes from flashing console windows (go build/test/vet, the verified program).
+func HideWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 }
 
 func isReparse(path string) bool {

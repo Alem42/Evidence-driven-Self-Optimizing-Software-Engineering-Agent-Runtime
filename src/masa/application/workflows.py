@@ -12,7 +12,7 @@ fix-v1: what to do after a failed verification. It replaces the hard-coded if/el
             ├─ 测试有编译/准备错 ───► revise ────────────────────────┤
             ├─ 同一断言反复失败 ────► arbitrate ─────────────────────┤
             └─ 其它 ───────────────► repair ─────────────────────────┘
-  任一修复节点“没有任何改动且已无更强模型” → halt
+  任一修复节点“没有任何改动且已无更强模型” → halt（修复实现例外：先转去修订测试一次）
 """
 from masa.application.flow import guard, validate
 
@@ -44,6 +44,9 @@ FIX_V1 = {
         {'from': 'format', 'to': 'drafted'},
         # 修复节点之后：没有改动 → 先让 Diagnoser 看看（若可用）→ 再试（路由器会换更强的模型）→ 仍无改动就停。
         # After a fix node: nothing changed → let the Diagnoser look (if available) → try again (the router escalates) → halt if still nothing.
+        # 最强模型反复“不改实现”＝它认为实现没错：错的很可能是测试（例如手算的期望值错了）。转去修订测试一次，而不是直接停下。
+        # The strongest model repeatedly leaves the implementation unchanged = it believes the implementation is right: suspect the tests (e.g. a miscalculated expectation) once before halting.
+        {'from': 'repair', 'to': 'revise', 'when': 'flip_to_tests'},
         *[edge for node in ('repair', 'revise', 'arbitrate') for edge in (
             {'from': node, 'to': 'halt', 'when': 'halted'},
             {'from': node, 'to': 'diagnose', 'when': 'noop_diagnose'},
@@ -93,6 +96,16 @@ def _noop_diagnose(facts, params):
 @guard('noop_retry')
 def _noop_retry(facts, params):
     return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) < 3
+
+
+@guard('flip_to_tests')
+def _flip_to_tests(facts, params):
+    if facts.get('flipped'):
+        return False
+    if facts.get('halted') and facts.get('halt_kind') == 'noop':
+        return True
+    # 重试次数用尽且 Diagnoser 已看过（或不可用）：同样视为“实现没错”。 Retries exhausted and the Diagnoser already looked (or is unavailable): same conclusion.
+    return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) >= 3 and (facts.get('diagnosed') or not facts.get('can_diagnose'))
 
 
 @guard('halted')

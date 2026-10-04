@@ -63,7 +63,7 @@ class CoordinatorTransportTests(unittest.TestCase):
         store = Store(Path(temp.name))
         self.addCleanup(store.close)
         providers = {'local': local, 'cloud': Cloud()}
-        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, **(policy or {})}), 'budget': dict(BUDGET),
+        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, 'prefer_highest_roles': ['project_diagnoser'], **(policy or {})}), 'budget': dict(BUDGET),
                     'candidates': [fake_entry('local', 1, 'small', 'local'), fake_entry('cloud', 2, 'big', 'cloud')]}
         jobs = Jobs(Path(temp.name))
         jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0,

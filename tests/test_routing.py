@@ -32,6 +32,17 @@ class RoutePolicyTests(unittest.TestCase):
         d = decide([])
         self.assertEqual((d.action, d.candidate, d.reason), ('use', 'local', 'start_lowest_eligible'))
 
+    def test_by_default_spec_and_tests_use_the_strongest_level_while_code_starts_low(self):
+        # 规格与测试决定下游一切，token 少 → 最高等级；实现从低等级起步再上推。
+        # Spec and tests decide everything downstream and are cheap -> top level; implementation starts low and climbs.
+        for role in ('project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'):
+            with self.subTest(role=role):
+                d = route(role, 'planning', [LOCAL, CLOUD], [], SPEND, BUDGET, DEFAULT_POLICY, 1000)
+                self.assertEqual((d.candidate, d.reason), ('cloud', 'start_lowest_eligible'))  # 起步等级 = 最高等级 / the start level is the top level
+        for role, chain in (('project_developer', 'generation'), ('project_repair', 'fix:implementation')):
+            d = route(role, chain, [LOCAL, CLOUD], [], SPEND, BUDGET, DEFAULT_POLICY, 1000)
+            self.assertEqual(d.candidate, 'local')
+
     def test_escalates_after_the_attempts_of_a_non_top_level(self):
         # fix 链每级 1 次：本地失败一次就升级。 The fix chain gives each non-top level one attempt.
         d = decide([{'candidate': 'local', 'level': 1}])

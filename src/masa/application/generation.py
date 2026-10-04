@@ -1,6 +1,7 @@
 from masa.domain.proposals import validate_files, validate_file_proposal, validate_repair, validate_test_revision
 """已批准架构到多文件草稿和隔离执行。 Approved architecture to multi-file drafts and isolated execution."""
 from pathlib import Path
+from masa.infrastructure.proc import NO_WINDOW
 import tempfile
 import time
 import json
@@ -43,6 +44,10 @@ def concise_failure_evidence(result):
 
 
 
+# 每个文件语法错误就地重写的最多次数。 Max in-stage rewrites per file with a parse error.
+SYNTAX_RETRIES = 2
+
+
 class ProjectGeneration:
     def __init__(self, store, executor):
         """沿用运行账本与审批存储。 Reuse the run ledger and approval artifacts."""
@@ -64,14 +69,37 @@ class ProjectGeneration:
                 continue
             try:
                 process = subprocess.run([str(formatter)], input=files[path].encode('utf-8'),
-                                         capture_output=True, timeout=10, check=False)
+                                         capture_output=True, timeout=10, check=False, **NO_WINDOW)
             except (OSError, subprocess.TimeoutExpired):
                 continue
             if process.returncode == 0 and 0 < len(process.stdout) <= 60000:
                 out[path] = process.stdout.decode('utf-8')
         return out
 
-    def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None):
+    def _syntax_errors(self, files, paths):
+        """用 gofmt -e 做确定性语法检查（不需要编译整个项目），返回 {路径: 带行列号的错误}。工具链缺失时视为无错误。
+        Deterministic parse check with `gofmt -e` (no project build needed): {path: error text with line:column}. Missing toolchain = no errors."""
+        go = getattr(self.executor, 'go_executable', None)
+        if not go:
+            return {}
+        formatter = Path(go).parent / ('gofmt.exe' if os.name == 'nt' else 'gofmt')
+        if not formatter.is_file():
+            return {}
+        found = {}
+        for path in paths:
+            if not path.endswith('.go') or not isinstance(files.get(path), str):
+                continue
+            try:
+                process = subprocess.run([str(formatter), '-e'], input=files[path].encode('utf-8'),
+                                         capture_output=True, timeout=10, check=False, **NO_WINDOW)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if process.returncode != 0:
+                text = process.stderr.decode('utf-8', 'replace').replace('<standard input>', path)
+                found[path] = chr(10).join(text.strip().splitlines()[:5])[:600]
+        return found
+
+    def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None, test_provider=None):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         original = self.store.run(parent)
         plan = original['data'].get('project_plan', {})
@@ -96,7 +124,7 @@ class ProjectGeneration:
                            and frozen_config.get('protocol', snapshot.get('protocol')) == 'ollama')
             if local_files:
                 metadata['generation_mode'] = 'files-v1'
-            calls = len(approved['spec']['files']) - 1 if local_files else 2
+            calls = (len(approved['spec']['files']) - 1) * (1 + SYNTAX_RETRIES) if local_files else 2
             rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
                   Budget(model_calls=calls, tool_calls=3, deadline_seconds=86400), graph=graph,
                   parent_run_id=parent, project_plan=metadata)
@@ -104,7 +132,7 @@ class ProjectGeneration:
             on_created(rid)
         try:
             if metadata.get('generation_mode') == 'files-v1':
-                files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata, retry_feedback)
+                files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata, retry_feedback, test_provider)
             else:
                 values = {'goal':original['data']['goal'], **approved}
                 if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
@@ -112,6 +140,11 @@ class ProjectGeneration:
             # 模型常写出不符合 gofmt 的代码；格式属于确定性工作，不应消耗修复调用。
             # Models often emit non-gofmt code; formatting is deterministic and must not cost a repair call.
             files = self._gofmt(files, list(files))
+            # 语法错误的草稿不值得验证：直接让本阶段带精确诊断重试（云端单次生成走协调器的阶段重试/升级）。
+            # A draft that does not even parse is not worth verifying: fail the stage with exact diagnostics so it is retried/escalated.
+            broken = self._syntax_errors(files, list(files))
+            if broken:
+                raise MasaError('generated Go files do not parse (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(broken.items())[:3]))
             validate_files(files, approved['spec'])
             metadata.update(status='awaiting_review', files_ref=self.store.put(files))
             self.planning.update(rid, metadata, 'paused', 'project_code_review_requested')
@@ -123,7 +156,7 @@ class ProjectGeneration:
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
             raise stage_error(exc, f'project generation failed; run {rid}: {metadata["error"]}') from None
 
-    def _generate_local_files(self, rid, provider, goal, approved, metadata, retry_feedback=None):
+    def _generate_local_files(self, rid, provider, goal, approved, metadata, retry_feedback=None, test_provider=None):
         """逐文件落盘与恢复，不重放未知调用；合并后仍进行完整校验。 Checkpoint file calls without replaying unknown results; validate the final bundle."""
         from masa.runtime.roles import RoleRuntime
         spec = approved['spec']
@@ -132,8 +165,11 @@ class ProjectGeneration:
         # The approved specification determines go.mod; generate implementation before tests.
         files = {'go.mod': f"module {spec['module']}\n\ngo 1.27.0\n"}
         paths = [item['path'] for item in spec['files'] if item['path'] != 'go.mod']
-        paths = [path for path in paths if not path.endswith('_test.go')] + [
-            path for path in paths if path.endswith('_test.go')]
+        impl_paths = [path for path in paths if not path.endswith('_test.go')]
+        test_paths = [path for path in paths if path.endswith('_test.go')]
+        # 有“测试作者”模型（更强的等级）时测试先行：它定义公共接口，较弱的模型对着冻结的测试写实现；否则保持“实现先于测试”。
+        # With a stronger test author the tests come FIRST and define the public API; the weaker model implements against the frozen tests.
+        paths = test_paths + impl_paths if test_provider is not None else impl_paths + test_paths
         roles = RoleRuntime(self.store)
         for ordinal, path in enumerate(paths):
             metadata['gen_progress'] = {'completed': ordinal, 'total': len(paths), 'current': path}
@@ -144,8 +180,20 @@ class ProjectGeneration:
                       'target_path': path, 'previous_files': dict(files)}
             if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
             invocation = 'initial' if ordinal == 0 else f'file:{ordinal + 1}'
-            generated = roles.call(rid, provider, 'project_developer', values, invocation_id=invocation)
+            author = test_provider if (test_provider is not None and path.endswith('_test.go')) else provider
+            slot = {'freeze_key': 'tests_snapshot_ref'} if author is not provider else {}
+            generated = roles.call(rid, author, 'project_developer', values, invocation_id=invocation, **slot)
             validate_file_proposal(generated, spec, path)
+            # 模型刚写完、上下文还在：语法错误就地带行列号重写（本地免费、确定性），不留给验证阶段去“修实现”。
+            # Right after the write, with context still warm: rewrite on a parse error using line:column (free locally, deterministic).
+            for retry in range(1, SYNTAX_RETRIES + 1):
+                candidate = self._gofmt({**files, **generated}, [path])
+                broken = self._syntax_errors(candidate, [path])
+                if not broken:
+                    break
+                again = dict(values, previous_attempt_error='The file you just wrote does not parse. Fix exactly these errors and return the complete file again:' + chr(10) + broken[path])
+                generated = roles.call(rid, author, 'project_developer', again, invocation_id=f'{invocation}:syntax{retry}', **slot)
+                validate_file_proposal(generated, spec, path)
             files.update(generated)
             metadata['partial_files_ref'] = self.store.put(files)
             metadata['gen_progress'] = {'completed': ordinal + 1, 'total': len(paths), 'current': None}
@@ -327,7 +375,7 @@ class ProjectGeneration:
         for path in format_paths:
             try:
                 process=subprocess.run([str(formatter)],input=base['files'][path].encode('utf-8'),
-                                       capture_output=True,timeout=10,check=False)
+                                       capture_output=True,timeout=10,check=False,**NO_WINDOW)
             except (OSError,subprocess.TimeoutExpired):
                 raise MasaError('gofmt did not complete') from None
             if process.returncode!=0 or len(process.stdout)>60000:

@@ -31,8 +31,10 @@ class RoleRuntime:
                     SELECT run_id,purpose,'initial',1,input_ref,route_ref,status,output_ref,started,finished FROM role_calls""")
                 store.db.execute("INSERT INTO schema_migrations VALUES('role_invocations_v1')")
 
-    def call(self, rid, provider, purpose, values, *, invocation_id="initial"):
-        """完成的调用不再付费重放；未知调用要求显式处理。 Reuse completed calls; never silently replay uncertain requests."""
+    def call(self, rid, provider, purpose, values, *, invocation_id="initial", freeze_key="model_snapshot_ref"):
+        """完成的调用不再付费重放；未知调用要求显式处理。 Reuse completed calls; never silently replay uncertain requests.
+        freeze_key：同一个 run 里由不同模型承担的“职位”（如更强的测试作者）各自冻结自己的配置，互不冲突。
+        freeze_key: a distinct role slot in one run (e.g. a stronger test author) freezes its own configuration without clashing."""
         if not isinstance(invocation_id,str) or not invocation_id or len(invocation_id)>100:
             raise MasaError('invalid role invocation id')
         if 'purpose' in values:
@@ -69,7 +71,7 @@ class RoleRuntime:
             # Persist secret-free configuration using existing artifacts and transaction boundaries.
             snapshot=getattr(provider,'snapshot',None)
             snapshot_ref=self.store.put(snapshot) if snapshot is not None else None
-            frozen=run['data'].get('model_snapshot_ref')
+            frozen=run['data'].get(freeze_key)
             if frozen and frozen!=snapshot_ref:
                 raise MasaError('task model configuration changed; restore its snapshot')
             # 意图、预算和开始事件原子提交，崩溃不能绕过预算。
@@ -87,7 +89,7 @@ class RoleRuntime:
                     if run['model_calls'] >= run['data']['budget']['model_calls']:
                         raise MasaError('model_call_budget_exhausted')
                     if snapshot_ref and not frozen:
-                        self.store.save_metadata(rid,'model_snapshot_ref',snapshot_ref,'model_configuration_frozen',
+                        self.store.save_metadata(rid,freeze_key,snapshot_ref,'model_configuration_frozen',
                                                  payload={'snapshot_ref':snapshot_ref,'mode':'fixed'})
                     self.store.db.execute('UPDATE runs SET model_calls=model_calls+1 WHERE id=?',(rid,))
                     self.store.db.execute('INSERT INTO role_invocations VALUES(?,?,?,?,?,?,?,?,?,?)',

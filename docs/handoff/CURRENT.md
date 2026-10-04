@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-04（晚）**：见进展012 与 PLAN_LOW_MODEL_QUALITY。新增：逐文件语法门、测试先行（强模型写测试）、Planner/Tester/测试修订最高等级、按进展延长轮数、实现无改动⇒转修订测试、子进程不弹 cmd（需重启 API 服务）。文本统计 CLI 仍未稳定通过（规格边界语义/弱模型方案）；下一步见 PLAN §5：尝试摘要、证据带源码片段、约束解码、冻结前红灯检查、Planner 钉死边界语义。M1 不推进 M2，路线待重新明确。
+
 **2026-10-04 M1 后半完成**：见进展011。新增 application/{ownership,flow,workflows}.py（归属分析、声明式引擎、fix-v1）、Diagnoser 角色、无进展拒收、`POST /api/runs/<id>/auto-fix`（失败后一键继续）、`GET /api/workflows/fix-v1`、失败卡“自动修复（推荐）”。真实模拟暴露并修复：云端返回截断 JSON 被当成传输失败而不升级。下一步：Worker 租约/自动续跑、报告页显示修复子图轨迹、M2。显卡归用户，跑完确认 /api/ps 为空。
 
 **2026-10-04 M0.5 收尾 + M1 前半完成**：见进展010。新增：application/triage.py（可行性预检）、infrastructure/orphans.py（孤儿 llama-server 检测/清理）、providers.py（API 账户：官方 /models 与余额）、TransportFailure + 账本层免费本地重试（roles.py `_free_retry`）、failure_signature 卡死检测、模型次序/API 账户/路由默认值三个设置页。下一步：Diagnoser、声明式工作流、Worker 租约。**运维要点**：杀 ollama serve 会留下占显存的孤儿 llama-server（本地运行时页可清理，scripts/drill_ollama.py 已自动清）；跑完本地模型要卸载，并确认显存回落。

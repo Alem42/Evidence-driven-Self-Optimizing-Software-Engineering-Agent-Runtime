@@ -106,7 +106,7 @@ class IntegrationTests(unittest.TestCase):
         jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0,
                        'request': {'goal': goal, 'force': force}}
         if mode == 'ladder':
-            snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy(DEFAULT_POLICY), 'budget': dict(BUDGET),
+            snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, 'prefer_highest_roles': ['project_diagnoser']}), 'budget': dict(BUDGET),
                         'candidates': [fake_entry('local', 1, 'small', 'local'), fake_entry('cloud', 2, 'big', 'cloud')]}
             router = Router(store, snapshot, lambda entry: providers[entry['id']])
             WorkflowCoordinator(store, FakeExecutor(), None, jobs['job'], router=router).run()
