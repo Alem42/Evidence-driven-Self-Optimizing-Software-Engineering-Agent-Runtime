@@ -22,9 +22,15 @@ def response_schema(context):
                                      'properties':{path:string}}}}
     if purpose=='project_diagnoser':
         text={'type':'string','maxLength':2000}
+        short={'type':'string','maxLength':300}
+        # 属性顺序即生成顺序：先写“需求怎么说”，再写“测试期望什么”，最后才下结论，减少被测试带偏。
+        # Property order is generation order: first what the REQUIREMENT says, then what the test expects, the verdict last, so the test cannot anchor the answer.
+        check={'type':'object','additionalProperties':False,'required':['case','requirement_says','test_expects','matches'],
+               'properties':{'case':short,'requirement_says':short,'test_expects':short,'matches':{'type':'boolean'}}}
         return {'type':'object','additionalProperties':False,
-                'required':['owner','rationale','implementation_instructions','test_instructions'],
-                'properties':{'owner':{'enum':['implementation','test','both','spec','unclear']},'rationale':text,
+                'required':['expectation_checks','owner','rationale','implementation_instructions','test_instructions'],
+                'properties':{'expectation_checks':{'type':'array','maxItems':8,'items':check},
+                              'owner':{'enum':['implementation','test','both','spec','unclear']},'rationale':text,
                               'implementation_instructions':text,'test_instructions':text}}
     if purpose=='project_triage':
         short={'type':'array','maxItems':5,'items':{'type':'string','maxLength':400}}

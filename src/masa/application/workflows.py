@@ -4,6 +4,7 @@ fix-v1：一次验证失败之后“下一步做什么”。它取代了协调�
 fix-v1: what to do after a failed verification. It replaces the hard-coded if/elif chain in the coordinator.
 
             ┌───────────── 仅 gofmt 失败 ──────────────► format ──┐
+            │  补丁连续没有改善且最强模型试过 ─► rewrite（整体重写）┤
             │                                                      │
   classify ─┼─ 需要诊断 ─► diagnose ─┬ 实现 ─► repair ──────────────┤
             │                        ├ 测试 ─► revise ───────────────┤
@@ -28,18 +29,23 @@ FIX_V1 = {
         'repair': {'action': 'fix_implementation', 'label': '修复实现（测试冻结）', 'kind': 'role'},
         'revise': {'action': 'revise_tests', 'label': '修订测试（实现冻结）', 'kind': 'role'},
         'arbitrate': {'action': 'arbitrate_tests', 'label': '测试↔规格仲裁', 'kind': 'role'},
+        'rewrite': {'action': 'rewrite_implementation', 'label': '整体重写实现（最高等级，对着冻结的测试）', 'kind': 'role'},
         'drafted': {'end': 'drafted', 'label': '得到新草稿 → 去验证', 'kind': 'end'},
         'halt': {'end': 'halt', 'label': '停止并交给人', 'kind': 'end'},
     },
     'edges': [
         {'from': 'classify', 'to': 'format', 'when': 'format_only'},
         {'from': 'classify', 'to': 'diagnose', 'when': 'needs_diagnosis'},
+        # 补丁连续没有改善、最强模型也试过：与其继续补一个结构错误的实现，不如整体重写一次。
+        # Patching has stalled and the strongest model already tried: rewrite once instead of patching a wrongly structured implementation.
+        {'from': 'classify', 'to': 'rewrite', 'when': 'rewrite_due'},
         {'from': 'classify', 'to': 'repair', 'when': 'primary_is', 'params': {'owner': 'implementation'}},
         {'from': 'classify', 'to': 'revise', 'when': 'primary_is', 'params': {'owner': 'test'}},
         {'from': 'classify', 'to': 'arbitrate', 'when': 'arbitrate_due'},
         {'from': 'classify', 'to': 'repair'},
         {'from': 'diagnose', 'to': 'halt', 'when': 'diagnosis_is', 'params': {'owners': ['spec', 'unclear']}},
         {'from': 'diagnose', 'to': 'revise', 'when': 'diagnosis_is', 'params': {'owners': ['test']}},
+        {'from': 'diagnose', 'to': 'rewrite', 'when': 'rewrite_due'},
         {'from': 'diagnose', 'to': 'repair'},
         {'from': 'format', 'to': 'drafted'},
         # 修复节点之后：没有改动 → 先让 Diagnoser 看看（若可用）→ 再试（路由器会换更强的模型）→ 仍无改动就停。
@@ -47,7 +53,7 @@ FIX_V1 = {
         # 最强模型反复“不改实现”＝它认为实现没错：错的很可能是测试（例如手算的期望值错了）。转去修订测试一次，而不是直接停下。
         # The strongest model repeatedly leaves the implementation unchanged = it believes the implementation is right: suspect the tests (e.g. a miscalculated expectation) once before halting.
         {'from': 'repair', 'to': 'revise', 'when': 'flip_to_tests'},
-        *[edge for node in ('repair', 'revise', 'arbitrate') for edge in (
+        *[edge for node in ('repair', 'revise', 'arbitrate', 'rewrite') for edge in (
             {'from': node, 'to': 'halt', 'when': 'halted'},
             {'from': node, 'to': 'diagnose', 'when': 'noop_diagnose'},
             {'from': node, 'to': node, 'when': 'noop_retry'},
@@ -66,6 +72,11 @@ def _format_only(facts, params):
 def _primary_is(facts, params):
     # 诊断过后不再按规则的 primary 走，改由诊断结论决定。 After a diagnosis the diagnosis decides, not the rule-based primary.
     return not facts.get('diagnosed') and facts.get('primary') == params['owner']
+
+
+@guard('rewrite_due')
+def _rewrite_due(facts, params):
+    return bool(facts.get('rewrite_due')) and not facts.get('rewritten')
 
 
 @guard('needs_diagnosis')

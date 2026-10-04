@@ -28,6 +28,10 @@ class NoProgress(MasaError):
 # Base number of automatic repair rounds, and how many extra rounds steady progress can earn.
 BASE_ROUNDS = 4
 MAX_PROGRESS_BONUS = 4
+# 补丁连续这么多轮没有改善（且最强模型试过）就整体重写；每个任务最多重写几次。
+# Rewrite after this many consecutive stalled patch rounds (strongest model already tried); at most this many rewrites per task.
+REWRITE_AFTER_STALLS = 2
+MAX_REWRITES = 1
 
 class WorkflowCoordinator:
     def __init__(self, store, runner, provider, job, *, resuming=False, router=None):
@@ -133,7 +137,9 @@ class WorkflowCoordinator:
         Total attempts within one stage, including after escalation; fixed mode keeps 'first try + one retry'."""
         if not self._ladder:return 2
         policy=self.router.policy
-        return min(4,int(policy['attempts_per_level'].get(chain.split(':')[0],1))*(int(policy.get('max_escalations',0))+1))
+        # 上限 6：每级 2 次 × 3 级，最高等级才有机会出场（之前上限 4，梯子在到达最高等级前就停了）。
+        # Cap 6 = 2 attempts x 3 levels so the top level gets a turn (the old cap of 4 ended the ladder before it).
+        return min(6,int(policy['attempts_per_level'].get(chain.split(':')[0],1))*(int(policy.get('max_escalations',0))+1))
 
     def _attempt(self, chain, role, call, *, need=None, stage=None, reject_noop=False):
         """call(provider, feedback)；响应被校验拒绝时带原因重试，重复失败由路由器决定是否升级。
@@ -344,11 +350,16 @@ class WorkflowCoordinator:
             history=len(self._history('fix'))
             noop=int(self.job.get('noop_streak',0))
             diagnoses=int(self.job.get('diagnoses',0))
-            wants=(repeats>=2 or (primary=='ambiguous' and history>=2))
+            # 只有断言失败（没有编译/准备错误）时，先让 Diagnoser 核对期望值：测试期望写错是这类失败最常见的原因，越早判越省轮数。
+            # Assertion-only failures: let the Diagnoser check the expectations first; a wrong expectation is the commonest cause and the earlier it is found the fewer rounds are wasted.
+            only_assertions=bool(analysis['items']) and all(i['kind']=='assertion' for i in analysis['items'])
+            wants=(repeats>=2 or (primary=='ambiguous' and history>=2) or (only_assertions and not self.job.get('diagnoses')))
             can=bool(self._ladder and self.router.policy.get('diagnose') and diagnoses<int(self.router.policy.get('diagnose_max',0)))
             return {'primary':primary,'format_only':format_only(checks),'can_diagnose':can,
                     'arbitrate_due':bool(assertion) and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'),
-                    'needs_diagnosis':bool(can and wants)}
+                    'needs_diagnosis':bool(can and wants),
+                    'rewrite_due':bool(self._ladder and primary in ('implementation','ambiguous') and int(self.job.get('stall',0))>=REWRITE_AFTER_STALLS
+                                       and int(self.job.get('rewrites',0))<MAX_REWRITES and self._strongest_tried())}
 
         def diagnose(ctx):
             try:
@@ -412,6 +423,23 @@ class WorkflowCoordinator:
                 lambda rid:phase('test_revision',rid,attempt+1)))
             return {**out,'flipped':True} if flipped else out
 
+        def rewrite_implementation(ctx):
+            # 整体重写：连续几轮补丁都没有改善，说明结构本身可能是错的。最强模型丢弃现有结构，对着冻结的测试重新写实现；
+            # 给全部实现文件（不做相关性裁剪），因为重写可能要改动任何一个。
+            # Whole rewrite: several patch rounds without improvement suggest the structure itself is wrong. The strongest model discards it and
+            # writes the implementation again against the frozen tests, with every implementation file supplied (a rewrite may touch any of them).
+            self.job.update(rewrites=int(self.job.get('rewrites',0))+1,stall=0)
+            self._emit('rewrite_started',{'after_rounds':len(self.job.get('fix_log',[])),'unresolved':self.job.get('unresolved_now')},verified,always=True)
+            phase('repair',verified,attempt+1)
+            base=('REWRITE. Several patch rounds in a row did not reduce the failures, so the current structure is probably wrong. Do NOT patch it: '
+                  'discard its design and write the implementation files again from scratch so that the frozen tests pass. Keep exactly the identifiers '
+                  'and signatures the tests use. Choose the simplest design that satisfies the approved acceptance criteria (for example read all input at once '
+                  'instead of keeping line-by-line state) and read the earlier rounds below to avoid repeating what failed.')
+            out=run_fix('fix:implementation','project_repair','rewrite',lambda provider,fb:generation.repair(
+                verified,provider,chr(10).join(x for x in (base,instructions('implementation'),fb) if x),
+                lambda rid:phase('repair',rid,attempt+1),use_intelligence=False))
+            return {**out,'rewritten':True}
+
         def arbitrate_tests(ctx):
             # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
             # 此后仍相同则由三次规则停止并交给人。 Same assertion survives an implementation repair: let the Tester
@@ -426,7 +454,7 @@ class WorkflowCoordinator:
                 verified,provider,'\n'.join(x for x in (base,fb) if x),lambda rid:phase('test_revision',rid,attempt+1)))
 
         actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
-                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests}
+                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation}
         engine=FlowEngine(FIX_V1,actions,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
 
@@ -464,8 +492,12 @@ class WorkflowCoordinator:
         budget=20000
         wanted=[i['path'] for i in analysis['items'] if i['path']]
         for path in dict.fromkeys(wanted):
-            if path in bundle and budget>0:
-                files[path]=bundle[path][:6000];budget-=len(files[path])
+            # 断言条目里只有文件名（如 cli_test.go），要还原成 bundle 里的完整路径；之前没还原，测试源码从未送进 Diagnoser。
+            # Assertion items carry only a file name (cli_test.go): resolve it to the full bundle path (previously the test source never reached the Diagnoser).
+            keys=[k for k in bundle if k==path or k.endswith('/'+path)]
+            full=keys[0] if len(keys)==1 else None
+            if full and full not in files and budget>0:
+                files[full]=bundle[full][:6000];budget-=len(files[full])
         context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'all_files':sorted(bundle),'files':files,
                  'ownership':ownership.describe(analysis),'failure_evidence':[
                      {'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3],
@@ -478,9 +510,15 @@ class WorkflowCoordinator:
             if self._wait_for_server(provider,0):
                 diagnosis=RoleRuntime(store).call(verified,provider,'project_diagnoser',context)
             else:raise
-        from masa.domain.proposals import validate_diagnosis
+        from masa.domain.proposals import reconcile_diagnosis, validate_diagnosis
         diagnosis=validate_diagnosis(diagnosis)
-        self._emit('diagnosis',{'owner':diagnosis['owner'],'rationale':diagnosis['rationale'][:400],'by':(provider.profile or {}).get('model')},verified,always=True)
+        # 结论必须服从 Diagnoser 自己逐条核对的结果（它被测试带偏过：见 reconcile_diagnosis）。
+        # The verdict must obey the Diagnoser's own per-case checks (it has been anchored by the test before: see reconcile_diagnosis).
+        verdict=diagnosis['owner']
+        diagnosis,changed=reconcile_diagnosis(diagnosis)
+        self._emit('diagnosis',{'owner':diagnosis['owner'],'rationale':diagnosis['rationale'][:400],'by':(provider.profile or {}).get('model'),
+                                'reconciled_from':verdict if changed else None,
+                                'mismatches':[c['case'] for c in diagnosis['expectation_checks'] if not c['matches']][:6]},verified,always=True)
         return diagnosis
 
     def _seed_history_from_lineage(self, verified):

@@ -407,5 +407,88 @@ class FlipToTestsTests(FixFlowCase):
         self.assertTrue(any(c['purpose'] == 'project_test_revision' for c in cloud.contexts))  # 最高等级改测试 / the top level revises tests
 
 
+class RewriteModel(ProgressModel):
+    """补丁怎么打都没有改善（每次只是改了文件内容）；只有被要求整体重写时才真正修好。
+    Patches never help; only an explicit rewrite request really fixes the implementation."""
+    def respond(self, context):
+        if context['purpose'] == 'project_repair':
+            self.world.rewrite_seen = self.world.rewrite_seen or 'REWRITE' in str(context.get('feedback', ''))
+            if 'REWRITE' in str(context.get('feedback', '')):
+                self.world.remaining = 0
+        return Model.respond(self, context)
+
+
+class RewriteTests(FixFlowCase):
+    def run_rewrite(self):
+        world = World()
+        world.remaining = 3
+        world.rewrite_seen = False
+        local, cloud = RewriteModel('local-m', 'local', world, 0), RewriteModel('cloud-m', 'cloud', world, 0)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'stuck_after': 10})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, ProgressExecutor(world), None, jobs['job'], router=router).run()
+        return world, jobs['job'], store, cloud
+
+    def test_patching_that_stalls_is_replaced_by_one_rewrite_by_the_strongest_model(self):
+        world, job, store, cloud = self.run_rewrite()
+        self.assertTrue(world.rewrite_seen)
+        self.assertEqual(world.remaining, 0)  # 重写之后通过 / passes after the rewrite
+        self.assertEqual(job.get('rewrites'), 1)
+        nodes = [step['node'] for step in self.trace(store)]
+        self.assertIn('rewrite', nodes)
+        self.assertEqual(self.events(store, 'rewrite_started')[0]['unresolved'], 3)
+        rewrite_calls = [c for c in cloud.contexts if 'REWRITE' in str(c.get('feedback', ''))]
+        self.assertEqual(len(rewrite_calls), 1)  # 只重写一次，且由最高等级 / once, by the top level
+        self.assertIn('Previous repair rounds', str(rewrite_calls[0]['feedback']))  # 带着前几轮摘要 / with the attempt summary
+
+    def test_a_task_that_is_improving_is_never_rewritten(self):
+        world = World()
+        world.remaining = 4
+        local, cloud = ProgressModel('local-m', 'local', world, 1), ProgressModel('cloud-m', 'cloud', world, 1)
+        store, jobs, router = self.build(local, cloud, world, policy={'diagnose': False, 'stuck_after': 10})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, ProgressExecutor(world), None, jobs['job'], router=router).run()
+        self.assertFalse(jobs['job'].get('rewrites'))
+        self.assertNotIn('rewrite', [step['node'] for step in self.trace(store)])
+
+
+class DiagnoserChecksTests(FixFlowCase):
+    def test_assertion_only_failures_are_diagnosed_first_and_the_verdict_obeys_the_diagnosers_own_checks(self):
+        # 真实任务（CSV）：只剩断言失败；测试把降序写成了升序；Diagnoser 判成“实现问题”，但它自己的逐条核对全是“不一致”。
+        world = World()
+        verdict = {'owner': 'implementation', 'rationale': 'tie-break by category', 'implementation_instructions': 'sort ascending by category',
+                   'test_instructions': '', 'expectation_checks': [
+                       {'case': 'food vs clothing', 'requirement_says': 'food 1.00 first (descending)', 'test_expects': 'clothing first', 'matches': False}]}
+        local, cloud = Model('local-m', 'local', world), Model('cloud-m', 'cloud', world, diagnosis=verdict)
+        store, jobs, router = self.build(local, cloud, world, policy={'prefer_highest_roles': ['project_diagnoser', 'project_test_revision']})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, WrongTestExecutor(world), None, jobs['job'], router=router).run()
+        self.assertTrue(world.test_ok)  # 测试被改正后通过 / passes once the test is corrected
+        self.assertFalse([entry for entry in world.log if entry.startswith('project_repair')])  # 从未去“修正确的实现” / the correct implementation was never "repaired"
+        nodes = [step['node'] for step in self.trace(store)]
+        self.assertEqual(nodes[:3], ['classify', 'diagnose', 'revise'])
+        event = self.events(store, 'diagnosis')[0]
+        self.assertEqual((event['owner'], event['reconciled_from']), ('test', 'implementation'))
+        revision = [c for c in cloud.contexts if c['purpose'] == 'project_test_revision'][0]
+        self.assertIn('the requirement says food 1.00 first', str(revision['feedback']))
+
+    def test_the_diagnoser_receives_the_test_source_even_though_assertions_only_name_the_file(self):
+        world = World()
+        seen = {}
+
+        class Spy(Model):
+            def respond(self, context):
+                if context['purpose'] == 'project_diagnoser':
+                    seen.update(context['files'])
+                return super().respond(context)
+
+        local = Model('local-m', 'local', world)
+        cloud = Spy('cloud-m', 'cloud', world, diagnosis={'owner': 'test', 'rationale': 'r', 'implementation_instructions': '', 'test_instructions': 'fix'})
+        store, jobs, router = self.build(local, cloud, world, policy={'prefer_highest_roles': ['project_diagnoser', 'project_test_revision']})
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, WrongTestExecutor(world), None, jobs['job'], router=router).run()
+        self.assertIn('internal/app/app_test.go', seen)  # 断言条目里只有 app_test.go，也要还原成完整路径 / resolved from the bare file name
+
+
 if __name__ == '__main__':
     unittest.main()

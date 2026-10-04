@@ -140,3 +140,31 @@ def fix_imports(source):
                 insert = '\nimport (\n' + ''.join(f'\t"{p}"\n' for p in missing) + ')\n'
                 text = text[:package.end()] + insert + text[package.end():]
     return text, changes
+
+
+def fix_module_imports(source, module, dirs):
+    """把写错 module 前缀的“本项目内”import 改回批准的 module 路径，例如
+    `github.com/example.com/expense/internal/expense` → `example.com/task/internal/expense`（真实任务里弱模型这样编过）。
+    只在 import 路径以某个已知包目录结尾、且恰好匹配一个目录时才改；已经是正确前缀的、标准库的都不动。
+    Rewrite a wrongly prefixed import of a package of THIS project back to the approved module path (a weak model invented
+    `github.com/example.com/expense/internal/expense` in a real task). Only when the path ends with exactly one known package directory."""
+    if not module or not dirs:
+        return source, []
+    lines = source.split(chr(10))
+    changes = []
+    for start, end, block in _import_region(lines):
+        for k in range(start, end + 1):
+            if block and k in (start, end):
+                continue
+            text = lines[k]
+            match = re.search(r'"([^"]+)"', text)
+            if not match:
+                continue
+            path = match.group(1)
+            if path == module or path.startswith(module + '/') or '.' not in path.split('/')[0]:
+                continue
+            hits = [d for d in dirs if path == d or path.endswith('/' + d)]
+            if len(hits) == 1:
+                lines[k] = text.replace('"' + path + '"', '"' + module + '/' + hits[0] + '"', 1)
+                changes.append(('module', path + ' -> ' + module + '/' + hits[0]))
+    return (chr(10).join(lines), changes) if changes else (source, [])

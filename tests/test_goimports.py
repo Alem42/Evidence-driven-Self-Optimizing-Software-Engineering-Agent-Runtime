@@ -1,7 +1,7 @@
 """确定性 import 修复。Deterministic import fixing — cases taken from real weak-model output."""
 import unittest
 
-from masa.application.goimports import fix_imports
+from masa.application.goimports import fix_imports, fix_module_imports
 
 NL = chr(10)
 
@@ -69,6 +69,25 @@ class FixImportsTests(unittest.TestCase):
     def test_struct_fields_and_method_chains_are_not_mistaken_for_packages(self):
         source = src('package a', '', 'func F(s S) int {', '\treturn s.count + s.inner.size', '}')
         self.assertEqual(fix_imports(source)[1], [])
+
+
+class FixModuleImportsTests(unittest.TestCase):
+    DIRS = ['internal/expense']
+
+    def test_a_wrongly_prefixed_internal_import_is_rewritten_to_the_approved_module(self):
+        # 真实任务：弱模型把 module 前缀编成了 github.com/example.com/expense
+        source = src('package main', '', 'import (', '	"fmt"', '	"github.com/example.com/expense/internal/expense"', ')', '', 'func main() { fmt.Println(expense.X) }')
+        fixed, changes = fix_module_imports(source, 'example.com/task', self.DIRS)
+        self.assertIn('"example.com/task/internal/expense"', fixed)
+        self.assertNotIn('github.com', fixed)
+        self.assertEqual(changes[0][0], 'module')
+
+    def test_correct_standard_unrelated_and_ambiguous_imports_are_left_alone(self):
+        ok = src('package a', '', 'import (', '	"fmt"', '	"example.com/task/internal/expense"', '	"github.com/other/lib"', ')')
+        self.assertEqual(fix_module_imports(ok, 'example.com/task', self.DIRS), (ok, []))
+        two = src('package a', '', 'import "github.com/x/internal/expense"')
+        self.assertEqual(fix_module_imports(two, 'example.com/task', ['internal/expense', 'expense'])[1], [])  # 两个目录都匹配：不猜 / ambiguous
+        self.assertEqual(fix_module_imports(two, None, self.DIRS), (two, []))
 
 
 if __name__ == '__main__':

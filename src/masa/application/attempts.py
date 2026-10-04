@@ -15,6 +15,10 @@ def close_attempt(job, analysis):
     log = list(job.get('fix_log', []))
     if log and 'after' not in log[-1]:
         log[-1]['after'] = len(items)
+        # 连续没有改善的轮数：补丁修不动时的信号（用于“整体重写”）。 Consecutive rounds without improvement: the signal that patching has stalled (drives the whole rewrite).
+        before = log[-1].get('before')
+        stalled = before is not None and len(items) >= before
+        job['stall'] = int(job.get('stall', 0)) + 1 if stalled else 0
         log[-1]['remaining'] = [str(item.get('message') or '')[:120] for item in items[:3]]
         job['fix_log'] = log
     job['unresolved_now'] = len(items)

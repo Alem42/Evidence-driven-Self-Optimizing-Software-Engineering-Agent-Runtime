@@ -15,7 +15,9 @@ from masa.infrastructure.workspaces import verify_snapshot
 
 
 from masa.application.snippets import source_snippets  # noqa: E402
-from masa.application.goimports import fix_imports  # noqa: E402
+from masa.application.goimports import fix_imports, fix_module_imports  # noqa: E402
+from masa.application.leaks import leak_messages  # noqa: E402
+from masa.application.testlint import test_problem_messages  # noqa: E402
 
 
 def concise_failure_evidence(result, files=None):
@@ -71,10 +73,18 @@ class ProjectGeneration:
             return files
         out = dict(files)
         fixed_imports = {}
+        # 批准的 module 路径与本项目的包目录：用来修“module 前缀写错”的内部 import。 The approved module and this project's package directories.
+        module_line = next((line.split(None, 1)[1].strip() for line in str(files.get('go.mod', '')).splitlines() if line.startswith('module ')), None)
+        package_dirs = sorted({k.rsplit('/', 1)[0] for k in files if k.endswith('.go') and '/' in k and k.rsplit('/', 1)[0] != 'cmd/app'})
         for path in paths:
             if not path.endswith('.go') or not isinstance(files.get(path), str):
                 continue
-            source, changes = fix_imports(files[path]) if imports else (files[path], [])
+            if imports:
+                source, changes = fix_imports(files[path])
+                source, module_changes = fix_module_imports(source, module_line, package_dirs)
+                changes = changes + module_changes
+            else:
+                source, changes = files[path], []
             try:
                 process = subprocess.run([str(formatter)], input=source.encode('utf-8'),
                                          capture_output=True, timeout=10, check=False, **NO_WINDOW)
@@ -88,16 +98,26 @@ class ProjectGeneration:
             self.store.event(rid, 'imports_fixed', {'files': fixed_imports})
         return out
 
+    @staticmethod
+    def _refuse_leaks(changes):
+        """修复/测试修订的产物里出现提示词片段就当作被拒绝（协调器会带原因重试或升级）。
+        A repair or test revision that contains prompt text is rejected (the coordinator retries or escalates with the reason)."""
+        leaked = leak_messages(changes)
+        if leaked:
+            raise MasaError('generated Go files contain harness prompt text (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(leaked.items())[:3]))
+
     def _syntax_errors(self, files, paths):
         """用 gofmt -e 做确定性语法检查（不需要编译整个项目），返回 {路径: 带行列号的错误}。工具链缺失时视为无错误。
         Deterministic parse check with `gofmt -e` (no project build needed): {path: error text with line:column}. Missing toolchain = no errors."""
+        found = dict(leak_messages(files, paths))  # 提示词泄漏不需要工具链 / prompt leaks need no toolchain
+        for path, message in test_problem_messages(files, paths).items():  # 空转的测试同理 / so do vacuous tests
+            found[path] = (found[path] + chr(10) if path in found else '') + message
         go = getattr(self.executor, 'go_executable', None)
         if not go:
-            return {}
+            return found
         formatter = Path(go).parent / ('gofmt.exe' if os.name == 'nt' else 'gofmt')
         if not formatter.is_file():
-            return {}
-        found = {}
+            return found
         for path in paths:
             if not path.endswith('.go') or not isinstance(files.get(path), str):
                 continue
@@ -108,7 +128,7 @@ class ProjectGeneration:
                 continue
             if process.returncode != 0:
                 text = process.stderr.decode('utf-8', 'replace').replace('<standard input>', path)
-                found[path] = chr(10).join(text.strip().splitlines()[:5])[:600]
+                found[path] = (found[path] + chr(10) if path in found else '') + chr(10).join(text.strip().splitlines()[:5])[:600]
         return found
 
     def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None, test_provider=None):
@@ -203,7 +223,7 @@ class ProjectGeneration:
                 broken = self._syntax_errors(candidate, [path])
                 if not broken:
                     break
-                again = dict(values, previous_attempt_error='The file you just wrote does not parse. Fix exactly these errors and return the complete file again:' + chr(10) + broken[path])
+                again = dict(values, previous_attempt_error='The file you just wrote was rejected by deterministic checks (syntax, harness text, or tests that cannot fail). Fix exactly these problems and return the complete file again:' + chr(10) + broken[path])
                 generated = roles.call(rid, author, 'project_developer', again, invocation_id=f'{invocation}:syntax{retry}', **slot)
                 validate_file_proposal(generated, spec, path)
             files.update(generated)
@@ -253,6 +273,7 @@ class ProjectGeneration:
                 'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report})
             if any(path not in original_files for path in changes):
                 raise MasaError('repair changed a file outside supplied context; request a broader revision')
+            self._refuse_leaks(changes)
             files=validate_repair(changes,base['files'])
             # 冻结的测试与 go.mod 不动；其余 Go 文件统一格式化，修复不再被 gofmt 卡住。
             # Frozen tests/go.mod stay untouched; format every other Go file so repairs are never blocked by gofmt.
@@ -298,6 +319,7 @@ class ProjectGeneration:
         if purpose=='project_repair' and any(path not in context['original_files'] for path in changes):
             raise MasaError('repair changed a file outside supplied context; request a broader revision')
         validator=validate_test_revision if purpose=='project_test_revision' else validate_repair
+        self._refuse_leaks(changes)
         files=validator(changes,base['files'])
         tests_scope=purpose=='project_test_revision'
         files=self._gofmt(files,[p for p in files if (p.endswith('_test.go') if tests_scope else p!='go.mod' and not p.endswith('_test.go'))],rid)
@@ -339,6 +361,7 @@ class ProjectGeneration:
             changes=self.planning.call(rid,provider,'project_test_revision',{
                 'goal':data['goal'],**approved,'original_files':base['files'],
                 'failure_evidence':evidence,'feedback':feedback})
+            self._refuse_leaks(changes)
             files=validate_test_revision(changes,base['files'])
             files=self._gofmt(files,[p for p in files if p.endswith('_test.go')],rid)
             validate_files(files,approved['spec'])

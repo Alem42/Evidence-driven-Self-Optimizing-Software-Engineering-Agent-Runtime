@@ -280,6 +280,31 @@ class SloppyImportsDeveloper(LocalDeveloper):
             return validate_response(context, {'files': {'cmd/app/main.go': source}}, '')
         return super().respond(context)
 
+
+class LeakingDeveloper(LocalDeveloper):
+    """第一次把提示词字段写进了测试文件（真实任务里发生过），之后写对。 First answer leaks a prompt field into the test file (it happened); later answers are right."""
+    def respond(self, context):
+        path = context.get('target_path')
+        if path == 'internal/app/app_test.go' and not [c for c in self.contexts if c.get('target_path') == path]:
+            self.contexts.append(copy.deepcopy(context))
+            source = FILES[path].replace('wrong value', 'previous_attempt_error: wrong value')
+            return validate_response(context, {'files': {path: source}}, '')
+        return super().respond(context)
+
+
+
+class VacuousTestDeveloper(LocalDeveloper):
+    """第一次的测试文件只有 t.Log、永远不会失败；之后写对。 The first test file only logs and can never fail; later answers are right."""
+    def respond(self, context):
+        path = context.get('target_path')
+        if path == 'internal/app/app_test.go' and not [c for c in self.contexts if c.get('target_path') == path]:
+            self.contexts.append(copy.deepcopy(context))
+            nl = chr(10)
+            source = 'package app' + nl + nl + 'import "testing"' + nl + nl + 'func TestValue(t *testing.T) { t.Log(Value()) }' + nl
+            return validate_response(context, {'files': {path: source}}, '')
+        return super().respond(context)
+
+
 @unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
 class SyntaxGateTests(unittest.TestCase):
     approved_parent = LocalGenerationTests.approved_parent
@@ -315,6 +340,36 @@ class SyntaxGateTests(unittest.TestCase):
                 self.assertEqual(len([c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']), 1)  # 没有再问模型 / no second model call
                 fixed = [e['payload'] for e in store.events(rid) if e['type'] == 'imports_fixed']
                 self.assertEqual(fixed[0]['files']['cmd/app/main.go'], ['remove bufio', 'add fmt'])
+            finally:
+                store.close()
+
+    def test_prompt_text_in_a_generated_file_is_rewritten_in_stage_even_though_it_parses(self):
+        # 提示词泄漏在语法上是合法的 Go（字符串里），所以必须有独立的确定性检查。 It is valid Go (inside a string), so only a dedicated check catches it.
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = LeakingDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                tries = [c for c in provider.contexts if c.get('target_path') == 'internal/app/app_test.go']
+                self.assertEqual(len(tries), 2)
+                self.assertIn('harness prompt text', tries[1]['previous_attempt_error'])
+                files = store.read(store.run(rid)['data']['project_plan']['files_ref'])
+                self.assertNotIn('previous_attempt_error', files['internal/app/app_test.go'])
+            finally:
+                store.close()
+
+    def test_a_test_file_that_can_never_fail_is_rewritten_before_it_is_frozen(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = VacuousTestDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                tries = [c for c in provider.contexts if c.get('target_path') == 'internal/app/app_test.go']
+                self.assertEqual(len(tries), 2)
+                self.assertIn('no test ever fails', tries[1]['previous_attempt_error'])
+                self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref']), FILES)
             finally:
                 store.close()
 
