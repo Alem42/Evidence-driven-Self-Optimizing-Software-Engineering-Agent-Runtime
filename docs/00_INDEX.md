@@ -1,20 +1,30 @@
-# MASA 文档入口
+# 文档入口
 
-更新：2026-10-03。
+更新：2026-10-06。**先读下面三份**，它们是当前事实；其余是历史记录或某一方面的细节。
 
-| 用途 | 阅读 |
+## 先读这三份
+| 文档 | 回答什么 |
 |---|---|
-| 使用 | [工作台](guides/USER_WORKBENCH.md)、[本地模型](guides/USER_LOCAL_MODELS.md)、[Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) |
-| 当前事实 | [STATUS](STATUS_PROJECT.md) |
-| 下一步 | [PLAN](PLAN_NEXT_STAGE.md) |
-| 开发接续 | [CURRENT](handoff/CURRENT.md)、[长期约定](MEMORY_PROJECT.md)、[实施入口](LLM_IMPLEMENTATION_GUIDE.md) |
-| 架构 | [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md)、[减法执行范围](PLAN_ARCHITECTURE_SIMPLIFICATION.md) |
-| 模型实施 | [Runtime v2：多模型/长任务/动态角色](PLAN_MULTI_MODEL_RUNTIME.md)、[R0–R5 细节](PLAN_MULTI_MODEL.md) |
-| 低质量模型方案 | [让低质量模型完成高难度工作：他人做法、原因、状态](PLAN_LOW_MODEL_QUALITY.md) |
-| 路由与预算 | [使用说明](guides/USER_ROUTING_AND_BUDGET.md) |
-| 本地控制 | [Ollama控制页](guides/USER_OLLAMA_CONTROLLER.md)、[Runtime与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)、[硬件方案](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md) |
-| 愿景 | [IDE 工作台](PLAN_MODEL_ROUTING_AND_WORKBENCH.md) |
-| 前端 v3 | [前后端分离与布局方案](PLAN_FRONTEND_REDESIGN.md)、[进展006](progress/PROGRESS_2026-10-03_006_frontend-v3.md)、[进展007](progress/PROGRESS_2026-10-03_007_usage-report-and-auto-fixes.md)、[进展008](progress/PROGRESS_2026-10-03_008_m0-routing-and-budget.md)、[进展009](progress/PROGRESS_2026-10-04_001_m05-context-guard-and-recovery-drill.md)、[进展010](progress/PROGRESS_2026-10-04_002_m05-complete-and-m1-first-half.md) |
-| 验收需求 | [明确种子的随机数 CLI](scenarios/SCENARIO_SEEDED_RANDOM.md) |
+| [PROJECT_OVERVIEW](PROJECT_OVERVIEW.md) | 项目是什么、解决什么问题、一次任务怎么跑、**Gate 到底是什么**、每个术语的白话解释、模块地图、做了/没做什么 |
+| [ROADMAP](ROADMAP.md) | 项目定位、主流岗位要求对照、**动态角色的六条路线与选择理由**、重新判断后的路线与优先级、各项优化的理由与出处 |
+| [RESUME_PROJECT_DESCRIPTION](RESUME_PROJECT_DESCRIPTION.md) | 精简版/标准版简历、面试问答、数据备忘 |
 
-progress 是历史验收记录，archive 是过期方案。它们不覆盖 STATUS / PLAN / CURRENT。详细技术讲解按需阅读 guides；不要把旧进展中的待实现描述当成当前事实。
+## 使用指南
+[工作台](guides/USER_WORKBENCH.md) · [本地模型](guides/USER_LOCAL_MODELS.md) · [Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) · [路由与预算](guides/USER_ROUTING_AND_BUDGET.md) · [**评测**](guides/USER_BENCHMARK.md) · [Ollama 控制页](guides/USER_OLLAMA_CONTROLLER.md) · [Runtime 与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)
+
+## 方案与细节（仍有参考价值，优先级以 ROADMAP 为准）
+| 文档 | 内容 |
+|---|---|
+| [PLAN_LOW_MODEL_QUALITY](PLAN_LOW_MODEL_QUALITY.md) | 让低质量模型完成高难度工作：16 项主流做法的出处、理由、实现状态（这份写得最细，保留） |
+| [PLAN_MULTI_MODEL_RUNTIME](PLAN_MULTI_MODEL_RUNTIME.md) | 多模型 Runtime 的原始设计与 M0–M3、W0–W7 细化；**§8–§10 的优先级已被 ROADMAP 取代** |
+| [PLAN_MULTI_MODEL](PLAN_MULTI_MODEL.md) | R0–R5 的早期细节 |
+| [DESIGN_SYSTEM_ARCHITECTURE](design/DESIGN_SYSTEM_ARCHITECTURE.md) | 最小骨架 |
+| [DESIGN_OPTIONAL_HARDWARE_MONITOR](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md) | 硬件监控 |
+
+## 开发接续与历史
+- 接续：[CURRENT](handoff/CURRENT.md) · [长期约定](MEMORY_PROJECT.md) · [实施入口](LLM_IMPLEMENTATION_GUIDE.md)
+- **progress/** 是历史验收记录（按时间，每份对应一次迭代），最近几份：[进展015 评测基线](progress/PROGRESS_2026-10-05_001_w0-benchmark-baseline.md) · [016 评测发现与修复](progress/PROGRESS_2026-10-05_002_benchmark-findings-and-fixes.md) · [017 流式/取消/stall](progress/PROGRESS_2026-10-05_003_m2-w1-streaming-cancel-stall.md)
+- **已过期（只作历史）**：[STATUS_PROJECT](STATUS_PROJECT.md)、[PLAN_NEXT_STAGE](PLAN_NEXT_STAGE.md)、[PLAN_ARCHITECTURE_SIMPLIFICATION](PLAN_ARCHITECTURE_SIMPLIFICATION.md)、[PLAN_FRONTEND_REDESIGN](PLAN_FRONTEND_REDESIGN.md)、[PLAN_MODEL_ROUTING_AND_WORKBENCH](PLAN_MODEL_ROUTING_AND_WORKBENCH.md)、[PLAN_PRIORITY_ROADMAP](PLAN_PRIORITY_ROADMAP.md)、[PLAN_RUNTIME_CLARIFICATION](PLAN_RUNTIME_CLARIFICATION.md)、archive/
+- 验收场景：[明确种子的随机数 CLI](scenarios/SCENARIO_SEEDED_RANDOM.md)
+
+规则：当前事实以 PROJECT_OVERVIEW 和代码为准；不要把旧进展里的“待实现”当成当前事实。
