@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import type { Detail, Job, ProjectView } from '../../api/types';
+import type { Detail, Job, ProjectView, TaskReport } from '../../api/types';
 import type { DerivedStatus } from '../../entities/status';
 import { fmtSeconds } from '../../entities/text';
 import { fmtTokens } from '../../entities/report';
@@ -18,6 +18,7 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
   const [now, setNow] = useState(Date.now());
   const report = useReport(detail.run.id, status.live);
   const totals = report.data?.totals;
+  const routing = report.data?.routing;
   const cancel = useAction(() => api('/runs/' + detail.run.id + '/cancel', {}));
 
   useEffect(() => {
@@ -38,7 +39,16 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
         <div className="topbar-meta">
           <Badge tone={status.tone} dot>{status.label}</Badge>
           <span className="meta">{status.headline}</span>
-          {job?.model && <span className="chip-static">{job.model}</span>}
+          {job?.current_model ? (
+            <span className="chip-static" title="此刻真正在用的模型（来自账本）">{job.current_kind === 'local' ? '本地 ' : job.current_kind === 'cloud' ? 'API ' : ''}{job.current_model}</span>
+          ) : (
+            job?.model && <span className="chip-static">{job.model}</span>
+          )}
+          {status.live && job?.live && job.live.chars > 0 && (
+            <span className="chip-static" title="流式传输：这次模型调用正在生成的字符数">
+              <span className="spin" aria-hidden /> 生成中 {job.live.chars.toLocaleString()} 字 · {job.live.seconds}s
+            </span>
+          )}
           {status.live && started && <span className="meta">{fmtSeconds(Math.max(0, now / 1000 - started))}</span>}
           {gen && status.live && <span className="meta" title={gen.current}>文件 {gen.completed}/{gen.total}</span>}
           {rate != null && <span className="meta">最近调用 {rate} tok/s</span>}
@@ -49,6 +59,7 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
               {totals.cloud_tokens > 0 && <span className="tc-cloud">API {fmtTokens(totals.cloud_tokens)}</span>}
             </button>
           )}
+          {routing?.mode === 'ladder' && <BudgetChips routing={routing} />}
         </div>
       </div>
       <div className="row">
@@ -62,5 +73,28 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
       </div>
       {status.live && <progress className="topbar-progress" aria-label="任务正在运行" />}
     </header>
+  );
+}
+
+/** 顶栏预算条：API token 与调用次数的占用；接近上限变红。 Compact budget meters; they turn red near the limit. */
+function BudgetChips({ routing }: { routing: NonNullable<TaskReport['routing']> }) {
+  const b = routing.budget;
+  const items: [string, number, number | null, (n: number) => string][] = [
+    ['API', routing.spend.cloud_tokens, b.max_cloud_tokens, fmtTokens],
+    ['调用', routing.spend.calls, b.max_model_calls, String],
+  ];
+  return (
+    <span className="budget-chips" title="任务级预算（含对未知用量请求的预留）；详情见任务报告">
+      {items.filter(([, , limit]) => limit != null).map(([label, used, limit, fmt]) => {
+        const pct = Math.min(100, (used / (limit as number)) * 100);
+        return (
+          <span key={label} className={`bchip ${pct >= 90 ? 'hot' : pct >= 70 ? 'warm' : ''}`}>
+            {label} {fmt(used)}/{fmt(limit as number)}
+            <i style={{ width: pct + '%' }} />
+          </span>
+        );
+      })}
+      {routing.escalations > 0 && <span className="bchip warm">升级 {routing.escalations}</span>}
+    </span>
   );
 }

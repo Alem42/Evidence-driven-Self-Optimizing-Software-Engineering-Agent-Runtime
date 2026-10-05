@@ -8,6 +8,7 @@ import uuid
 
 from masa.infrastructure.llm import ChatProvider, validate_config
 from masa.domain.models import MasaError
+from masa.infrastructure import providers
 
 
 class Settings:
@@ -15,6 +16,7 @@ class Settings:
         """加载配置与用户选择保存的本地密钥。 Load profiles and credentials explicitly persisted by the user."""
         self.path = root / "provider.json"
         self.secret_path = root / 'provider-keys.local.json'
+        self.routing_path = root / 'routing.json'
         self.lock = threading.RLock()
         self.profiles = {}
         self.keys = {}
@@ -156,6 +158,161 @@ class Settings:
                 active,
             )
             return self.public()
+
+    # ───────────── 路由默认值（可在设置页编辑）/ routing defaults editable in Settings ─────────────
+    def routing(self):
+        """已保存的路由默认值（策略与预算）；文件缺失或损坏时回到内置默认。 Saved routing defaults, built-in defaults when absent."""
+        from masa.application.routing import validate_budget, validate_policy
+        raw = {}
+        try:
+            raw = json.loads(self.routing_path.read_text(encoding='utf-8')) if self.routing_path.exists() else {}
+        except (ValueError, OSError):
+            raw = {}
+        try:
+            return {'policy': validate_policy(raw.get('policy')), 'budget': validate_budget(raw.get('budget'))}
+        except MasaError:
+            return {'policy': validate_policy(None), 'budget': validate_budget(None)}
+
+    def save_routing(self, body):
+        """校验后原子保存。只保存与默认值不同的部分之外的完整规范化结果。 Validate, then save atomically."""
+        from masa.application.routing import validate_budget, validate_policy
+        policy = validate_policy(body.get('policy'))
+        budget = validate_budget(body.get('budget'))
+        with self.lock:
+            temp = self.routing_path.with_suffix('.tmp')
+            temp.write_text(json.dumps({'policy': policy, 'budget': budget}, ensure_ascii=False, indent=2), encoding='utf-8')
+            os.replace(temp, self.routing_path)
+        return {'policy': policy, 'budget': budget}
+
+    # ───────────── 模型次序 / model order ─────────────
+    def reorder(self, order, levels=None):
+        """按给定顺序重写 (等级, 优先级)：同一等级内按出现顺序给 0,1,2…。levels 可同时改等级。
+        等级沿列表非递减：路由是“从低等级起、逐级升级”，所以更靠前的模型不能比后面的等级更高。
+        Rewrite (level, priority) from a list order; levels are forced non-decreasing along the list because routing climbs from low to high."""
+        with self.lock:
+            if not isinstance(order, list) or sorted(order) != sorted(self.profiles):
+                raise MasaError('order must list every profile exactly once')
+            levels = levels or {}
+            if not isinstance(levels, dict) or any(k not in self.profiles or type(v) is not int or not 1 <= v <= 100 for k, v in levels.items()):
+                raise MasaError('invalid levels')
+            profiles = {i: dict(p) for i, p in self.profiles.items()}
+            previous = 1
+            counters = {}
+            for ident in order:
+                level = max(levels.get(ident, profiles[ident]['level']), previous)
+                profiles[ident]['level'] = previous = level
+                profiles[ident]['priority'] = counters.get(level, 0)
+                counters[level] = counters.get(level, 0) + 1
+            for p in profiles.values():
+                validate_config(p)
+            raw = {'version': 2, 'active_id': self.active_id, 'profiles': [dict(profiles[i], id=i) for i in order]}
+            temp = self.path.with_suffix('.tmp')
+            temp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding='utf-8')
+            os.replace(temp, self.path)
+            self.profiles = profiles
+            return self.public()
+
+    # ───────────── API 账户 / API accounts ─────────────
+    def accounts(self):
+        """把云端配置按 (地址 + key) 分组。不返回 key。 Group cloud profiles by (base URL + key); keys are never returned."""
+        with self.lock:
+            groups = {}
+            for ident, cfg in self.profiles.items():
+                key = self.keys.get(ident)
+                if cfg['model_type'] != 'cloud' or not key:
+                    continue
+                acc = providers.account_id(cfg['base_url'], key)
+                groups.setdefault(acc, {'id': acc, 'base_url': cfg['base_url'], 'host': providers.host_of(cfg['base_url']), 'profiles': []})
+                groups[acc]['profiles'].append({'id': ident, 'name': cfg.get('name') or cfg['model'], 'model': cfg['model'], 'level': cfg['level'],
+                                                'enabled': cfg['enabled']})
+            for g in groups.values():
+                known = providers.KNOWN.get(g['host'])
+                g['balance_supported'] = bool(known and known.get('balance_path'))
+                g['pricing_source'] = known['source'] if known else None
+            return list(groups.values())
+
+    def _account(self, acc):
+        """账户的 (地址, key, 模板配置)。 (base URL, key, template profile) of an account."""
+        with self.lock:
+            for ident, cfg in self.profiles.items():
+                key = self.keys.get(ident)
+                if cfg['model_type'] == 'cloud' and key and providers.account_id(cfg['base_url'], key) == acc:
+                    return cfg['base_url'], key, ident, dict(cfg)
+        raise MasaError('unknown API account')
+
+    def account_models(self, acc):
+        """向官方 /models 查询这把 key 能用的模型，并标出已添加的与建议配置。 Live model list with what is already added."""
+        base_url, key, _, _ = self._account(acc)
+        have = {cfg['model'] for ident, cfg in self.profiles.items() if cfg['base_url'] == base_url and self.keys.get(ident) == key}
+        models = providers.fetch_models(base_url, key)
+        for m in models:
+            m['added'] = m['id'] in have
+            m['suggestion'] = providers.suggestion(base_url, m['id'])
+        return models
+
+    def account_balance(self, acc):
+        base_url, key, _, _ = self._account(acc)
+        return providers.fetch_balance(base_url, key)
+
+    def add_models(self, acc, model_ids):
+        """把该 key 能用的新模型加成配置：复制地址与 key，按官方信息与已知建议填上下文、价格、等级。
+        Add models the key can use as profiles; endpoints/keys are copied and limits/prices come from the official data."""
+        base_url, key, template_id, template = self._account(acc)
+        if not isinstance(model_ids, list) or not model_ids or len(model_ids) > 20:
+            raise MasaError('choose 1..20 models to add')
+        live = {m['id']: m for m in providers.fetch_models(base_url, key)}
+        added = []
+        for model_id in model_ids:
+            if model_id not in live:
+                raise MasaError(f'the API does not list model {model_id}')
+            if any(c['base_url'] == base_url and c['model'] == model_id and self.keys.get(i) == key for i, c in self.profiles.items()):
+                continue
+            info, hint = live[model_id], providers.suggestion(base_url, model_id) or {}
+            body = {'new': True, 'name': info['name'], 'base_url': base_url, 'model': model_id, 'api_key': key,
+                    'model_type': 'cloud', 'protocol': template['protocol'], 'enabled': True,
+                    'level': hint.get('level', template['level']), 'priority': 0,
+                    'context_limit': max(512, min(info['context_window'] or template['context_limit'], 262144)),
+                    'max_output_tokens': max(64, min(info['max_output_tokens'] or template['max_output_tokens'], 8192)),
+                    'timeout_seconds': template['timeout_seconds'], 'token_parameter': template['token_parameter'],
+                    'thinking': template['thinking'], 'roles': [], 'input_price_per_million': hint.get('price_in'),
+                    'output_price_per_million': hint.get('price_out')}
+            # save() 会把新配置设为默认；添加模型不应改变默认选择。 save() would make it the default; adding must not.
+            previous_active = self.active_id
+            result = self.save(body)
+            if previous_active in self.profiles:
+                result = self.save({'action': 'select', 'id': previous_active})
+            added.append(model_id)
+        return {'added': added, 'settings': self.public()}
+
+    def select_models(self, acc, model_ids):
+        """按勾选应用：勾选的模型启用（没有就先添加），没勾选的已有配置只停用、不删除（保留价格/等级等设置）。
+        Apply a tick-list: ticked models are enabled (added first when missing); unticked existing profiles are disabled, never deleted.
+        默认模型不变。 The default model never changes."""
+        base_url, key, _, _ = self._account(acc)
+        if not isinstance(model_ids, list) or len(model_ids) > 50 or any(not isinstance(m, str) for m in model_ids):
+            raise MasaError('model_ids must be a list of model ids')
+        wanted = set(model_ids)
+        have = {cfg['model'] for i, cfg in self.profiles.items() if cfg['base_url'] == base_url and self.keys.get(i) == key}
+        missing = [m for m in model_ids if m not in have]
+        if missing:
+            self.add_models(acc, missing)  # 校验它们确实在官方列表里 / validates against the live list
+        with self.lock:
+            profiles = {i: dict(p) for i, p in self.profiles.items()}
+            for i, cfg in profiles.items():
+                if cfg['base_url'] == base_url and self.keys.get(i) == key:
+                    cfg['enabled'] = cfg['model'] in wanted
+            raw = {'version': 2, 'active_id': self.active_id, 'profiles': [dict(p, id=i) for i, p in profiles.items()]}
+            temp = self.path.with_suffix('.tmp')
+            temp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding='utf-8')
+            os.replace(temp, self.path)
+            self.profiles = profiles
+            return self.public()
+
+    def ready_profiles(self):
+        """已启用且凭据就绪（本地无需密钥）的配置，按等级与优先级排序。 Enabled, credentialed profiles in routing order."""
+        with self.lock:
+            return [(i, dict(p)) for i, p in sorted(self.profiles.items(), key=lambda item: (item[1]['level'], item[1]['priority'], item[0]))
+                    if p['enabled'] and (p['model_type'] == 'local' or self.keys.get(i))]
 
     def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""

@@ -68,7 +68,7 @@ export const useResults = (detail?: Detail) => {
   const revision = detail?.tools.map((t) => t.id + ':' + t.result_ref).join('|') ?? '';
   return useQuery({
     queryKey: qk.results(detail?.run.id ?? '', revision),
-    queryFn: () => api<{ checks: CheckResult[]; repair_advice?: RepairAdvice }>('/runs/' + detail!.run.id + '/results'),
+    queryFn: () => api<{ checks: CheckResult[]; repair_advice?: RepairAdvice; ownership?: { primary: string; lines: string[] } }>('/runs/' + detail!.run.id + '/results'),
     enabled: Boolean(detail),
   });
 };

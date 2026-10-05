@@ -22,6 +22,8 @@ from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 from masa.application.usage import task_report
+from masa.application.router import Router, build_snapshot
+from masa.application.routing import DEFAULT_BUDGET, DEFAULT_POLICY
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
@@ -42,6 +44,9 @@ class Console:
             Path(project),
         )
         self.settings = Settings(self.root)
+        # 如果跑过 scripts/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
+        from masa.domain.tokens import configure as configure_tokens
+        configure_tokens(self.root / 'token-calibration.json')
         self.hardware = HardwareMonitor()
         self.diagnostics = DiagnosticLog(self.root)
         self.lock = threading.RLock()
@@ -53,6 +58,8 @@ class Console:
         self.app_cancel = threading.Event()
         self.app_run_id = None
         self.job_thread = None
+        self.bench = None
+        self.bench_thread = None
         Store(self.root).close()
 
     def bootstrap(self):
@@ -68,6 +75,8 @@ class Console:
                     break
         return {
             "console_version": "workspace-console-v2",
+            # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
+            "routing_defaults": self.settings.routing(),
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
             "active_run": self.active,
@@ -100,6 +109,14 @@ class Console:
             store.db.execute('BEGIN')
             return Projects(store).view(rid) if rid else {'projects':Projects(store).catalog()}
         finally:store.close()
+
+    def triage(self, body):
+        """需求可行性预检（确定性规则，无模型调用），供新建任务页实时提示。 Rules-only feasibility triage for the New Task page."""
+        goal = body.get('goal')
+        if not isinstance(goal, str) or len(goal) > 16000:
+            raise MasaError('goal must be text up to 16000 characters')
+        from masa.application.triage import assess
+        return assess(goal)
 
     def project_report(self, rid):
         """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""
@@ -284,7 +301,10 @@ class Console:
                  'result': store.read(row['result_ref']) if row['result_ref'] else None}
                 for row in store.tools(rid)]
             completed=[(c['operation'],c['result']) for c in checks if c['result']]
-            return {'checks':checks,'repair_advice':repair_advice(completed)}
+            from masa.application import ownership
+            analysis=ownership.analyse(completed)
+            return {'checks':checks,'repair_advice':repair_advice(completed),
+                    'ownership':{'primary':analysis['primary'],'lines':ownership.describe(analysis)}}
         finally:
             store.close()
 
@@ -320,7 +340,48 @@ class Console:
             self._launch(new_id, 0)
             return {'id': new_id}
 
+    # ───────────── 评测 / benchmark ─────────────
+    def bench_tasks(self):
+        from masa.bench.tasks import describe
+        return describe()
+
+    def bench_start(self, body):
+        """启动一次评测（后台线程）。评测在独立的临时状态目录里跑，不污染历史，也不占用主界面的任务槽，但会占用 GPU 和云端额度，所以不允许与正在执行的任务同时跑。
+        Start a benchmark in a background thread. It runs in a scratch state directory (no pollution of history) but uses the GPU and cloud budget, so it never overlaps a running task."""
+        from masa.bench.runner import BenchRunner, resolve_config
+        with self.lock:
+            if self.bench_thread and self.bench_thread.is_alive():
+                raise MasaError('a benchmark is already running')
+            if (self.job_thread and self.job_thread.is_alive()) or self.active:
+                raise MasaError('a task is running; start the benchmark after it finishes')
+            config=resolve_config(body)
+            self.bench=BenchRunner(self.root,self.runner_path,self.go_path,self.project,config)
+            self.bench_thread=threading.Thread(target=self.bench.run,daemon=True,name='masa-bench')
+            self.bench_thread.start()
+            return {'id':self.bench.id}
+
+    def bench_status(self):
+        return self.bench.snapshot() if self.bench else {'state':'idle'}
+
+    def bench_stop(self):
+        if self.bench and self.bench_thread and self.bench_thread.is_alive():
+            self.bench.stop()
+        return self.bench_status()
+
+    def bench_results(self):
+        from masa.bench.runner import list_results
+        return {'results':list_results(self.root)}
+
+    def bench_result(self, result_id):
+        from masa.bench.runner import load_result
+        from masa.bench.report import aggregate
+        data=load_result(self.root,result_id)
+        data['aggregate']=aggregate(data.get('records',[]))
+        return data
+
     def _available(self):
+        if self.bench_thread and self.bench_thread.is_alive():
+            raise MasaError('a benchmark is running; stop it first (it uses the GPU and cloud budget)')
         if self.job_thread and self.job_thread.is_alive() and threading.current_thread() is not self.job_thread:
             raise MasaError('project generation is busy; wait for the current job')
         if self.closing:
@@ -372,6 +433,7 @@ class Console:
                     self.jobs[ident].update(status=status,result=result)
                 except Exception as exc:
                     self._fail_job(ident,exc,'worker:project')
+                finally:self._release_local_models()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-project-job')
             self.job_thread.start()
             return {'job_id':ident}
@@ -426,6 +488,29 @@ class Console:
         self.app_cancel.set()
         return {'id':rid}
 
+    def _release_local_models(self):
+        """手动任务结束后释放所有已启用的本地 Ollama 模型：不留空挂的模型，显卡随时可还给用户。尽力而为。
+        After a manual job, unload every enabled local Ollama model so no model idles in VRAM. Best effort."""
+        try:
+            for ident,_ in self.settings.ready_profiles():
+                profile=self.settings.profiles.get(ident,{})
+                if profile.get('model_type')=='local':
+                    try:self.settings.provider(ident).unload()
+                    except Exception:pass
+        except Exception:pass
+
+    def auto_fix(self, rid, body):
+        """从一次失败的验证继续自动修复：跳过规划与生成，沿用任务的路由与预算设置。
+        Continue the automatic repair from a failed verification (no re-planning); history is rebuilt from the version lineage."""
+        store=Store(self.root)
+        try:
+            run=store.run(rid)
+            goal=run['data'].get('goal')
+        finally:store.close()
+        request=dict(body or {})
+        request.update(goal=goal,continue_from=rid,auto_verify=True)
+        return self.start_autonomous_project_job(request)
+
     def start_autonomous_project_job(self, body, resume_job=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
@@ -444,30 +529,55 @@ class Console:
                             raise MasaError('answer the pending clarification before resuming')
                     finally:store.close()
                 body=previous['request']
+            # 路由：ladder = 本地优先、有界升级、任务级预算；固定模式保持原行为。恢复时沿用任务开始时冻结的候选集合。
+            # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
+            routing=previous.get('routing') if resume_job else None
+            if not resume_job and body.get('routing')=='ladder':
+                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),policy=body.get('policy'),
+                                       profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
-            provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
-            if resume_job and previous.get('provider',provider.profile)!=provider.profile:
-                raise MasaError('select the original API profile to resume')
+            if routing:
+                provider=None
+            else:
+                provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
+                if resume_job and previous.get('provider',provider.profile)!=provider.profile:
+                    raise MasaError('select the original API profile to resume')
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
-                              'mode':'auto','phase':'planning','attempt':0,'provider':provider.profile,'model_snapshot':getattr(provider,'snapshot',None),
-                              'request':{'goal':goal,'api_profile_id':body.get('api_profile_id') or self.settings.active_id}}
+                              'mode':'auto','phase':'planning','attempt':0,
+                              'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
+                              'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
+                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
             from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
                 try:
-                    WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job)).run()
+                    router=None
+                    if routing:
+                        # 候选按冻结快照重建；本地权重摘要变了的候选自动不可用。 Rebuild from the frozen set; changed local weights make a candidate unavailable.
+                        router=Router(store,routing,lambda entry:self.settings.provider(snapshot=entry['snapshot']),
+                                      live_digests=self._local_digests() if resume_job else None)
+                        if not self.jobs[ident].get('routing_ref'):
+                            self.jobs[ident]['routing_ref']=store.put(routing)
+                    WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job),router=router).run()
                 except Exception as exc:
                     self._fail_job(ident,exc,'worker:auto')
                 finally:store.close()
             self.job_thread=threading.Thread(target=work,daemon=True,name='masa-auto-project-job')
             self.job_thread.start()
             return {'job_id':ident}
+
+    def _local_digests(self):
+        """本地模型权重摘要（best effort；Ollama 不可达则返回 None，不阻塞任务）。 Local weight digests, best effort."""
+        try:
+            return {m['name']:m.get('digest') for m in OllamaControl().catalog().get('models',[])}
+        except Exception:
+            return None
 
     def _fail_job(self, ident, exc, route):
         """业务取消不改成失败；其余故障保存安全调用位置。 Preserve cancellation and log safe locations for other faults."""
@@ -496,6 +606,14 @@ class Console:
             job['generation_progress']=detail['run']['data'].get('project_plan',{}).get('gen_progress')
             requested=[e for e in detail['events'] if e['type']=='model_requested']
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
+            # 流式传输的实时进度：正在生成的字符数与用时（只在内存里）。 Live streaming progress: characters generated so far and elapsed time (memory only).
+            from masa.runtime import live as live_calls
+            job['live']=live_calls.get(job['run_id'])
+            # 顶栏显示“此刻真正在用的模型”，而不是选择框里的默认模型。 Show the model actually in use, not the default in a selector.
+            if requested:
+                route=requested[-1]['payload'].get('route') or {}
+                job['current_model']=route.get('model')
+                job['current_kind']=('local' if route.get('provider')=='ollama-native' else 'cloud') if route else None
             # 版本切换后仍显示同任务最近的实际速度，不伪造当前请求吞吐。
             # Keep the latest measured speed across revisions, never pretend it is the current live rate.
             store=Store(self.root)

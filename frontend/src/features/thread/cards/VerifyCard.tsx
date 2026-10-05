@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../api/client';
 import { startJob } from '../../../api/jobs';
-import { useResults } from '../../../api/queries';
+import { useProfiles, useResults } from '../../../api/queries';
 import type { Detail } from '../../../api/types';
 import { useActivity } from '../../../app/activity';
 import { useOpenRun } from '../../../app/nav';
@@ -47,13 +47,13 @@ export function VerifyCard({ detail }: { detail: Detail }) {
       }
     >
       {[rerun.error, resume.error, cancel.error, folder.error].filter(Boolean).map((e, i) => <Notice key={i} tone="bad">{(e as Error).message}</Notice>)}
-      {run.status === 'failed' && <RepairBox detail={detail} advice={results.data?.repair_advice} />}
+      {run.status === 'failed' && <RepairBox detail={detail} advice={results.data?.repair_advice} ownership={results.data?.ownership} />}
       {run.status === 'succeeded' && <AppRunner detail={detail} />}
     </Card>
   );
 }
 
-function RepairBox({ detail, advice }: { detail: Detail; advice?: { action: string; message: string } }) {
+function RepairBox({ detail, advice, ownership }: { detail: Detail; advice?: { action: string; message: string }; ownership?: { primary: string; lines: string[] } }) {
   const { working } = useActivity();
   const choice = useModelChoice();
   const open = useOpenRun();
@@ -64,12 +64,29 @@ function RepairBox({ detail, advice }: { detail: Detail; advice?: { action: stri
   const format = useAction(() => api<{ id: string }>('/runs/' + detail.run.id + '/format-project-tests', {}), (r) => open(r.id, { tab: 'code' }));
   const formatOnly = advice?.action === 'format_tests';
   const cycle = formatOnly || advice?.action === 'revise_tests';
-  const busy = repair.busy || revise.busy || format.busy;
-  const error = repair.error ?? revise.error ?? format.error;
+  // 推荐路径：从这次失败继续自动修复。系统自己判断“修实现还是改测试”，必要时升级到更强的模型，用户不必选。
+  // Recommended: continue automatic repair from this failure; the system decides implementation vs tests and escalates models itself.
+  const profiles = useProfiles().data?.profiles ?? [];
+  const ladderOk = profiles.some((p) => p.enabled && p.model_type === 'local') && profiles.some((p) => p.enabled && p.model_type === 'cloud');
+  const auto = useAction(() => startJob('/runs/' + detail.run.id + '/auto-fix', { api_profile_id: choice.id, ...(ladderOk ? { routing: 'ladder' } : {}) }, { label: '自动修复' }));
+  const busy = repair.busy || revise.busy || format.busy || auto.busy;
+  const error = auto.error ?? repair.error ?? revise.error ?? format.error;
 
   return (
     <div className="repair">
       <h4>下一步：修复</h4>
+      {ownership && ownership.lines.length > 0 && (
+        <Notice tone="neutral">
+          <b>问题归属：{ownership.primary === 'implementation' ? '实现' : ownership.primary === 'test' ? '测试' : '暂时分不清'}</b>
+          <ul>{ownership.lines.slice(0, 6).map((l, i) => <li key={i}>{l}</li>)}</ul>
+        </Notice>
+      )}
+      <div className="row wrap">
+        <Button variant="primary" disabled={busy || working || !choice.any} onClick={auto.run}>自动修复（推荐）</Button>
+        <span className="hint">系统判断该修实现还是改测试，无进展时自动升级模型；本地模型换云端时会先释放。</span>
+      </div>
+      <details>
+        <summary>手动选择</summary>
       <p className="muted">修改实现（测试冻结），或在测试本身有缺陷时创建单独的测试修订；每次修订都是新版本并重新验证。</p>
       {advice && <Notice tone={cycle ? 'warn' : 'neutral'}>{advice.message}</Notice>}
       <textarea rows={2} maxLength={4000} value={feedback} disabled={busy} onChange={(e) => setFeedback(e.target.value)} placeholder="补充说明（可选）：例如保留现有接口，修复编译错误，不更改测试预期。" />
@@ -80,6 +97,7 @@ function RepairBox({ detail, advice }: { detail: Detail; advice?: { action: stri
         <Button variant={cycle ? 'default' : 'primary'} disabled={busy || working || !advice || cycle || !choice.any} onClick={repair.run}>修复实现（冻结测试）</Button>
         <Button variant={cycle && !formatOnly ? 'primary' : 'default'} disabled={busy || working || !choice.any} onClick={revise.run}>修订测试（新版本）</Button>
       </div>
+      </details>
     </div>
   );
 }

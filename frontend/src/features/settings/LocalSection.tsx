@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { startJob } from '../../api/jobs';
 import { qk } from '../../api/queries';
@@ -101,6 +101,7 @@ export function LocalSection() {
           </div>
         </div>
       </Card>
+      <OrphanCard />
       <HardwareCard />
     </div>
   );
@@ -141,6 +142,40 @@ function HardwareCard() {
           <p className="hint">最近采集 {new Date(d.collected_at).toLocaleTimeString()} · 后端缓存 {d.cache_seconds} 秒</p>
         </>
       )}
+    </Card>
+  );
+}
+
+interface Runner { pid: number; parent_pid: number; orphan: boolean; memory_mb: number | null; started: string | null; model_blob: string | null }
+
+// 孤儿模型进程：Ollama 的 llama-server 在 ollama serve 被杀后可能继续占着显存。检测（只读）+ 一键清理，只会清理确认是孤儿的 Ollama 运行进程。
+// Orphaned model runners: Ollama's llama-server can keep holding VRAM after `ollama serve` dies. Detect (read-only) and clean up on request.
+function OrphanCard() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['orphans'], queryFn: async () => (await api<{ runners: Runner[] }>('/ollama/orphans')).runners, refetchInterval: 15_000 });
+  const clean = useMutation({
+    mutationFn: () => api<{ killed: number[]; freed_memory_mb: number }>('/ollama/orphans/clean', {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orphans'] }); qc.invalidateQueries({ queryKey: ['hardware'] }); },
+  });
+  const orphans = (q.data ?? []).filter((r) => r.orphan);
+  return (
+    <Card
+      title="模型运行进程"
+      subtitle="Ollama 的 llama-server 在 ollama serve 被杀、崩溃后可能继续占着显存和内存。"
+      actions={orphans.length > 0 && <Button size="sm" variant="danger" disabled={clean.isPending} onClick={() => clean.mutate()}>{clean.isPending ? '清理中…' : `清理 ${orphans.length} 个孤儿进程`}</Button>}
+    >
+      {q.isError && <Notice tone="bad">{(q.error as Error).message}</Notice>}
+      {orphans.length > 0 ? (
+        <Notice tone="warn">
+          发现 {orphans.length} 个<strong>孤儿</strong>模型进程（父进程 ollama serve 已不存在），共占用约 {orphans.reduce((a, r) => a + (r.memory_mb ?? 0), 0)} MB 内存和对应显存：
+          {orphans.map((r) => <div key={r.pid} className="mono">PID {r.pid} · {r.memory_mb ?? '?'} MB · {r.model_blob ?? '未知模型'} · 启动于 {r.started ? new Date(r.started).toLocaleTimeString() : '?'}</div>)}
+        </Notice>
+      ) : (
+        <p className="muted">{(q.data ?? []).length ? `${q.data!.length} 个运行进程，均有父进程，状态正常。` : '没有模型运行进程。'}</p>
+      )}
+      {clean.isSuccess && <p className="ok-text">已清理 {clean.data.killed.length} 个，释放约 {clean.data.freed_memory_mb} MB 内存。</p>}
+      {clean.isError && <Notice tone="bad">{(clean.error as Error).message}</Notice>}
+      <p className="hint">只会终止「确认父进程已不存在的 Ollama llama-server」，其它进程不受影响；清理前会再次核对。</p>
     </Card>
   );
 }

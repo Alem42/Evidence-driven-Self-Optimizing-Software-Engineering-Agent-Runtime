@@ -88,3 +88,27 @@ def repeated_assertion_signature(checks):
     return ()
 
 
+
+
+def failure_signature(checks):
+    """失败签名：把所有失败检查的诊断去掉文件名、行列号和数字后取集合。同一问题在多轮修复后仍出现，签名就不变。
+    A normalized failure signature: diagnostics stripped of paths, positions and numbers. An unchanged signature after several
+    repair rounds means the repairs are not making progress."""
+    found = set()
+    for operation, result in checks:
+        if result.get('exit_code') == 0:
+            continue
+        text = str(result.get('stdout', '')) + '\n' + str(result.get('stderr', ''))
+        for raw in text.splitlines():
+            try:
+                frame = json.loads(raw)
+                raw = frame.get('Output', '') if isinstance(frame, dict) else raw
+            except (ValueError, TypeError):
+                pass
+            for line in str(raw).splitlines():
+                match = re.search(r'\.go:\d+(?::\d+)?:\s*(.+)$', line.strip())
+                if match:
+                    found.add(re.sub(r'\d+', 'N', match.group(1).strip())[:160])
+                elif re.match(r'(?:--- FAIL|FAIL\b|panic:)', line.strip()):
+                    found.add(re.sub(r'\(?[\d.]+s\)?|\d+', 'N', line.strip())[:120])
+    return tuple(sorted(found))[:12]

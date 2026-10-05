@@ -67,3 +67,18 @@ class PreflightTests(unittest.TestCase):
                 'files': [{'path': p, 'purpose': 'p'} for p in ('go.mod', 'cmd/app/main.go', 'interval.go', 'interval_test.go')]}
         with self.assertRaisesRegex(MasaError, 'subdirectories'):
             validate_spec(spec)
+
+
+class FakeSettings:
+    """build_snapshot 所需的最小设置替身（不含真实密钥）。 Minimal settings stand-in for snapshot tests."""
+
+    def __init__(self, profiles):
+        self._profiles = profiles
+
+    def ready_profiles(self):
+        return list(self._profiles)
+
+    def provider(self, ident):
+        class P:
+            snapshot = {'version': 1, 'mode': 'fixed', 'profile_id': ident, 'config': {}}
+        return P()

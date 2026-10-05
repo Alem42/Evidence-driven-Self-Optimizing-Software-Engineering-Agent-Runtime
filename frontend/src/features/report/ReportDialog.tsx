@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useReport } from '../../api/queries';
 import type { TaskReport } from '../../api/types';
-import { fmtDuration, fmtTokens, kindLabel, OUTCOME, reportText } from '../../entities/report';
+import { CHAIN_TEXT, fmtDuration, fmtTokens, kindLabel, OUTCOME, REASON_TEXT, reportText } from '../../entities/report';
 import { stageLabels } from '../../entities/status';
 import { useUi } from '../../stores/ui';
 import { Badge, Button, Spinner } from '../../shared/ui';
@@ -19,6 +19,90 @@ function SplitBar({ local, cloud }: { local: number; cloud: number }) {
       <i className="seg-local" style={{ width: (local / total) * 100 + '%' }} />
       <i className="seg-cloud" style={{ width: (cloud / total) * 100 + '%' }} />
     </div>
+  );
+}
+
+/** 预算条：已用（含对未知用量请求的预留）/ 上限。 Budget bar: used (incl. reservations) vs limit. */
+function BudgetBar({ label, used, limit, fmt }: { label: string; used: number; limit: number | null; fmt: (n: number) => string }) {
+  if (limit == null) return <div className="budget-row"><span>{label}</span><span className="muted">{fmt(used)} · 不限</span></div>;
+  const pct = Math.min(100, (used / limit) * 100);
+  return (
+    <div className="budget-row">
+      <span>{label}</span>
+      <div className="budget-bar"><i className={pct >= 90 ? 'hot' : ''} style={{ width: pct + '%' }} /></div>
+      <span className="mono">{fmt(used)} / {fmt(limit)}</span>
+    </div>
+  );
+}
+
+function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
+  const b = r.budget;
+  const t0 = r.decisions[0]?.at ?? 0;
+  return (
+    <>
+      <h3>路由与预算 <span className="muted">{r.mode === 'ladder' ? '本地优先 · 有界升级' : '固定模型'}</span></h3>
+      {r.mode === 'ladder' && (
+        <div className="budget">
+          <BudgetBar label="API token" used={r.spend.cloud_tokens} limit={b.max_cloud_tokens} fmt={fmtTokens} />
+          <BudgetBar label="模型调用" used={r.spend.calls} limit={b.max_model_calls} fmt={String} />
+          <BudgetBar label="运行时间" used={r.spend.active_seconds} limit={b.max_active_seconds} fmt={(n) => fmtDuration(n * 1000)} />
+          {b.max_cost != null && <BudgetBar label="费用" used={r.spend.cost} limit={b.max_cost} fmt={(n) => n.toFixed(4)} />}
+          {r.spend.reserved_calls > 0 && <p className="hint">有 {r.spend.reserved_calls} 次云调用没有返回用量，已按其上下文上限预留。</p>}
+        </div>
+      )}
+      {r.stopped && <div className="notice notice-warn">路由已停止：{REASON_TEXT[r.stopped.reason] ?? r.stopped.reason}{r.stopped.detail ? '（' + r.stopped.detail + '）' : ''}。证据已保留，未继续花费。</div>}
+      <div className="row wrap"><Badge tone={r.escalations ? 'warn' : 'ok'}>{r.escalations ? `升级 ${r.escalations} 次` : '未升级'}</Badge><span className="muted">候选：{r.candidates.map((c) => `L${c.level} ${c.model}`).join(' → ')}</span></div>
+      <ol className="timeline">
+        {r.decisions.map((d, i) => (
+          <li key={i} className={d.escalated ? 'tl-pending' : d.action === 'stop' ? 'tl-failed' : ''}>
+            <time>{t0 ? '+' + fmtDuration((d.at - t0) * 1000) : '—'}</time>
+            <div className="tl-main">
+              <div className="row between">
+                <span><strong>{CHAIN_TEXT[d.chain] ?? d.chain}</strong> <span className="muted">· {step(d.role)}</span></span>
+                <span className="mono">{d.action === 'stop' ? '停止' : `L${d.level} ${d.model}`}</span>
+              </div>
+              <div className="muted">{d.escalated && <strong>升级 · </strong>}{REASON_TEXT[d.reason] ?? d.reason}{d.detail ? ' · ' + d.detail : ''}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+const NODE_TEXT: Record<string, string> = {
+  classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: 'gofmt 格式化',
+  repair: '修复实现', revise: '修订测试', arbitrate: '测试↔规格仲裁', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
+};
+const OWNER_TEXT: Record<string, string> = { implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' };
+
+/** 修复过程：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收。 Repair process events. */
+function ProcessBlock({ items, t0 }: { items: NonNullable<TaskReport['process']>; t0: number }) {
+  const rows = items.flatMap((p, i) => {
+    const d = p.data;
+    let text = '';
+    let tone = '';
+    if (p.kind === 'workflow_node') text = `修复子图 · ${NODE_TEXT[d.node] ?? d.node} → ${NODE_TEXT[d.to] ?? d.to}（${d.why}）`;
+    else if (p.kind === 'diagnosis') {
+      text = `Diagnoser（${d.by}）：${OWNER_TEXT[d.owner] ?? d.owner}${d.reconciled_from ? `（原判“${OWNER_TEXT[d.reconciled_from] ?? d.reconciled_from}”，但它自己逐条核对发现测试期望与需求不一致，已改判）` : ''} · ${d.rationale ?? ''}`;
+      if (d.mismatches?.length) text += ` · 期望与需求不一致的用例：${d.mismatches.join('、')}`;
+    } else if (p.kind === 'rewrite_started') { text = `补丁连续没有改善，由最高等级整体重写实现（当时未解决 ${d.unresolved ?? '?'} 条）`; tone = 'p-ok'; }
+    else if (p.kind === 'imports_fixed') { text = `确定性修复 import（无模型调用）：${Object.entries(d.files ?? {}).map(([f, c]) => f + ' ' + (c as string[]).join('、')).join('；')}`; tone = 'p-ok'; }
+    else if (p.kind === 'diagnosis_failed') text = 'Diagnoser 未能给出诊断，按规则继续';
+    else if (p.kind === 'models_released') { text = `释放本地模型：${(d.models ?? []).join('、')}${d.reason === 'switching' ? '（切换模型）' : '（任务结束）'}`; tone = 'p-ok'; }
+    else if (p.kind === 'rounds_extended') { text = `仍在收敛（未解决 ${d.was} → ${d.unresolved}），多给一轮修复`; tone = 'p-ok'; }
+    else if (p.kind === 'noop_revision') { text = '修复没有任何改动，已拒收（不验证）并换更强的模型'; tone = 'p-bad'; }
+    else if (p.kind === 'task_stopped') { text = `任务停止：${d.detail ?? d.reason}`; tone = 'p-bad'; }
+    else if (p.kind === 'transport_retry') text = '本地服务暂不可达，等待恢复后重试';
+    else return [];
+    return [<li key={i} className={tone}><time>{t0 ? '+' + fmtDuration((p.at - t0) * 1000) : '—'}</time><span>{text}</span></li>];
+  });
+  if (!rows.length) return null;
+  return (
+    <>
+      <h3>修复过程 <span className="muted">{rows.length} 步</span></h3>
+      <ul className="process">{rows}</ul>
+    </>
   );
 }
 
@@ -48,6 +132,9 @@ function Body({ r }: { r: TaskReport }) {
       </div>
       <SplitBar local={t.local_tokens} cloud={t.cloud_tokens} />
       {t.unknown_usage_calls > 0 && <p className="hint">有 {t.unknown_usage_calls} 次调用服务端没有返回用量，已计为“未知”，没有当作 0。</p>}
+
+      {r.routing && <RoutingBlock r={r.routing} />}
+      {r.process && r.process.length > 0 && <ProcessBlock items={r.process} t0={t0} />}
 
       <h3>按模型</h3>
       <div className="table-wrap">
