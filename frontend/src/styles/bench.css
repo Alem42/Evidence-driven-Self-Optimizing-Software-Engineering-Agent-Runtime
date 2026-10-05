@@ -33,3 +33,6 @@
 .bench-queue .q-mark { display: inline-block; min-width: 14px; font-weight: 700; }
 .bench-queue .q-now { color: var(--accent, #4c6ef5); font-weight: 600; }
 .bench-queue .q-wait { color: var(--muted); }
+
+/* streaming indicator in the top bar */
+.chip-static .spin { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent, #4c6ef5); animation: bench-spin 0.9s linear infinite; vertical-align: -1px; }

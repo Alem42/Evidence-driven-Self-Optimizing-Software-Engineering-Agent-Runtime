@@ -209,7 +209,7 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(provider.usage['total_tokens'],20)
         self.assertEqual(provider.metrics['generation_tokens_per_second'],4)
         self.assertEqual(provider.metrics['prompt_tokens_per_second'],12)
-        self.assertFalse(self.requests[0]['stream']);self.assertEqual(self.requests[0]['format'],'json')
+        self.assertTrue(self.requests[0]['stream']);self.assertEqual(self.requests[0]['format'],'json')  # 流式是默认（W1）：可取消、能检测 stall / streaming is the default (W1)
         self.assertEqual(self.requests[0]['options']['num_ctx'],8192)
         self.assertFalse(self.requests[0]['think'])
         self.assertEqual(self.request_metadata, [('/api/chat', None)])

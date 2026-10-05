@@ -44,6 +44,11 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
           ) : (
             job?.model && <span className="chip-static">{job.model}</span>
           )}
+          {status.live && job?.live && job.live.chars > 0 && (
+            <span className="chip-static" title="流式传输：这次模型调用正在生成的字符数">
+              <span className="spin" aria-hidden /> 生成中 {job.live.chars.toLocaleString()} 字 · {job.live.seconds}s
+            </span>
+          )}
           {status.live && started && <span className="meta">{fmtSeconds(Math.max(0, now / 1000 - started))}</span>}
           {gen && status.live && <span className="meta" title={gen.current}>文件 {gen.completed}/{gen.total}</span>}
           {rate != null && <span className="meta">最近调用 {rate} tok/s</span>}

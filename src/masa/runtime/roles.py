@@ -3,6 +3,7 @@ import time
 from masa.domain.models import MasaError, TransportFailure
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure.llm import ChatProvider
+from masa.runtime import live
 
 
 class RoleRuntime:
@@ -100,6 +101,9 @@ class RoleRuntime:
                 # 真实网络调用不能超过任务剩余时间；旧测试提供商仍使用原签名。
                 # Bound real requests by the remaining run deadline without changing fake providers.
                 if isinstance(provider,ChatProvider):
+                    # 流式：每个数据块之间检查取消标志，并上报实时进度。 Streaming: check the cancel flag between chunks and report live progress.
+                    provider.should_cancel=lambda:bool(self.store.run(rid)['cancel_requested'])
+                    provider.on_progress=lambda info:live.update(rid,purpose,(provider.profile or {}).get('model'),info)
                     remaining=run['data']['deadline_at']-time.time()
                     if remaining<=0:
                         raise MasaError('role run cancelled or deadline expired')
@@ -107,6 +111,7 @@ class RoleRuntime:
                 else:
                     output=provider.respond(context)
             except Exception as failure:
+                live.clear(rid)
                 with self.store.transaction():
                     self.store.db.execute("UPDATE role_invocations SET status='failed',finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(time.time(),rid,purpose,invocation_id))
                     self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None),
@@ -114,6 +119,7 @@ class RoleRuntime:
                         # 没有收到响应：免费本地调用可以安全重试。 No response received: safe to retry for free local calls.
                         'transport':isinstance(failure,TransportFailure)})
                 raise
+            live.clear(rid)
             output_ref=self.store.put(output)
             with self.store.transaction():
                 self.store.db.execute("UPDATE role_invocations SET status='completed',output_ref=?,finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(output_ref,time.time(),rid,purpose,invocation_id))

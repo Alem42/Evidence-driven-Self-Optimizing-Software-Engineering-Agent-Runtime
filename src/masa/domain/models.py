@@ -20,6 +20,10 @@ class ContextOverflow(MasaError):
                          'rejected before sending because local servers silently truncate instead of failing')
 
 
+class CallCancelled(MasaError):
+    """模型调用在流式传输过程中被用户取消：连接已关闭，服务端会停止生成。 The call was cancelled mid-stream; the connection is closed so the server stops generating."""
+
+
 class TransportFailure(MasaError):
     """没有收到任何响应（连接被拒绝、被重置、服务被杀）。对免费的本地模型，这种失败可以在服务恢复后安全重试；
     对付费云调用，结果仍视为未知。 No response was received (refused, reset, server killed). Safe to retry for FREE local models

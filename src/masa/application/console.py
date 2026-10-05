@@ -606,6 +606,9 @@ class Console:
             job['generation_progress']=detail['run']['data'].get('project_plan',{}).get('gen_progress')
             requested=[e for e in detail['events'] if e['type']=='model_requested']
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
+            # 流式传输的实时进度：正在生成的字符数与用时（只在内存里）。 Live streaming progress: characters generated so far and elapsed time (memory only).
+            from masa.runtime import live as live_calls
+            job['live']=live_calls.get(job['run_id'])
             # 顶栏显示“此刻真正在用的模型”，而不是选择框里的默认模型。 Show the model actually in use, not the default in a selector.
             if requested:
                 route=requested[-1]['payload'].get('route') or {}

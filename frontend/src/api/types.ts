@@ -125,6 +125,8 @@ export interface Job {
   /** 此刻真正在用的模型（来自账本事件），不是选择框里的默认模型。 The model in use right now, from ledger events. */
   current_model?: string | null;
   current_kind?: 'local' | 'cloud' | null;
+  /** 流式传输的实时进度：此刻这次模型调用已生成的字符数与用时。 Live streaming progress of the in-flight model call. */
+  live?: { step: string; model: string | null; chars: number; seconds: number } | null;
   error?: string;
   result?: any;
   run_status?: string;

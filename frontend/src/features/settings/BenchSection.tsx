@@ -233,6 +233,7 @@ function Progress({ r, cat }: { r: BenchResult; cat: BenchCatalog }) {
           <p>
             正在跑 <Badge>L{cur.level}</Badge> <strong>{title}</strong> 第 {cur.repeat} 次 · 已 <b>{fmtDuration(runElapsed * 1000)}</b>
             {cur.stage && <> · 阶段 <b>{stageLabels[cur.stage] ?? cur.stage}</b></>}
+            {cur.live_chars ? <> · 正在生成 <b>{cur.live_chars.toLocaleString()}</b> 字</> : null}
             {cur.model && <> · <span className="chip-static">{cur.kind === 'local' ? '本地 ' : cur.kind === 'cloud' ? 'API ' : ''}{cur.model}</span></>}
           </p>
           <div className="budget">

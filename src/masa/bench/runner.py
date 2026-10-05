@@ -305,7 +305,8 @@ class BenchRunner:
     def _live(self, console, job, started, polls):
         """每次轮询：当前阶段与模型；每 3 次轮询再算一次本次已用的云端 token（算账要读账本，不必每次都做）。
         On every poll: current stage and model; the cloud tokens used so far are recomputed every 3rd poll (it reads the ledger)."""
-        fields = {'stage': job.get('stage') or job.get('phase'), 'model': job.get('current_model'), 'kind': job.get('current_kind')}
+        fields = {'stage': job.get('stage') or job.get('phase'), 'model': job.get('current_model'), 'kind': job.get('current_kind'),
+                  'live_chars': (job.get('live') or {}).get('chars')}
         if polls % 3 == 0 and job.get('run_id'):
             try:
                 from masa.application.usage import task_report
