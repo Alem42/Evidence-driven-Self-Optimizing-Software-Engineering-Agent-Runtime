@@ -24,6 +24,7 @@ export interface ProjectPlan {
   clarification_id?: string;
   clarification?: Clarification;
   coverage_warning?: string;
+  triage?: Triage;
   test_review?: { findings: { severity: string; message: string }[] };
   error?: string;
 }
@@ -121,6 +122,11 @@ export interface Job {
   started?: number;
   created_at?: number;
   model?: string | null;
+  /** 此刻真正在用的模型（来自账本事件），不是选择框里的默认模型。 The model in use right now, from ledger events. */
+  current_model?: string | null;
+  current_kind?: 'local' | 'cloud' | null;
+  /** 流式传输的实时进度：此刻这次模型调用已生成的字符数与用时。 Live streaming progress of the in-flight model call. */
+  live?: { step: string; model: string | null; chars: number; seconds: number } | null;
   error?: string;
   result?: any;
   run_status?: string;
@@ -135,6 +141,7 @@ export interface Bootstrap {
   active_job: (Job & { job_id: string }) | null;
   interrupted_jobs: { job_id: string; run_id?: string; phase?: string }[];
   capabilities: Record<string, boolean>;
+  routing_defaults?: { policy: RoutingPolicy; budget: RoutingBudget };
 }
 
 export interface Profile {
@@ -199,7 +206,7 @@ export interface ModelCall {
   step_id: string | null;
   invocation_id: string | null;
   attempt_no: number | null;
-  status: 'completed' | 'failed' | 'pending';
+  status: 'completed' | 'failed' | 'pending' | 'abandoned';
   model: string;
   provider?: string | null;
   kind: 'local' | 'cloud' | 'unknown';
@@ -260,4 +267,103 @@ export interface TaskReport {
   calls: ModelCall[];
   tools: ToolCallRow[];
   versions: { run_id: string; status: string; kind: string }[];
+  /** 旧任务没有路由信息，为 null。 Null for legacy tasks. */
+  routing: RoutingReport | null;
+  /** 修复过程事件：子图节点、诊断、模型释放、轮数延长等。 Repair-process events. */
+  process?: ProcessEvent[];
+}
+
+export interface ProcessEvent {
+  kind: string;
+  run_id: string;
+  at: number;
+  data: Record<string, any>;
+}
+
+// ───────── 路由与预算 Routing & budget ─────────
+export interface RoutingBudget {
+  max_model_calls: number | null;
+  max_cloud_tokens: number | null;
+  max_active_seconds: number | null;
+  max_cost: number | null;
+}
+
+export interface RoutingPolicy {
+  attempts_per_level: Record<string, number>;
+  max_escalations: number;
+  planner_retries: number;
+  start_level_by_role: Record<string, number>;
+}
+
+export interface RouteDecision {
+  run_id: string;
+  at: number;
+  action: 'use' | 'stop';
+  role: string;
+  chain: 'planning' | 'generation' | 'fix' | string;
+  stage: string;
+  reason: string;
+  detail?: string;
+  escalated: boolean;
+  candidate: string | null;
+  level: number | null;
+  model: string | null;
+  model_type: 'local' | 'cloud' | null;
+  spend: { calls: number; cloud_tokens: number; active_seconds: number; cost: number };
+}
+
+export interface RoutingReport {
+  mode: 'ladder' | 'fixed';
+  budget: RoutingBudget;
+  policy: RoutingPolicy;
+  candidates: { id: string; level: number; model: string; model_type: string; digest: string | null; context_limit: number }[];
+  spend: { calls: number; cloud_tokens: number; active_seconds: number; cost: number; cost_known: boolean; reserved_calls: number };
+  decisions: RouteDecision[];
+  escalations: number;
+  stopped: { reason: string; detail?: string } | null;
+}
+
+// ───────── API 账户 Accounts ─────────
+export interface Account {
+  id: string;
+  base_url: string;
+  host: string;
+  profiles: { id: string; name: string; model: string; level: number; enabled: boolean }[];
+  balance_supported: boolean;
+  pricing_source: string | null;
+}
+
+export interface AccountModel {
+  id: string;
+  name: string;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  vision: boolean;
+  efforts: string[] | null;
+  added: boolean;
+  suggestion: { level: number; price_in: number; price_out: number; currency: string; source: string; note: string } | null;
+}
+
+export interface AccountBalance {
+  supported: boolean;
+  reason?: string;
+  available?: boolean;
+  balances?: { currency: string; total: string; granted: string; topped_up: string }[];
+}
+
+// ───────── 可行性预检 Feasibility triage ─────────
+export interface TriageFinding {
+  rule: string;
+  level: 'infeasible' | 'risky';
+  matched: string[];
+  reason: string;
+  suggestion: string;
+}
+
+export interface Triage {
+  verdict: 'ok' | 'risky' | 'infeasible';
+  summary?: string;
+  findings: TriageFinding[];
+  /** 本地模型的复核意见：只能告警，不拦截。 Local-model review: warns only. */
+  model?: { verdict: 'ok' | 'risky' | 'skipped'; reasons: string[]; suggestions: string[]; by?: string };
 }

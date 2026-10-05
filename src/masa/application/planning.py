@@ -3,7 +3,7 @@ from masa.domain.proposals import text, validate_spec, validate_checks
 
 import time
 import uuid
-from masa.domain.models import Budget, MasaError, canonical
+from masa.domain.models import Budget, MasaError, canonical, stage_error
 from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
@@ -37,7 +37,8 @@ class ProjectPlanning:
                 status,reason,event='failed',plan['error'],'project_deadline_expired'
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
-    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None):
+    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
+                 triage=None, triage_provider=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         if resume_id:
@@ -52,14 +53,24 @@ class ProjectPlanning:
             (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
             plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
             plan['clarification_enabled']=True
+            if triage:plan['triage']=triage
             if retry_of:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
-                for key in ('clarification','clarification_id','clarification_answers','requirement_revision'):
+                for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4, deadline_seconds=86400),
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0), deadline_seconds=86400),
                                                            graph=harness_policy(), project_plan=plan, parent_run_id=reuse or retry_of)
         if on_created:
             on_created(rid)
+        # 本地模型复核可行性：只能升级为“有风险”，失败也不影响规划。Local review may only raise a warning; failures never block planning.
+        if triage_provider is not None and not resume_id and not reuse and not retry_of:
+            try:
+                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal})
+                plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{**opinion,'by':triage_provider.profile.get('model')}}
+                if opinion['verdict']=='risky' and plan['triage'].get('verdict')=='ok':plan['triage']['verdict']='risky'
+            except Exception as exc:  # 预检只是建议：任何失败都不能影响规划 / advisory only: no failure may block planning
+                plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{'verdict':'skipped','reasons':[str(exc)[:200]],'suggestions':[]}}
+            self.update(rid,plan,'created','triage_reviewed')
         try:
             if resume_id and plan.get('spec_ref'):
                 spec=self.store.read(plan['spec_ref'])
@@ -77,7 +88,9 @@ class ProjectPlanning:
                     values['clarification_allowed']=not bool(plan.get('clarification_answers'))
                 if plan.get('clarification_answers'):
                     values.update(clarification=plan['clarification'],answers=plan['clarification_answers'])
-                    invocation=plan['clarification_id']
+                    # 重规划是新 run：它的第一次调用必须是 initial（答案已在上下文里）；只有在原 run 内续跑才用澄清编号。
+                    # A re-plan is a NEW run: its first call must be 'initial' (the answers are already in the context).
+                    invocation='initial' if retry_of else plan['clarification_id']
                 spec = RoleRuntime(self.store).call(rid,provider,'project_planner',values,invocation_id=invocation)
                 if isinstance(spec,dict) and spec.get('kind')=='clarification_request':
                     if plan.get('clarification_answers'):
@@ -90,7 +103,11 @@ class ProjectPlanning:
             validate_spec(spec)
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
-            checks = self.call(rid, provider, 'project_tester', {'goal':goal, 'spec':spec})
+            tester_values = {'goal':goal, 'spec':spec}
+            # 复用 Planner 结果重试 Tester 时，带上上次被拒绝的原因：否则上下文和第一次完全一样，同样的输出会连续被拒三次（评测里 hello 因此失败）。
+            # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
+            if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
+            checks = self.call(rid, provider, 'project_tester', tester_values)
             validate_checks(checks,spec,require_coverage=False)
             # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
@@ -113,7 +130,21 @@ class ProjectPlanning:
             plan['status'] = 'failed'
             plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
             self.update(rid, plan, 'failed', 'project_planning_failed')
-            raise MasaError(f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+            raise stage_error(exc, f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+
+    def record_triage_block(self, goal, triage):
+        """确定会失败的需求：不调用任何模型，只留下一条带原因和改写建议的失败记录，方便在历史里看到为什么。
+        A requirement that is certain to fail: no model call, just a failed record with reasons and rewrites for the history."""
+        text(goal, 16000)
+        seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
+        seed.mkdir(parents=True)
+        (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
+        reasons='; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible')
+        plan={'status':'failed','provider':{},'template':'go-cli','dependencies':[],'triage':triage,'error':'infeasible: '+reasons[:600]}
+        rid=Runtime(self.store,self.executor).create(seed,goal,Budget(model_calls=1,deadline_seconds=86400),graph=harness_policy(),project_plan=plan)
+        self.store.event(rid,'triage_blocked',{'rules':[f['rule'] for f in triage['findings'] if f['level']=='infeasible']})
+        self.update(rid,plan,'failed','project_triage_blocked')
+        return rid
 
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""

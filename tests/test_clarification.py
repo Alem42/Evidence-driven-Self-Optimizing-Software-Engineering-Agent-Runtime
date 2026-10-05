@@ -35,6 +35,27 @@ class ClarificationTests(unittest.TestCase):
             self.assertEqual(s.run(rid)['data']['project_plan']['status'],'awaiting_review')
             s.close()
 
+    def test_replan_after_a_rejected_response_keeps_the_answers_and_starts_with_an_initial_call(self):
+        """回答澄清后 Planner 响应又被拒绝：带原因重规划必须能继续（此前会报 role continuation requires an initial invocation）。"""
+        class RejectedOnce(AskingProvider):
+            def __init__(self):self.rejected=False
+            def respond(self,context):
+                if context['purpose']=='project_planner' and context.get('answers') and not self.rejected:
+                    self.rejected=True;return {'summary':'incomplete'}  # 缺字段，契约拒绝 / missing fields
+                return super().respond(context)
+        with tempfile.TemporaryDirectory() as temp:
+            s=Store(Path(temp));provider=RejectedOnce();p=ProjectPlanning(s,FakeExecutor())
+            try:
+                rid=p.generate(provider,'Build CLI')
+                plan=s.run(rid)['data']['project_plan']
+                p.answer(rid,plan['clarification_id'],ANSWER)
+                with self.assertRaises(MasaError):p.generate(provider,'Build CLI',resume_id=rid)
+                again=p.generate(provider,'Build CLI',retry_of=rid,retry_feedback='Your previous attempt was rejected: invalid ProjectSpec fields')
+                replanned=s.run(again)['data']['project_plan']
+                self.assertEqual(replanned['status'],'awaiting_review')
+                self.assertEqual(replanned['clarification_answers'],ANSWER)  # 用户的回答没有丢 / the answers survived
+            finally:s.close()
+
     def test_auto_waits_and_resumes_after_answer(self):
         """自动执行也等待真实回答，再继续整个流程。 Automatic workflows wait for explicit answers."""
         with tempfile.TemporaryDirectory() as temp:

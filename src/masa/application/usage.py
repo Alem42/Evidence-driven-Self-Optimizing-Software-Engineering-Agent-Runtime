@@ -23,15 +23,24 @@ def _add(total, key, value):
         total[key] = total.get(key, 0) + value
 
 
-def _model_calls(store, run):
+def _model_calls(store, run, events=None):
     """配对 requested 与 completed/failed，得到每次模型调用的真实用量。 Pair requests with their outcomes."""
     pending = {}
     calls = []
-    for e in store.events(run['id']):
+    for e in (events if events is not None else store.events(run['id'])):
         p = e['payload'] if isinstance(e['payload'], dict) else {}
         key = (p.get('step_id'), p.get('invocation_id'), p.get('attempt_no'))
         if e['type'] == 'model_requested':
             pending[key] = (e, p.get('route') or {})
+        elif e['type'] == 'model_abandoned':
+            req, route = pending.pop(key, (None, {}))
+            if req:
+                calls.append({
+                    'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'), 'attempt_no': p.get('attempt_no'),
+                    'status': 'abandoned', 'model': route.get('model') or '未知模型', 'provider': route.get('provider'),
+                    'kind': 'local' if _is_local(route) else 'cloud', 'started': req['created'], 'finished': e['created'], 'duration_ms': None,
+                    'prompt_tokens': None, 'completion_tokens': None, 'total_tokens': None, 'tokens_per_second': None,
+                    'error': '进程中断或请求丢失，已作为新尝试重试', 'reserved_tokens': _int(route.get('context_limit'))})
         elif e['type'] in ('model_completed', 'model_failed'):
             req, route = pending.pop(key, (None, {}))
             usage = p.get('usage') or {}
@@ -54,6 +63,8 @@ def _model_calls(store, run):
                 'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': total,
                 'tokens_per_second': metrics.get('generation_tokens_per_second'),
                 'error': p.get('error') or p.get('reason') or (p.get('contract_diagnostic') and '响应不符合契约') or None,
+                # 上下文上限是单次调用 token 的上界：用量未知时按它预留，不当作 0。 Upper bound used when usage is unknown.
+                'reserved_tokens': _int(route.get('context_limit')),
             })
     # 只有请求没有结果：说明仍在进行或结果未知，如实标记。 Requests without outcomes are in flight or unknown.
     for req, route in pending.values():
@@ -64,11 +75,12 @@ def _model_calls(store, run):
             'provider': route.get('provider'), 'kind': 'local' if _is_local(route) else 'cloud',
             'started': req['created'], 'finished': None, 'duration_ms': None, 'prompt_tokens': None,
             'completion_tokens': None, 'total_tokens': None, 'tokens_per_second': None, 'error': None,
+            'reserved_tokens': _int(route.get('context_limit')),
         })
     return calls
 
 
-def _tool_calls(store, run):
+def _tool_calls(store, run, events=None):
     """检查步骤的真实耗时与退出码；程序运行另列。 Real durations and exit codes of check steps, plus app runs."""
     ops = {n['id']: n.get('operation') for n in run['data'].get('graph', {}).get('nodes', [])}
     results = {t['step_id']: t.get('result_ref') for t in store.tools(run['id'])}
@@ -91,7 +103,7 @@ def _tool_calls(store, run):
             except Exception:  # 单个坏产物不能拖垮整份报告。 One broken artifact must not break the report.
                 pass
         out.append(item)
-    events = store.events(run['id'])
+    events = events if events is not None else store.events(run['id'])
     starts = {e['payload'].get('request_id'): e for e in events if e['type'] == 'app_requested'}
     for e in events:
         if e['type'] == 'app_finished':
@@ -109,9 +121,14 @@ def task_report(store, run_id):
     root = Projects.root_id(run_id, runs)
     members = [r for r in runs.values() if Projects.root_id(r['id'], runs) == root]
     calls, tools, versions = [], [], []
+    budget_events, decisions, process = [], [], []
     for run in members:
-        calls += _model_calls(store, run)
-        tools += _tool_calls(store, run)
+        events = store.events(run['id'])
+        calls += _model_calls(store, run, events)
+        tools += _tool_calls(store, run, events)
+        budget_events += [e for e in events if e['type'] == 'task_budget']
+        decisions += [{**e['payload'], 'run_id': run['id'], 'at': e['created']} for e in events if e['type'] == 'route_decided']
+        process += [{'kind': e['type'], 'run_id': run['id'], 'at': e['created'], 'data': _process_data(e)} for e in events if e['type'] in _PROCESS_EVENTS]
         plan = run['data'].get('project_plan')
         versions.append({'run_id': run['id'], 'status': run['status'], 'plan_status': (plan or {}).get('status'),
                          'kind': 'verification' if run['data'].get('project_bundle') else 'code' if (plan or {}).get('kind') == 'code' else 'plan',
@@ -161,10 +178,41 @@ def task_report(store, run_id):
         outcome = 'failed'
     else:
         outcome = 'running'
+    routing = _routing_section(report_calls=calls, tools=tools, totals=totals, budget_events=budget_events, decisions=decisions)
     return {
         'project_id': root, 'selected_run_id': selected['id'], 'latest_run_id': latest['id'], 'title': runs[root]['data']['goal'],
         'outcome': outcome, 'started_at': started_at, 'ended_at': ended_at,
         'wall_seconds': round(ended_at - started_at, 2) if started_at and ended_at else None,
         'totals': totals, 'by_model': sorted(models, key=lambda m: -m['total_tokens']), 'by_step': steps,
-        'calls': calls, 'tools': tools, 'versions': versions,
+        'calls': calls, 'tools': tools, 'versions': versions, 'routing': routing,
+        'process': sorted(process, key=lambda p: p['at']),
     }
+
+
+# 修复过程里值得在报告里展示的事件：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收、停止原因。
+# Events shown as the "process" of a task: workflow steps, diagnoses, model releases, extended rounds, rejected no-op fixes, stop reasons.
+_PROCESS_EVENTS = {'workflow_node', 'diagnosis', 'diagnosis_failed', 'models_released', 'rounds_extended', 'noop_revision', 'task_stopped', 'transport_retry',
+                   'rewrite_started', 'imports_fixed'}
+
+
+def _process_data(event):
+    """只保留短字段，避免把大段诊断原文塞进报告。 Keep short fields only."""
+    return {k: (v[:600] if isinstance(v, str) else v) for k, v in event['payload'].items()
+            if isinstance(v, (str, int, float, bool, list)) and k not in {'prompt', 'files'}}
+
+
+def _routing_section(report_calls, tools, totals, budget_events, decisions):
+    """路由与预算：模式、限额、当前花费（含预留）、每次决策与升级链。没有 task_budget 事件的旧任务返回 None。
+    Routing and budget view; legacy tasks without a task_budget event yield None."""
+    from masa.application.routing import spend_from_report
+    if not budget_events:
+        return None
+    latest = max(budget_events, key=lambda e: e['created'])['payload']
+    decisions.sort(key=lambda d: d['at'])
+    prices = {m: tuple(v) for m, v in (latest.get('prices') or {}).items()}
+    spend = spend_from_report({'calls': report_calls, 'tools': tools, 'totals': totals}, prices)
+    stop = next((d for d in reversed(decisions) if d.get('action') == 'stop'), None)
+    return {'mode': latest.get('mode'), 'budget': latest.get('budget'), 'policy': latest.get('policy'),
+            'candidates': latest.get('candidates', []), 'spend': spend, 'decisions': decisions,
+            'escalations': sum(1 for d in decisions if d.get('escalated')),
+            'stopped': {'reason': stop['reason'], 'detail': stop.get('detail')} if stop else None}

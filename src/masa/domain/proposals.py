@@ -215,3 +215,86 @@ def validate_files(files, spec):
     preflight_go(files, spec['module'])
     return files
 
+
+
+def validate_triage(action):
+    """本地模型的可行性意见：只能是 ok 或 risky（它没有拦截权）；“infeasible”会被降级为 risky，因为弱模型不能误杀好需求。
+    The local model's opinion: ok or risky only (it has no blocking power); "infeasible" is downgraded to risky."""
+    if not isinstance(action, dict) or set(action) - {'verdict', 'reasons', 'suggestions'} or action.get('verdict') not in {'ok', 'risky', 'infeasible'}:
+        raise MasaError('invalid triage opinion')
+    result = {'verdict': 'ok' if action['verdict'] == 'ok' else 'risky'}
+    for key in ('reasons', 'suggestions'):
+        items = action.get(key, [])
+        if not isinstance(items, list) or len(items) > 5 or any(not isinstance(i, str) or len(i) > 400 or '\x00' in i for i in items):
+            raise MasaError('invalid triage ' + key)
+        result[key] = [i.strip() for i in items if i.strip()]
+    if action['verdict'] == 'infeasible':
+        result['reasons'] = ['（本地模型认为不可行，已降级为风险提示）'] + result['reasons']
+    return result
+
+
+DIAGNOSIS_OWNERS = ('implementation', 'test', 'both', 'spec', 'unclear')
+
+
+def validate_diagnosis(action):
+    """Diagnoser 的结论：谁的问题 + 依据 + 给修复者的指导。它不能改文件，也不能放宽冻结边界；
+    spec/unclear 表示需要人（需求矛盾或证据不足），由工作流确定性地停下。
+    The Diagnoser's verdict: whose problem, why, and instructions for the fixer. It edits nothing and cannot relax frozen boundaries;
+    spec/unclear mean a human is needed and the workflow stops deterministically."""
+    from masa.domain.models import MasaError
+    required = {'owner', 'rationale', 'implementation_instructions', 'test_instructions'}
+    if not isinstance(action, dict) or not required <= set(action) or set(action) - required - {'expectation_checks'}:
+        raise MasaError('invalid diagnosis fields')
+    if action['owner'] not in DIAGNOSIS_OWNERS:
+        raise MasaError('invalid diagnosis owner')
+    out = {'owner': action['owner']}
+    for key in ('rationale', 'implementation_instructions', 'test_instructions'):
+        value = action[key]
+        if not isinstance(value, str) or len(value) > 2000 or '\x00' in value:
+            raise MasaError(f'invalid diagnosis {key}')
+        out[key] = value.strip()
+    out['expectation_checks'] = _expectation_checks(action.get('expectation_checks', []))
+    if out['owner'] in ('implementation', 'both') and not out['implementation_instructions']:
+        raise MasaError('an implementation diagnosis needs implementation_instructions')
+    if out['owner'] in ('test', 'both') and not out['test_instructions']:
+        raise MasaError('a test diagnosis needs test_instructions')
+    return out
+
+
+def _expectation_checks(value):
+    """Diagnoser 对每个失败用例的独立核对：需求怎么说 / 测试期望什么 / 是否一致。 The Diagnoser's independent per-case check."""
+    from masa.domain.models import MasaError
+    if not isinstance(value, list) or len(value) > 8:
+        raise MasaError('invalid expectation_checks')
+    out = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {'case', 'requirement_says', 'test_expects', 'matches'} or type(item['matches']) is not bool:
+            raise MasaError('invalid expectation check')
+        entry = {'matches': item['matches']}
+        for key in ('case', 'requirement_says', 'test_expects'):
+            if not isinstance(item[key], str) or len(item[key]) > 300 or chr(0) in item[key]:
+                raise MasaError('invalid expectation check text')
+            entry[key] = item[key].strip()
+        out.append(entry)
+    return out
+
+
+def reconcile_diagnosis(diagnosis):
+    """让结论服从 Diagnoser 自己的核对结果（确定性）。强模型也会被测试带偏：真实任务里它写出“同额按类别升序”的理由，判成实现问题，
+    而它自己对用例的核对如果做了，会发现测试把“按金额降序”写成了升序。规则：核对过的用例全部“测试与需求不一致” ⇒ 测试有问题；
+    部分不一致且原判只是实现 ⇒ 两侧都有问题。返回 (新诊断, 是否被改判)。
+    Make the verdict obey the Diagnoser's OWN per-case checks (deterministic). Even a strong model can be anchored by the test: in a real task it
+    invented a tie-break rule and blamed the implementation, while a per-case check would have shown the test had descending turned into ascending.
+    Rule: every checked case disagrees with the requirement => the test is wrong; some disagree and the verdict blamed only the implementation => both."""
+    checks = diagnosis.get('expectation_checks') or []
+    if not checks or diagnosis['owner'] in ('spec', 'unclear'):
+        return diagnosis, False
+    wrong = [c for c in checks if not c['matches']]
+    if not wrong:
+        return diagnosis, False
+    lines = chr(10).join(f"- {c['case']}: the requirement says {c['requirement_says']}; the test expects {c['test_expects']}" for c in wrong)
+    if len(wrong) == len(checks) and diagnosis['owner'] != 'test':
+        return {**diagnosis, 'owner': 'test', 'test_instructions': ('Correct these expectations to follow the requirement:' + chr(10) + lines)[:2000]}, True
+    if diagnosis['owner'] == 'implementation':
+        return {**diagnosis, 'owner': 'both', 'test_instructions': ('Also correct these expectations to follow the requirement:' + chr(10) + lines)[:2000]}, True
+    return diagnosis, False

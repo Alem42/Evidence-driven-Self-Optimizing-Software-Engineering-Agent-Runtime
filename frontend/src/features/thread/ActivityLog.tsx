@@ -1,6 +1,7 @@
 import type { Detail, RunEvent } from '../../api/types';
 import { stageLabels } from '../../entities/status';
 import { fmtSeconds } from '../../entities/text';
+import { ranModel } from '../../entities/models';
 
 const role = (e: RunEvent): string => stageLabels[e.payload.step_id] ?? e.payload.step_id ?? '角色';
 
@@ -9,7 +10,24 @@ type Mapper = (e: RunEvent) => { text: string; tone?: 'ok' | 'bad' | 'run' } | n
 // 事件 → 人话。未知事件不显示，避免噪音。 Event → plain language; unknown events stay hidden.
 const MAP: Record<string, Mapper> = {
   run_created: () => ({ text: '任务创建' }),
-  model_requested: (e) => ({ text: `${role(e)} · 发起模型请求`, tone: 'run' }),
+  model_requested: (e) => {
+    const m = ranModel(e);
+    return { text: `${role(e)} · ${m ? (m.local ? '本地 ' : 'API ') + m.model : '模型'} 发起请求`, tone: 'run' };
+  },
+  route_decided: (e) => {
+    const p = e.payload;
+    if (p.action === 'stop') return { text: `路由停止：${p.reason}`, tone: 'bad' };
+    return p.escalated ? { text: `升级 → L${p.level} ${p.model}（${role(e)}）`, tone: 'run' } : null;
+  },
+  diagnosis: (e) => ({ text: `Diagnoser 诊断：${{ implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' }[e.payload.owner as string] ?? e.payload.owner}`, tone: 'run' }),
+  diagnosis_failed: () => ({ text: 'Diagnoser 未能给出诊断，按规则继续' }),
+  models_released: (e) => ({ text: `已释放本地模型：${(e.payload.models ?? []).join('、')}`, tone: 'ok' }),
+  rounds_extended: (e) => ({ text: `仍在收敛（未解决 ${e.payload.was} → ${e.payload.unresolved}），多给一轮修复`, tone: 'ok' }),
+  rewrite_started: () => ({ text: '补丁连续没有改善，整体重写实现', tone: 'run' }),
+  imports_fixed: (e) => ({ text: `确定性修复 import（无模型调用）：${Object.keys(e.payload.files ?? {}).join('、')}`, tone: 'ok' }),
+  noop_revision: () => ({ text: '修复没有任何改动，已拒收并换更强的模型', tone: 'bad' }),
+  task_stopped: (e) => ({ text: `任务停止：${e.payload.detail ?? e.payload.reason}`, tone: 'bad' }),
+  transport_retry: () => ({ text: '本地服务暂不可达，等待恢复后重试' }),
   model_completed: (e) => {
     const m = e.payload.metrics;
     const rate = m?.generation_tokens_per_second;

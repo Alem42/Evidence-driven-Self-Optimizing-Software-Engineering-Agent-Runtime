@@ -15,6 +15,8 @@ interface UiState {
   follow: boolean;
   /** 正在展示任务报告的版本；不持久化。 Run whose report dialog is open (transient). */
   reportFor: string | null;
+  /** 本任务参与路由的模型；null = 全部可用。 Models taking part in a ladder task; null = every ready model. */
+  selectedModels: string[] | null;
   set: (patch: Partial<Omit<UiState, 'set'>>) => void;
 }
 
@@ -28,6 +30,7 @@ export const useUi = create<UiState>()(
       graphExpanded: false,
       follow: true,
       reportFor: null,
+      selectedModels: null,
       set: (patch) => set(patch),
     }),
     { name: 'masa.ui.v1', partialize: ({ reportFor: _r, ...rest }) => rest },

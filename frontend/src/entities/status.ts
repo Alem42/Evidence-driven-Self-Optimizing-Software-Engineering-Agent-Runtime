@@ -23,6 +23,8 @@ export const stageLabels: Record<string, string> = {
   verification: 'Go 验证',
   repair: '修复实现',
   project_repair: '修复实现',
+  project_diagnoser: 'Diagnoser 诊断',
+  project_triage: '可行性初筛',
   test_revision: '修订测试',
   project_test_revision: '修订测试',
   planning_retry: '重试测试方案',
@@ -76,6 +78,8 @@ export function deriveStatus(detail: Detail | undefined, job?: Job | null): Deri
   if (run.status === 'cancelled') return make('cancelled', '已取消', 'neutral', '任务已取消', '已有代码与证据保留在版本记录中。');
   if (attached && job?.status === 'interrupted')
     return make('interrupted', '已中断', 'warn', '任务已中断', '服务曾重启；请检查并恢复，未知请求不会被自动重发。');
+  if (plan?.triage?.verdict === 'infeasible' && String(plan.error ?? '').startsWith('infeasible'))
+    return make('triage_blocked', '预检拦下', 'warn', '需求被预检判定为确定会失败', '没有调用任何模型。看下面的原因和改写建议，改写后重新开始；确实想试可在新建任务页勾选「仍然继续」。');
   if (plan && run.status === 'failed')
     return make('model_failed', '模型阶段失败', 'bad', '模型阶段未完成', '查看日志中的响应或契约错误；此草稿尚未执行 Go 工具验证。');
   if (run.status === 'failed' || run.status === 'needs_attention')

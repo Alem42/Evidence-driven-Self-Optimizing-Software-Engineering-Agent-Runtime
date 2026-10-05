@@ -130,6 +130,22 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = console.projects(parts[2])
                 elif path == "/api/settings":
                     result = console.settings.save(body) if write else console.settings.public()
+                elif path == '/api/triage' and write:
+                    result = console.triage(body)
+                elif path == '/api/routing':
+                    result = console.settings.save_routing(body) if write else console.settings.routing()
+                elif path == '/api/settings/order' and write:
+                    result = console.settings.reorder(body.get('order'), body.get('levels'))
+                elif path == '/api/accounts' and not write:
+                    result = {'accounts': console.settings.accounts()}
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'models' and not write:
+                    result = {'models': console.settings.account_models(parts[2])}
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'balance' and not write:
+                    result = console.settings.account_balance(parts[2])
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'add-models' and write:
+                    result = console.settings.add_models(parts[2], body.get('models'))
+                elif len(parts) == 4 and parts[:2] == ['api', 'accounts'] and parts[3] == 'select' and write:
+                    result = console.settings.select_models(parts[2], body.get('models'))
                 elif path == '/api/settings/test' and write:
                     result = console.settings.test(body.get('id') or console.settings.active_id)
                 elif path == '/api/ollama' and not write:
@@ -137,6 +153,27 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = OllamaControl().catalog()
                 elif path == '/api/ollama/action' and write:
                     result = console.ollama_action(body)
+                elif path == '/api/ollama/orphans' and not write:
+                    from masa.infrastructure import orphans
+                    result = {'runners': orphans.list_runners()}
+                elif path == '/api/ollama/orphans/clean' and write:
+                    from masa.infrastructure import orphans
+                    result = orphans.clean_orphans()
+                elif path == '/api/workflows/fix-v1' and not write:
+                    from masa.application.workflows import FIX_V1
+                    result = FIX_V1
+                elif path == '/api/bench/tasks' and not write:
+                    result = console.bench_tasks()
+                elif path == '/api/bench/status' and not write:
+                    result = console.bench_status()
+                elif path == '/api/bench/results' and not write:
+                    result = console.bench_results()
+                elif len(parts) == 4 and parts[:3] == ['api', 'bench', 'results'] and not write:
+                    result = console.bench_result(parts[3])
+                elif path == '/api/bench/start' and write:
+                    result = console.bench_start(body)
+                elif path == '/api/bench/stop' and write:
+                    result = console.bench_stop()
                 elif path == '/api/hardware' and not write:
                     result = console.hardware.snapshot()
                 elif path == '/api/diagnostics' and not write:
@@ -169,6 +206,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                         action = parts[3]
                         if action == "resume":
                             result = console.resume(rid, body.get('pause_after'))
+                        elif action == 'auto-fix':
+                            result = console.auto_fix(rid, body)
                         elif action == 'rerun':
                             result = console.rerun(rid)
                         elif action == 'approve-project':

@@ -105,6 +105,7 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 		defer os.RemoveAll(dir)
 		binary := filepath.Join(dir, "app"+filepath.Ext(exe))
 		build := exec.CommandContext(ctx, exe, "build", "-o", binary, "./cmd/app")
+		HideWindow(build)
 		build.Dir, build.Env = cfg.Workspace, cleanEnvironment(cfg.GoExecutable)
 		output := &capBuffer{limit: req.MaxOutputBytes}
 		build.Stdout, build.Stderr = output, output
@@ -134,6 +135,7 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 	stdout := &capBuffer{limit: (req.MaxOutputBytes + 1) / 2}
 	stderr := &capBuffer{limit: req.MaxOutputBytes / 2}
 	cmd := exec.CommandContext(ctx, exe, args...)
+	HideWindow(cmd)
 	cmd.Dir, cmd.Env = cfg.Workspace, cleanEnvironment(cfg.GoExecutable)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A descendant holding a pipe must not keep the worker alive indefinitely.

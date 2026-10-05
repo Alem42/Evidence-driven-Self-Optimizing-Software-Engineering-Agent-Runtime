@@ -72,6 +72,7 @@ func main() {
 		return
 	}
 	cmd := exec.CommandContext(ctx, exe, "--worker", "--workspace", *workspace, "--go", *goExe)
+	runner.HideWindow(cmd)
 	cmd.Stdin = bytes.NewReader(line)
 	var out, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &diagnostic

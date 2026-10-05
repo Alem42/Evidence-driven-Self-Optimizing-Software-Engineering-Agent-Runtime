@@ -1,5 +1,6 @@
 """有界 OpenAI-compatible 调用；模型只返回提案。 Bounded compatible calls; models only propose actions."""
 
+import http.client
 import json
 import math
 import time
@@ -7,7 +8,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
-from masa.domain.models import MasaError, canonical
+from masa.domain.models import CallCancelled, MasaError, TransportFailure, canonical, ContextOverflow
+from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, StreamError, StreamStalled, StreamTimeout, StreamTooLarge,
+                                           abandon, read_stream)
+from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
 from masa.agents.schemas import response_schema
 
@@ -41,10 +45,20 @@ def validate_config(config):
         if type(value) is not int or not low<=value<=high:raise MasaError('invalid '+name)
         values[name]=value
     roles=config.get('roles',[])
-    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','code_generation','verifier'}
+    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','project_triage','project_diagnoser','code_generation','verifier'}
     if not isinstance(roles,list) or any(not isinstance(r,str) or r not in allowed for r in roles) or len(set(roles))!=len(roles):
         raise MasaError('invalid model roles')
     values['roles']=roles
+    # 流式传输的可选旋钮：stall_seconds = 开始回答之后多久没有任何字节算卡死；first_token_seconds = 出第一个字之前允许多久（本地模型加载/预填充可能很慢）；streaming = 是否流式。
+    # Optional streaming knobs: stall_seconds (silence after the answer started), first_token_seconds (before the first token; a local model may load or prefill for long), streaming.
+    for name,low,high in (('stall_seconds',5,3600),('first_token_seconds',5,7200)):
+        if name in config:
+            value=config[name]
+            if type(value) is not int or not low<=value<=high:raise MasaError(f'invalid {name}')
+            values[name]=value
+    if 'streaming' in config:
+        if type(config['streaming']) is not bool:raise MasaError('invalid streaming')
+        values['streaming']=config['streaming']
     for name in ('input_price_per_million','output_price_per_million'):
         value=config.get(name)
         if value is not None and (type(value) not in {int,float} or not math.isfinite(value) or value<0):raise MasaError('invalid '+name)
@@ -81,6 +95,11 @@ def validate_config(config):
     return values
 
 
+# 每个本地请求都带保活时间：就算进程崩溃，模型最多再占 2 分钟显存，而不是 Ollama 默认的 5 分钟或更久。
+# Every local request carries a keep-alive: after a crash the model holds VRAM for 2 minutes at most.
+LOCAL_KEEP_ALIVE = '120s'
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         """禁止将认证头重定向到其他地址。 Never redirect authorization to another endpoint."""
@@ -113,6 +132,50 @@ class ChatProvider:
         self.usage = None
         self.metrics = None
         self.contract_diagnostic = None
+        self.loaded = False  # 这个实例是否可能让本地模型驻留在显存里 / may this instance have left a local model resident in VRAM
+        # 流式传输的钩子：由 RoleRuntime 在每次调用前设置。should_cancel() 为真就中断连接；on_progress(info) 收到实时进度。
+        # Streaming hooks set by RoleRuntime before every call: should_cancel() true aborts the connection; on_progress(info) receives live progress.
+        self.should_cancel = None
+        self.on_progress = None
+
+    def unload(self):
+        """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
+        Release the local model from VRAM right away (Ollama: keep_alive=0). Best effort: never raises."""
+        if self.config['model_type'] != 'local' or self.config['protocol'] != 'ollama':
+            return False
+        body = json.dumps({'model': self.config['model'], 'keep_alive': 0, 'stream': False}).encode()
+        request = urllib.request.Request(self.config['base_url'].rstrip('/') + '/api/generate', data=body,
+                                         headers={'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+                response.read(4096)
+            self.loaded = False
+            return True
+        except (OSError, urllib.error.URLError, ValueError):
+            return False
+
+    def reachable(self, timeout=3):
+        """本地服务是否在响应（Ollama: /api/version；兼容服务: /models）。 Is the local server answering?"""
+        path = '/api/version' if self.config['protocol'] == 'ollama' else '/models'
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(self.config['base_url'].rstrip('/') + path, timeout=timeout) as response:
+                response.read(1024)
+            return True
+        except (OSError, urllib.error.URLError, ValueError):
+            return False
+
+    def wait_until_reachable(self, max_seconds, *, interval=3, sleep=time.sleep, clock=time.monotonic):
+        """等本地服务恢复（用户能容忍很长的时间）。只用于本地模型；云端没有这个概念。
+        Wait for the local server to come back (the user tolerates long waits). Local models only."""
+        if self.config['model_type'] != 'local':
+            return False
+        deadline = clock() + max_seconds
+        while True:
+            if self.reachable():
+                return True
+            if clock() >= deadline:
+                return False
+            sleep(interval)
 
     def respond(self, context, *, timeout=None):
         """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
@@ -130,6 +193,9 @@ class ChatProvider:
             instruction+=' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
         if self.config['protocol']=='ollama' and purpose=='project_developer' and context.get('generation_mode')!='files-v1':
             instruction+=' Copy this exact go.mod value: '+json.dumps(f"module {context['spec']['module']}\n\ngo 1.27.0\n")+'. Keep implementation concise. Avoid repetitive comments.'
+        # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
+        # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
+        streaming = bool(self.config.get('streaming', True))
         payload = {
             "model": self.config["model"],
             "messages": [
@@ -138,8 +204,10 @@ class ChatProvider:
             ],
             "response_format": {"type": "json_object"},
             self.config["token_parameter"]: self.config["max_output_tokens"],
-            "stream": False,
+            "stream": streaming,
         }
+        if streaming:
+            payload['stream_options'] = {'include_usage': True}  # OpenAI 兼容服务在末尾块里给用量 / usage arrives in a trailing chunk
         if self.config["thinking"] != "auto":
             payload["thinking"] = {"type": self.config["thinking"]}
         endpoint='/chat/completions'
@@ -148,13 +216,23 @@ class ChatProvider:
             # Native options bound context/output without streaming; role contracts remain shared.
             # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
             # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
-            payload={'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':False,
+            payload={'keep_alive':LOCAL_KEEP_ALIVE,'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':streaming,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
+        if self.config['model_type'] == 'local':
+            self.loaded = True  # 请求发出后模型就会被加载 / the request will load the model
         raw = canonical(payload).encode()
         if len(raw) > 262144:
             raise MasaError("model input byte limit exceeded")
+        # 本地服务（Ollama 等）在输入超出窗口时静默截断而不是报错，所以必须在发出前拦截。云端 API 会明确报错，不需要。
+        # 只在“几乎一定溢出”（下界估算仍超过窗口）时拒绝，避免误杀本来能跑的请求。
+        # Local servers silently truncate an over-long prompt, so guard before sending (cloud APIs fail loudly and need no guard).
+        # Reject only when even the LOWER-bound estimate exceeds the window.
+        if self.config['model_type'] == 'local':
+            low = estimate_tokens_lower(payload['messages'][0]['content'] + payload['messages'][1]['content'])
+            if low > self.config['context_limit']:
+                raise ContextOverflow(low, self.config['context_limit'], self.config['model'])
         request = urllib.request.Request(
             self.config["base_url"].rstrip("/") + endpoint,
             data=raw,
@@ -167,24 +245,39 @@ class ChatProvider:
         try:
             # 不读取错误响应正文，避免上游回显密钥或请求内容进入日志。
             # Never expose upstream error bodies, which may echo credentials or request contents.
-            with urllib.request.build_opener(NoRedirect()).open(
-                request, timeout=max(0.1, deadline - time.monotonic())
-            ) as response:
-                chunks = []
-                size = 0
-                while True:
-                    if time.monotonic() >= deadline:
-                        raise MasaError(
-                            "model request timed out; billing may be unknown"
-                        )
-                    chunk = response.read1(min(65536, 1048577 - size))
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    size += len(chunk)
-                    if size > 1048576:
-                        raise MasaError("model response exceeds byte limit")
-                decoded = json.loads(b"".join(chunks))
+            response = urllib.request.build_opener(NoRedirect()).open(
+                request, timeout=max(0.1, min(30.0, deadline - time.monotonic()))  # 连接阶段的时限；读取阶段由流式读取循环自己控制 / connect-phase limit; the read phase is governed by the stream loop
+            )
+            try:
+                local = self.config['model_type'] == 'local'
+                assembler = StreamAssembler(self.config['protocol'])
+                try:
+                    read_stream(response, assembler, deadline=deadline, should_cancel=self.should_cancel, on_progress=self.on_progress,
+                                first_token_seconds=float(self.config.get('first_token_seconds', 900 if local else 240)),
+                                stall_seconds=float(self.config.get('stall_seconds', 180 if local else 90)))
+                except StreamCancelled:
+                    # 离开 with 块时连接被关闭，服务端（Ollama）随之停止生成。 Leaving the with block closes the connection, so the server stops generating.
+                    raise CallCancelled('model call cancelled; the connection was closed') from None
+                except StreamTimeout:
+                    raise MasaError("model request timed out; billing may be unknown") from None
+                except StreamTooLarge:
+                    raise MasaError("model response exceeds byte limit") from None
+                except StreamStalled as stalled:
+                    where = 'after it started answering' if stalled.started else 'before the first token'
+                    # 免费本地调用可以安全重试；付费云调用结果未知，不自动重放。
+                    # A free local call is safe to retry; a paid cloud call stays unknown and is never replayed.
+                    if local:
+                        raise TransportFailure(f'model stream stalled {where}; no bytes arrived') from None
+                    raise MasaError(f'model stream stalled {where}; billing may be unknown; no automatic retry') from None
+                except StreamError as streamed:
+                    raise MasaError(f'model reported an error while streaming: {str(streamed)[:200]}'.replace(self.key, '[REDACTED]') if self.key else f'model reported an error while streaming: {str(streamed)[:200]}') from None
+                decoded = assembler.finish()
+            except BaseException:
+                # 异常退出：丢弃连接，且不等待关闭（见 streaming.abandon）。 Exceptional exit: discard the connection without waiting for the close (see streaming.abandon).
+                abandon(response)
+                raise
+            else:
+                response.close()
         except urllib.error.HTTPError as exc:
             code = exc.code
             # 本地服务仅提取受限错误说明，便于判断模型/上下文配置。
@@ -200,10 +293,11 @@ class ChatProvider:
             raise MasaError(
                 f"model HTTP {code}; no automatic retry; check API configuration"
             ) from None
-        except (OSError, ValueError, urllib.error.URLError):
-            raise MasaError(
-                "model transport/JSON failure; billing may be unknown"
-            ) from None
+        except (OSError, urllib.error.URLError, http.client.HTTPException):
+            # 没有拿到响应：连接被拒绝/重置/超时。 No response received: refused, reset or timed out.
+            raise TransportFailure("model transport failure: no response received; billing may be unknown") from None
+        except ValueError:
+            raise MasaError("model response was not valid JSON; billing may be unknown") from None
         try:
             if self.config['protocol']=='ollama':
                 # verbose 同源的纳秒计数，只计算真实完成响应的速率。
@@ -233,6 +327,9 @@ class ChatProvider:
             if choice.get("finish_reason") != "stop" or choice["message"].get(
                 "refusal"
             ):
+                # 输出被截断（或被拒绝）也是“已收到响应”：标记出来，协调器才会重试/升级/切到逐文件，而不是当成传输失败直接中止。
+                # A cut-off (or refused) answer was RECEIVED too: mark it so the coordinator retries, escalates or switches to per-file generation instead of aborting.
+                self.contract_diagnostic = {'action_type': 'incomplete', 'top_keys': []}
                 raise MasaError("model refused or returned incomplete output")
             content = choice["message"]["content"]
             if not isinstance(content, str):
@@ -242,6 +339,9 @@ class ChatProvider:
             except json.JSONDecodeError as exc:
                 # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
                 # Distinguish a received invalid response from uncertain transport, without exposing content.
+                # 标记“已收到”，协调器才会带原因重试/升级，而不是把它当成网络失败直接中止（真实模拟中 DeepSeek 返回截断 JSON 即因此中止）。
+                # Mark it as RECEIVED so the coordinator retries/escalates instead of aborting as if it were a transport failure.
+                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[]}
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
             # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
             # Record response shape only, never code, thinking or raw exception text.
