@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { qk, useProfiles } from '../../api/queries';
+import { qk, useProfiles, useRoles } from '../../api/queries';
 import type { RoutingBudget, RoutingPolicy } from '../../api/types';
 import { useActivity } from '../../app/activity';
 import { byRouting, profileLabel, profileLevel, profileReady } from '../../entities/profiles';
 import { stageLabels } from '../../entities/status';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 
-const ROLES = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision'];
+const FALLBACK_ROLES = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision'];
 const CHAIN_NAMES: Record<string, string> = { planning: '规划', generation: '生成', fix: '修复' };
 
 type Draft = { policy: RoutingPolicy; budget: RoutingBudget };
@@ -19,6 +19,9 @@ type Draft = { policy: RoutingPolicy; budget: RoutingBudget };
 export function RoutingSection() {
   const qc = useQueryClient();
   const profiles = useProfiles();
+  // 起步等级可按角色设置：角色清单来自 RoleSpec 注册表（新增角色自动出现）。 Per-role start levels: the list comes from the RoleSpec registry (new roles appear automatically).
+  const roles = useRoles().data;
+  const ROLES = roles?.length ? roles.filter((r) => r.routable).map((r) => r.id) : FALLBACK_ROLES;
   const defaults = useActivity().bootstrap?.routing_defaults;
   const [draft, setDraft] = useState<Draft | null>(null);
   useEffect(() => {

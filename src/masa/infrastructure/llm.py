@@ -13,6 +13,7 @@ from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, Str
                                            abandon, read_stream)
 from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
+from masa.roles import registry
 from masa.agents.schemas import response_schema
 
 
@@ -45,7 +46,7 @@ def validate_config(config):
         if type(value) is not int or not low<=value<=high:raise MasaError('invalid '+name)
         values[name]=value
     roles=config.get('roles',[])
-    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','project_triage','project_diagnoser','code_generation','verifier'}
+    allowed=registry.current().config_roles()  # 来自 RoleSpec 注册表 / from the RoleSpec registry
     if not isinstance(roles,list) or any(not isinstance(r,str) or r not in allowed for r in roles) or len(set(roles))!=len(roles):
         raise MasaError('invalid model roles')
     values['roles']=roles

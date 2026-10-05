@@ -1,0 +1,18 @@
+{
+  "id": "project_test_reviewer",
+  "label": "测试方案审查",
+  "description": "独立审查测试方案里的错误期望、遗漏的边界与不稳定断言",
+  "order": 80,
+  "level": null,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "spec",
+      "checks"
+    ],
+    "writes": "none"
+  },
+  "validator": "semantic_review",
+  "prompt_builder": "test_review"
+}

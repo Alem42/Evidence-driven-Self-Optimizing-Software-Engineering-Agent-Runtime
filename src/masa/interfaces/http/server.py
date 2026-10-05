@@ -162,6 +162,11 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                 elif path == '/api/workflows/fix-v1' and not write:
                     from masa.application.workflows import FIX_V1
                     result = FIX_V1
+                elif path == '/api/roles' and not write:
+                    # 角色清单来自 RoleSpec 注册表（只读，不含提示词全文）：前端的阶段标签与顺序据此显示。
+                    # The role list from the RoleSpec registry (read-only, never the prompts): the UI derives stage labels and order from it.
+                    from masa.roles import registry
+                    result = {'roles': registry.current().public()}
                 elif path == '/api/bench/tasks' and not write:
                     result = console.bench_tasks()
                 elif path == '/api/bench/status' and not write:

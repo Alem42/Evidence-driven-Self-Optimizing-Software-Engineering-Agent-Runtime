@@ -1,0 +1,19 @@
+{
+  "id": "project_test_revision",
+  "label": "修订测试",
+  "description": "在测试本身有缺陷时修订测试文件（实现冻结）",
+  "order": 50,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "spec",
+      "original_files",
+      "failure_evidence"
+    ],
+    "writes": "tests"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

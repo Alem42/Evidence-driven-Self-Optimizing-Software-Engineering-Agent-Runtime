@@ -6,6 +6,8 @@ import { Button, Card, Notice } from '../../shared/ui';
 import { TriageView } from './TriageView';
 import { ActivityLog } from './ActivityLog';
 import { modelsByRole, modelText } from '../../entities/models';
+import { FALLBACK_ORDER } from '../../entities/roles';
+import { useRoles } from '../../api/queries';
 import { stageLabels } from '../../entities/status';
 import { ModelSelect, useModelChoice } from './ModelSelect';
 import { useAction } from './useAction';
@@ -69,11 +71,12 @@ export function Thread({ detail, status }: { detail: Detail; status: DerivedStat
 
 // 每个角色实际由哪个模型执行（来自账本）。选择框里的默认模型不代表实际调用，所以在这里直接展示事实。
 // Which model actually ran each role (from the ledger). A selector's default is not what ran, so show the facts here.
-const ROLE_ORDER = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];
 
 function ModelsStrip({ detail }: { detail: Detail }) {
   const ran = modelsByRole(detail);
-  const rows = ROLE_ORDER.filter((r) => ran[r]?.length);
+  const roles = useRoles().data;
+  const order = roles?.length ? roles.filter((r) => !r.legacy).map((r) => r.id) : FALLBACK_ORDER;  // 顺序来自注册表 / order from the registry
+  const rows = order.filter((r) => ran[r]?.length);
   if (!rows.length) return null;
   return (
     <details className="models-strip" open>

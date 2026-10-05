@@ -26,6 +26,12 @@ export const useBootstrap = () =>
 export const useProjects = (hot: boolean) =>
   useQuery({ queryKey: qk.projects, queryFn: async () => (await api<{ projects: ProjectSummary[] }>('/projects')).projects, refetchInterval: hot ? 2000 : 6000 });
 
+import { applyRoles, type RoleInfo } from '../entities/roles';
+
+/** 角色清单（RoleSpec 注册表）；在 select 里把名字写进标签表，所以消费者渲染时标签已经就绪。 Role list; labels are applied in select so they are ready when consumers render. */
+export const useRoles = () =>
+  useQuery({ queryKey: ['roles'] as const, queryFn: () => api<{ roles: RoleInfo[] }>('/roles'), staleTime: Infinity, select: (d) => applyRoles(d.roles) });
+
 export const useProfiles = () => useQuery({ queryKey: qk.profiles, queryFn: () => api<Profiles>('/settings'), staleTime: 30_000 });
 
 export const useDetail = (runId?: string) =>

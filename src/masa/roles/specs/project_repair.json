@@ -1,0 +1,19 @@
+{
+  "id": "project_repair",
+  "label": "修复实现",
+  "description": "根据失败证据修复实现文件（测试冻结）",
+  "order": 40,
+  "level": "low",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "spec",
+      "original_files",
+      "failure_evidence"
+    ],
+    "writes": "implementation"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

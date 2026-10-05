@@ -14,3 +14,7 @@ masa = "masa.interfaces.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# 角色定义（JSON + Markdown）不是 Python 文件，必须显式声明才会被打进包。
+[tool.setuptools.package-data]
+"masa.roles" = ["specs/*.json", "specs/*.md"]

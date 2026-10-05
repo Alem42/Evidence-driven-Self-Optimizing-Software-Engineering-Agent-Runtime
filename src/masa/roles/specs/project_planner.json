@@ -1,0 +1,17 @@
+{
+  "id": "project_planner",
+  "label": "Planner 规划",
+  "description": "把需求写成规格（文件结构 + 验收项），必要时提出澄清问题",
+  "order": 10,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal"
+    ],
+    "writes": "none"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "verifier",
+  "label": "验证 Agent",
+  "description": "（历史）只提出一次受限的工具调用",
+  "order": 100,
+  "level": null,
+  "routable": false,
+  "config_allowed": true,
+  "legacy": true,
+  "permissions": {
+    "reads": [],
+    "writes": "none"
+  },
+  "validator": "tool_protocol",
+  "prompt": "verifier.prompt.md"
+}

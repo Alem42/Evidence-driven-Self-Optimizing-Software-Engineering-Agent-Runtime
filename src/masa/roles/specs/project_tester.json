@@ -1,0 +1,18 @@
+{
+  "id": "project_tester",
+  "label": "Tester 测试方案",
+  "description": "根据规格设计检查方案和具体测试用例",
+  "order": 20,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "spec"
+    ],
+    "writes": "none"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from masa.roles import registry
 from masa.domain.tokens import estimate_tokens  # noqa: F401  (re-exported; coefficients are fitted on real calls)
 
 # 上下文准入只为“预期输出”预留窗口：整个 max_output 往往是上限而不是常态（真实修复输出约 1–3k token）。预算预留仍按完整 max_output。
@@ -29,7 +30,7 @@ DEFAULT_POLICY = {
     'diagnose_max': 2,  # 每个任务最多诊断几次 / diagnoses per task
     # 规格与测试决定后面一切（测试写坏了，再多轮“修实现”也无效），且 token 很少：用最高等级；代码实现由低等级起步、逐级上推。
     # Spec and tests decide everything downstream (broken tests make any number of implementation repairs useless) and cost few tokens: use the top level; implementation starts low and escalates.
-    'prefer_highest_roles': ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'],
+    'prefer_highest_roles': list(registry.current().top_ids()),
     'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
     'transport_retries': 6,
@@ -254,7 +255,9 @@ SKIP_TEXT = {
 
 POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
-ROLES = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
+# 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
+# The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.
+ROLES = registry.current().routable_ids()
 
 
 def validate_policy(policy) -> dict:
@@ -273,11 +276,11 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, dict):
                 raise MasaError('start_level_by_role must be an object')
             for role, level in value.items():
-                if role not in ROLES or type(level) is not int or not 1 <= level <= 100:
+                if role not in registry.current().routable_ids() or type(level) is not int or not 1 <= level <= 100:
                     raise MasaError('start_level_by_role needs known roles and levels 1..100')
                 out['start_level_by_role'][role] = level
         elif key == 'prefer_highest_roles':
-            if not isinstance(value, list) or any(r not in ROLES + ('project_diagnoser',) for r in value):
+            if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
         elif key in ('retry_unknown_local', 'triage_model', 'diagnose'):
