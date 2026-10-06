@@ -5,7 +5,8 @@ Aggregation and comparison of benchmark results: per level, per task, overall sc
 # 一次运行的结局 / run outcomes
 PASS, FALSE_PASS, GATE_FAIL, STOPPED, TIMEOUT, ERROR, SKIPPED = 'pass', 'false_pass', 'gate_fail', 'stopped', 'timeout', 'error', 'skipped'
 STATUS_TEXT = {PASS: '通过', FALSE_PASS: '假通过', GATE_FAIL: '未通过', STOPPED: '预算/路由停止', TIMEOUT: '超时', ERROR: '出错', SKIPPED: '跳过（超出评测上限）'}
-MECHANISMS = ('imports_fixed', 'syntax_rewrites', 'diagnosis', 'reconciled', 'rewrite', 'rounds_extended', 'noop', 'flip_to_tests')
+MECHANISMS = ('imports_fixed', 'syntax_rewrites', 'diagnosis', 'reconciled', 'rewrite', 'rounds_extended', 'noop', 'flip_to_tests',
+              'conductor', 'conductor_rejected', 'skeptic', 'code_review')
 
 
 def _mean(values):

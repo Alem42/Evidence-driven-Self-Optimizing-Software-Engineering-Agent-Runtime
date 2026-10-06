@@ -514,7 +514,7 @@ class Console:
         request.update(goal=goal,continue_from=rid,auto_verify=True)
         return self.start_autonomous_project_job(request)
 
-    def start_autonomous_project_job(self, body, resume_job=None):
+    def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
             self._available()
@@ -548,13 +548,17 @@ class Console:
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
+            if workflow:
+                from masa.application import flow
+                flow.validate(workflow)  # 图只能引用已注册的 guard 与动作 / the graph may only reference registered guards and actions
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
+                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                                         **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
             from masa.application.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)

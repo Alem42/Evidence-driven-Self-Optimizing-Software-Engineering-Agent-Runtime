@@ -496,7 +496,7 @@ class WorkflowCoordinator:
         actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
                  'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation,
                  'conduct':conduct,'test_skeptic':test_skeptic}
-        engine=FlowEngine(FIX_V1,actions,max_steps=16 if self.router.policy.get('conductor') else 12,on_step=lambda step:self._trace_step(step,verified))
+        engine=FlowEngine(self.job['request'].get('workflow') or FIX_V1,actions,max_steps=16 if self.router.policy.get('conductor') else 12,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
 
     def _log_fix(self, stage, draft, used):

@@ -59,7 +59,8 @@ def resolve_config(body):
 def count_mechanisms(report, store, run_ids):
     """从账本事件里数出各个 runtime 机制被触发了几次——这是“改动有没有起作用”的直接证据。
     Count how often each runtime mechanism fired, straight from ledger events: direct evidence that a change is in effect."""
-    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0}
+    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0,
+              'conductor': 0, 'conductor_rejected': 0, 'skeptic': 0, 'code_review': 0}
     for item in report.get('process') or []:
         kind, data = item['kind'], item['data']
         if kind == 'imports_fixed':
@@ -71,6 +72,10 @@ def count_mechanisms(report, store, run_ids):
             counts['rewrite'] += 1
         elif kind == 'rounds_extended':
             counts['rounds_extended'] += 1
+        elif kind in ('conductor_rejected', 'skeptic_verdict', 'code_review'):
+            counts[{'conductor_rejected': 'conductor_rejected', 'skeptic_verdict': 'skeptic', 'code_review': 'code_review'}[kind]] += 1
+        elif kind == 'conductor_decided':
+            counts['conductor'] += 1
         elif kind == 'noop_revision':
             counts['noop'] += 1
         elif kind == 'workflow_node' and data.get('why') == 'flip_to_tests':
@@ -91,6 +96,12 @@ class BenchRunner:
         self.main_root = Path(main_root)
         self.runner_path, self.go_path, self.project = Path(runner_path), Path(go_path), Path(project)
         self.config = config
+        # 调优器的覆盖项（策略增量 + 要去掉的边）：只作用于这次评测的任务，从不写入用户的设置。构造时就校验，不合法立即报错。
+        # The tuner's overrides (policy delta + dropped edges): they apply to this benchmark's tasks only and never touch the user's settings; validated here so an illegal one fails at once.
+        self.overrides = None
+        if config.get('overrides'):
+            from masa.tuning import space
+            self.overrides = space.materialize(config['overrides'])
         self.clock = clock
         self.on_change = on_change or (lambda state: None)
         self.run_task = run_task or self._run_task_for_real
@@ -246,7 +257,9 @@ class BenchRunner:
         started = self.clock()
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
                 'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40}}
-        job_id = console.start_autonomous_project_job(body)['job_id']
+        if self.overrides and self.overrides['policy']:
+            body['policy'] = self.overrides['policy']
+        job_id = console.start_autonomous_project_job(body, workflow=self.overrides['workflow'] if self.overrides else None)['job_id']
         deadline = started + limits['seconds'] + 30  # 路由层按“活跃秒数”停，这里是不依赖它的硬性墙钟线 / hard wall clock independent of the routing budget
         timed_out = False
         polls = 0
