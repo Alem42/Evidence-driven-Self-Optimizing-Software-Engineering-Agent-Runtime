@@ -45,7 +45,17 @@ def resolve_config(body):
             raise MasaError(f'{name} must be an integer in {low}..{high}')
         return value
 
+    # 费用上限（可选，按模型价格估算，单位与价格相同）：整个评测的总额与单次运行的额度。没有就不限（保持原行为）。
+    # Optional cost caps (estimated from model prices, same currency as the prices): whole-suite total and per run. Absent = unlimited (legacy behaviour).
+    costs = {}
+    for name in ('total_cost', 'per_run_cost'):
+        if body.get(name) is not None:
+            value = body[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 100000:
+                raise MasaError(f'{name} must be a positive number')
+            costs[name] = float(value)
     return {
+        **costs,
         'suite': suite, 'task_ids': list(dict.fromkeys(task_ids)),
         'repeats': bounded('repeats', preset['repeats'], 1, 10),
         'total_cloud_tokens': bounded('total_cloud_tokens', preset['total_cloud_tokens'], 1_000, 50_000_000),
@@ -109,7 +119,7 @@ class BenchRunner:
         self.stop_flag = threading.Event()
         self.lock = threading.Lock()
         self.records = []
-        self.state = {'id': self.id, 'state': 'starting', 'config': config, 'started': clock(), 'current': None, 'used': {'cloud_tokens': 0, 'seconds': 0},
+        self.state = {'id': self.id, 'state': 'starting', 'config': config, 'started': clock(), 'current': None, 'used': {'cloud_tokens': 0, 'seconds': 0, 'cost': 0.0},
                       'total': len(config['task_ids']) * config['repeats'], 'message': None}
         self.console = None
         self.scratch = self.main_root / 'bench' / 'state' / self.id
@@ -165,7 +175,8 @@ class BenchRunner:
     def _add(self, record):
         with self.lock:
             self.records.append(record)
-            self.state['used'] = {'cloud_tokens': sum(r.get('cloud_tokens') or 0 for r in self.records), 'seconds': round(self.clock() - self.state['started'], 1)}
+            self.state['used'] = {'cloud_tokens': sum(r.get('cloud_tokens') or 0 for r in self.records), 'seconds': round(self.clock() - self.state['started'], 1),
+                                  'cost': round(sum(r.get('cost') or 0 for r in self.records), 4)}
         self.on_change(self.state)
 
     def _cap_reason(self):
@@ -174,13 +185,19 @@ class BenchRunner:
             return f"评测云端 token 总量已达上限（{used}/{self.config['total_cloud_tokens']}）"
         if self.clock() - self.state['started'] >= self.config['total_minutes'] * 60:
             return f"评测总时间已达上限（{self.config['total_minutes']} 分钟）"
+        if self.config.get('total_cost') and self.state['used'].get('cost', 0) >= self.config['total_cost']:
+            return f"评测费用已达上限（{self.state['used']['cost']}/{self.config['total_cost']}）"
         return None
 
     def _limits(self, task):
         scale = self.config['per_run_scale'] / 100
         remaining_tokens = max(1_000, self.config['total_cloud_tokens'] - self.state['used']['cloud_tokens'])
         remaining_seconds = max(30, self.config['total_minutes'] * 60 - (self.clock() - self.state['started']))
-        return {'cloud_tokens': int(min(task.max_cloud_tokens * scale, remaining_tokens)), 'seconds': int(min(task.max_seconds * scale, remaining_seconds))}
+        out = {'cloud_tokens': int(min(task.max_cloud_tokens * scale, remaining_tokens)), 'seconds': int(min(task.max_seconds * scale, remaining_seconds))}
+        if self.config.get('total_cost'):
+            left = max(0.01, self.config['total_cost'] - self.state['used'].get('cost', 0))
+            out['cost'] = round(min(self.config.get('per_run_cost') or left, left), 4)
+        return out
 
     def _skipped(self, task, repeat, reason):
         return self._blank(task, repeat, SKIPPED, note=reason)
@@ -188,7 +205,7 @@ class BenchRunner:
     @staticmethod
     def _blank(task, repeat, status, **extra):
         return {'task': task.id, 'level': task.level, 'repeat': repeat + 1, 'status': status, 'gate_passed': False, 'oracle_passed': None, 'oracle_reason': '',
-                'seconds': 0, 'calls': 0, 'failed_calls': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'escalations': 0, 'rounds': 0, 'mechanisms': {}, 'stop_reason': None,
+                'seconds': 0, 'cost': 0.0, 'calls': 0, 'failed_calls': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'escalations': 0, 'rounds': 0, 'mechanisms': {}, 'stop_reason': None,
                 'note': None, 'run_id': None, 'fail_stage': None, **extra}
 
     def _guarded(self, task, repeat):
@@ -224,6 +241,8 @@ class BenchRunner:
                 pass
         # 有未通过的运行就保留这次评测的账本（否则失败的证据随临时目录一起消失，没法排查）；只留最近 3 份。
         # Keep the ledger when any run did not pass (otherwise the evidence of a failure vanishes with the scratch directory); keep only the newest 3.
+        if self.config.get('keep_state'):
+            return  # 对照评测要事后翻账本（例如指挥者为什么被拒绝）：全部保留，不裁剪 / A/B evaluations inspect the ledger afterwards (e.g. why the conductor was rejected): keep everything
         failed = any(r['status'] not in (PASS, SKIPPED) for r in self.records)
         if failed and not self.config.get('discard_state'):
             kept = sorted((p for p in self.scratch.parent.iterdir() if p.is_dir()), key=lambda p: p.name) if self.scratch.parent.exists() else []
@@ -256,7 +275,8 @@ class BenchRunner:
         record = self._blank(task, repeat, GATE_FAIL)
         started = self.clock()
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
-                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40}}
+                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40,
+                           **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
         if self.overrides and self.overrides['policy']:
             body['policy'] = self.overrides['policy']
         job_id = console.start_autonomous_project_job(body, workflow=self.overrides['workflow'] if self.overrides else None)['job_id']
@@ -293,7 +313,7 @@ class BenchRunner:
             totals = report['totals']
             routing = report.get('routing') or {}
             versions = report.get('versions') or []
-            record.update(calls=totals['calls'], failed_calls=totals['failed_calls'], local_tokens=totals['local_tokens'], cloud_tokens=totals['cloud_tokens'],
+            record.update(cost=round((routing.get('spend') or {}).get('cost') or 0, 4), calls=totals['calls'], failed_calls=totals['failed_calls'], local_tokens=totals['local_tokens'], cloud_tokens=totals['cloud_tokens'],
                           escalations=routing.get('escalations', 0), rounds=sum(1 for v in versions if v['kind'] == 'verification'),
                           mechanisms=count_mechanisms(report, store, [v['run_id'] for v in versions]),
                           stop_reason=(routing.get('stopped') or {}).get('reason'))

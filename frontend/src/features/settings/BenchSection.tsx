@@ -30,6 +30,10 @@ const MECH: Record<string, string> = {
   rounds_extended: '延长轮数',
   noop: '无改动拒收',
   flip_to_tests: '转修测试',
+  conductor: '指挥者决策',
+  conductor_rejected: '指挥者被拒',
+  skeptic: '测试怀疑者',
+  code_review: '代码审阅',
 };
 const pct = (x: number | null | undefined) => (x == null ? '—' : Math.round(x * 100) + '%');
 const num = (x: number | null | undefined) => (x == null ? '—' : String(x));

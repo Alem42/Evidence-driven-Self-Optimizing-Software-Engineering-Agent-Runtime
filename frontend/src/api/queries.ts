@@ -2,6 +2,7 @@
 // Server state with adaptive polling; revisiting a task shows cached data instantly.
 import { useQuery, type Query } from '@tanstack/react-query';
 import { api } from './client';
+import type { BenchCatalog } from './bench-types';
 import type { Bootstrap, CheckResult, TaskReport, Detail, Job, ProjectSummary, ProjectView, Profiles, RepairAdvice } from './types';
 
 export const qk = {
@@ -19,6 +20,9 @@ export const qk = {
 };
 
 const isLive = (d?: Detail): boolean => Boolean(d && (d.active || d.role_active));
+
+export const useBenchTasks = () =>
+  useQuery({ queryKey: ['bench', 'tasks'], queryFn: () => api<BenchCatalog>('/bench/tasks'), staleTime: Infinity });
 
 export const useBootstrap = () =>
   useQuery({ queryKey: qk.bootstrap, queryFn: () => api<Bootstrap>('/bootstrap'), refetchInterval: 2500 });

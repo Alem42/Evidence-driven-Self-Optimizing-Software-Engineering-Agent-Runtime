@@ -21,7 +21,8 @@ import time
 
 READ_SIZE = 65536
 CANCEL_POLL_SECONDS = 0.3
-MAX_BYTES = 1048576
+MAX_BYTES = 16 * 1048576  # 原始字节的安全上限（SSE 每个 token 约 250 字节外壳，所以要远大于内容上限）/ safety cap on RAW bytes (SSE adds about 250 bytes of framing per token, so it must far exceed the content cap)
+MAX_CHARS = 1048576  # 解码后的内容上限：这才是“响应太大”的真正含义 / cap on the decoded CONTENT, which is what "response too large" really means
 
 
 class StreamCancelled(Exception):
@@ -130,7 +131,7 @@ class StreamAssembler:
 
 
 def _read_loop(response, assembler, *, deadline, should_cancel=None, first_token_seconds=600, stall_seconds=120, on_progress=None,
-                clock=time.monotonic, max_bytes=MAX_BYTES, poll=CANCEL_POLL_SECONDS, threaded=True):
+                clock=time.monotonic, max_bytes=MAX_BYTES, max_chars=MAX_CHARS, poll=CANCEL_POLL_SECONDS, threaded=True):
     """读完整个流。每次循环（至多每秒一次，因为套接字有短读超时）检查：取消、总时限、是否 stall。
     Read the whole stream. Every iteration (at least once a second thanks to a short socket read timeout) checks cancellation, the deadline and stalls."""
     started = last_bytes = clock()
@@ -187,6 +188,8 @@ def _read_loop(response, assembler, *, deadline, should_cancel=None, first_token
         if total > max_bytes:
             raise StreamTooLarge()
         assembler.feed(chunk)
+        if assembler.chars > max_chars:
+            raise StreamTooLarge()
         if on_progress is not None and last_bytes - last_report >= 0.5:
             last_report = last_bytes
             on_progress({'chars': assembler.chars, 'seconds': round(last_bytes - started, 1)})

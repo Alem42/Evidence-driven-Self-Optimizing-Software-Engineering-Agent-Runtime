@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
-import { useProfiles } from '../../api/queries';
+import { useBenchTasks, useProfiles } from '../../api/queries';
+import { pickExamples } from '../../entities/examples';
 import { api } from '../../api/client';
 import type { Triage } from '../../api/types';
 import { TriageView } from '../thread/TriageView';
@@ -12,8 +13,7 @@ import { profileLabel, profileReady } from '../../entities/profiles';
 import { useToasts, useUi } from '../../stores/ui';
 import { Button, Notice, Segmented } from '../../shared/ui';
 
-// 建议任务池：每次打开页面随机抽 3 个（开发期使用；后续可在设置里编辑题库与数量）。
-// Suggestion pool: three random picks each time the page opens (development aid; the pool and count become settings later).
+// 备用建议任务：评测题库还没加载出来时使用。 Fallback suggestions, used until the benchmark set has loaded.
 const EXAMPLE_POOL = [
   '生成一个随机整数 CLI，支持范围、数量和可选种子；无效参数返回错误，不输出结果。',
   '写一个文本统计 CLI：读取标准输入，输出行数、单词数和字节数。',
@@ -30,7 +30,6 @@ const EXAMPLE_POOL = [
   '实现一个 CLI：把标准输入的 Markdown 标题行（# 开头）提取为带缩进的目录。',
   '写一个 CLI：对标准输入的整数做归并排序，支持 --desc 参数，每行输出一个。',
 ];
-const pick = <T,>(pool: T[], n: number): T[] => [...pool].sort(() => Math.random() - 0.5).slice(0, n);
 
 // 新任务页：一个大输入框 + 模型与执行方式。提交后任务图在任务页出现。
 // New-task page: one big prompt box; the task graph appears on the task page.
@@ -45,7 +44,10 @@ export function NewTask() {
   // 默认：自动执行 + 本地优先有界升级。需要逐步确认或固定模型时再手动切换。
   // Defaults: automatic execution + local-first bounded escalation; switch manually for step-by-step review or a fixed model.
   const [auto, setAuto] = useState<'review' | 'automatic'>('automatic');
-  const examples = useMemo(() => pick(EXAMPLE_POOL, 3), []);
+  // 推荐任务：从评测题库随机抽 3 个低等级任务；题库加载出来后抽一次，之后不再变（避免输入时闪烁）。
+  // Suggestions: three random low-level tasks from the benchmark set, drawn once after it loads (no flicker while typing).
+  const { data: catalog } = useBenchTasks();
+  const examples = useMemo(() => pickExamples(catalog?.tasks, EXAMPLE_POOL), [catalog]);
   const [starting, setStarting] = useState(false);
   const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('ladder');
   const [apiTokens, setApiTokens] = useState('');
@@ -163,8 +165,8 @@ export function NewTask() {
         {working && <Notice tone="warn">另一个任务正在执行；后端目前串行，完成后才能开始新任务。你仍可浏览历史。</Notice>}
         <div className="examples">
           {examples.map((e) => (
-            <button key={e} className="example" onClick={() => setGoal(e)}>
-              {e}
+            <button key={e.text} className="example" onClick={() => setGoal(e.text)}>
+              {e.level !== null && <span className="tag">L{e.level}</span>} {e.text}
             </button>
           ))}
         </div>

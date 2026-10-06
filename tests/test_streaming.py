@@ -136,6 +136,20 @@ class ReadLoopTests(unittest.TestCase):
         with self.assertRaises(StreamTooLarge):
             self.run_loop([(0, b'x' * 100)], max_bytes=50)
 
+    def test_the_size_limit_counts_content_not_sse_framing(self):
+        """真实回归：DeepSeek 每个 token 一个 SSE 块，每块约 250 字节的 JSON 外壳。按原始字节限 1 MB 会让约 4000 token 的正常回答被拒（评测里 2/7 的生成因此失败）。
+        Real regression: DeepSeek sends one SSE chunk per token with about 250 bytes of JSON framing. Limiting RAW bytes to 1 MB rejected ordinary answers of about 4000 tokens."""
+        pad = 'f' * 190  # 真实服务每块带 id、model、system_fingerprint 等字段 / real servers add id, model, system_fingerprint ... to every chunk
+        frames = ['data: ' + json.dumps({'id': 'x', 'fp': pad, 'choices': [{'delta': {'content': 'ab'}}]}) + NL + NL for _ in range(6000)]
+        raw = (''.join(frames) + 'data: ' + json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}]}) + NL + NL + 'data: [DONE]' + NL + NL).encode()
+        self.assertGreater(len(raw), 1_048_576)  # 旧的原始字节上限会拒绝它，而内容只有 12000 字符 / the old raw cap rejects this although the content is 12000 characters
+        clock = Clock()
+        assembler = StreamAssembler('openai')
+        read_stream(FakeResponse([(0, raw)], clock), assembler, clock=clock, threaded=False, deadline=10_000)
+        self.assertEqual(assembler.finish()['choices'][0]['message']['content'], 'ab' * 6000)
+        with self.assertRaises(StreamTooLarge):  # 内容本身太大仍然被拒 / genuinely oversized content is still rejected
+            read_stream(FakeResponse([(0, sse(['x' * 1000] * 20))], clock), StreamAssembler('openai'), clock=clock, threaded=False, deadline=10_000, max_chars=10_000)
+
     def test_progress_is_reported_with_character_counts(self):
         seen = []
         clock = Clock()

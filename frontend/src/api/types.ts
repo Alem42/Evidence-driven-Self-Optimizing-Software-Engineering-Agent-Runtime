@@ -138,6 +138,7 @@ export interface Bootstrap {
   console_version: string;
   /** 只读演示部署：不能发起或修改任务。 A read-only demo deployment: nothing can be started or changed. */
   demo?: boolean;
+  local_models?: { allowed: boolean; reason: string; vram_gb: number | null; ram_gb: number | null };
   runner_ready: boolean;
   active_run: string | null;
   active_job: (Job & { job_id: string }) | null;

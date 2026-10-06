@@ -48,7 +48,7 @@ def aggregate(records):
             'false_pass': sum(r['status'] == FALSE_PASS for r in attempted),
             'stable_level': stable, 'ceiling_level': ceiling, 'weighted_score': round(100 * got_w / total_w, 1) if total_w else None,
             'cloud_tokens': sum(r.get('cloud_tokens') or 0 for r in attempted), 'local_tokens': sum(r.get('local_tokens') or 0 for r in attempted),
-            'seconds': round(sum(r.get('seconds') or 0 for r in attempted), 1),
+            'seconds': round(sum(r.get('seconds') or 0 for r in attempted), 1), 'cost': round(sum(r.get('cost') or 0 for r in attempted), 4),
             'cloud_tokens_per_pass': round(sum(r.get('cloud_tokens') or 0 for r in attempted) / len(passed)) if passed else None,
             'seconds_per_pass': round(sum(r.get('seconds') or 0 for r in attempted) / len(passed), 1) if passed else None,
             'mechanisms': mechanisms,
