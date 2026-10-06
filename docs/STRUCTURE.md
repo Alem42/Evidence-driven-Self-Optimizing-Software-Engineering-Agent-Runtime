@@ -17,7 +17,7 @@ src/masa/
     (根)             console（对外的门面）、projects、planning、generation、applications、reports、usage
   bench/             评测：任务、独立判官、运行器、报告
   tuning/            工作流调优器（数据空间 + 搜索）
-  interfaces/        命令行与 HTTP 服务（含静态托管与演示模式）
+  interfaces/        命令行、HTTP 服务（含静态托管与演示模式）、MCP 服务（mcp_server.py，可选依赖）
 scripts/
   *.ps1              开发环境入口（构建、激活、测试），保持在根
   eval/              评测与分析：bench、p2_eval、tune、failure_taxonomy、loop_equivalence、calibrate_tokens…

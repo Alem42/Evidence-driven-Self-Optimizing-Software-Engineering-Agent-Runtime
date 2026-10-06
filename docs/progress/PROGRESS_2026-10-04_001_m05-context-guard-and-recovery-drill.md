@@ -1,6 +1,6 @@
 # 进展009：M0.5 硬上下文拦截 · 崩溃恢复演练 · 真实升级验证
 
-2026-10-04。分支 `feature/multi-model`。前置：[进展008](PROGRESS_2026-10-03_008_m0-routing-and-budget.md)。
+2026-10-04。分支 `feature/multi-model`。前置：进展008。
 
 ## 0. 结论
 

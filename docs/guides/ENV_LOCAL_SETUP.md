@@ -15,7 +15,7 @@
 
 Go 从 [官方发布元数据](https://go.dev/dl/?mode=json) 选择稳定版 Windows amd64 ZIP，下载后 SHA-256 校验通过再解压。具体版本、文件大小与校验值记录在 `scripts/go-toolchain.json`，后续安装复用该锁定信息。
 
-环境初始化没有修改系统 PATH、机器执行策略或替换现有 Python。`.tools`、`.cache`、`.venv` 和运行数据 `.masa` 均由 `.gitignore` 排除。后续 P0 已实现，当前代码操作见 [P0 使用说明](../archive/guides/USER_P0_QUICKSTART.md)，不要将最初环境检查结果当作全部业务验收。
+环境初始化没有修改系统 PATH、机器执行策略或替换现有 Python。`.tools`、`.cache`、`.venv` 和运行数据 `.masa` 均由 `.gitignore` 排除。后续 P0 已实现，当前代码操作见 P0 使用说明，不要将最初环境检查结果当作全部业务验收。
 
 ## 开发时使用
 

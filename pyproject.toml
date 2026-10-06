@@ -9,6 +9,10 @@ description = "Evidence-driven software engineering runtime: P0 foundation"
 requires-python = ">=3.12,<3.15"
 dependencies = []
 
+# MCP 服务是可选依赖：核心保持零依赖；缺失时只有 MCP 入口报错。 The MCP server is optional: the core stays dependency-free.
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+
 [project.scripts]
 masa = "masa.interfaces.cli:main"
 

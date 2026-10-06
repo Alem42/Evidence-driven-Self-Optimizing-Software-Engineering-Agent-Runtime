@@ -1,6 +1,6 @@
 # 进展012：逐文件语法门 · 规格与测试用最高等级 · 子进程不再弹 cmd 窗口
 
-2026-10-04。分支 `feature/multi-model`。前置：[进展011](PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)。分析与方案全文见 [PLAN_LOW_MODEL_QUALITY](../PLAN_LOW_MODEL_QUALITY.md)。
+2026-10-04。分支 `feature/multi-model`。前置：[进展011](PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)。分析与方案全文见 [PLAN_LOW_MODEL_QUALITY](../reference/LOW_MODEL_QUALITY.md)。
 
 ## 1. 为什么新任务一开始会弹出几个 cmd 窗口
 

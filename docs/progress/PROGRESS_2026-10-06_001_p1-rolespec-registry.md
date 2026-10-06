@@ -1,6 +1,6 @@
 # 进展018：P1 RoleSpec 注册表
 
-2026-10-06。分支 `feature/dynamic-roles`（从 `feature/multi-model` 切出）。设计与验收见 [DESIGN_DYNAMIC_ROLES](../DESIGN_DYNAMIC_ROLES.md) §2.1、§3 的 P1。
+2026-10-06。分支 `feature/dynamic-roles`（从 `feature/multi-model` 切出）。设计与验收见 [DESIGN_DYNAMIC_ROLES](../design/DYNAMIC_ROLES.md) §2.1、§3 的 P1。
 
 ## 1. 做了什么
 

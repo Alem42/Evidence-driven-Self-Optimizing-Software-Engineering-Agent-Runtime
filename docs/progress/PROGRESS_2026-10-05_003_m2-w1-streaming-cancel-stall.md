@@ -1,6 +1,6 @@
 # 进展017：M2 · W1 流式传输、真取消、stall 检测
 
-2026-10-05。分支 `feature/multi-model`。前置：[进展016](PROGRESS_2026-10-05_002_benchmark-findings-and-fixes.md)。计划：[PLAN_MULTI_MODEL_RUNTIME §10 W1](../PLAN_MULTI_MODEL_RUNTIME.md)。
+2026-10-05。分支 `feature/multi-model`。前置：[进展016](PROGRESS_2026-10-05_002_benchmark-findings-and-fixes.md)。计划：[PLAN_MULTI_MODEL_RUNTIME §10 W1](../reference/MULTI_MODEL_RUNTIME_PLAN.md)。
 
 ## 1. 做了什么
 

@@ -1,6 +1,6 @@
 # LLM 实施入口
 
-开始前依次读取 [长期约定](MEMORY_PROJECT.md)、[当前交接](handoff/CURRENT.md)、[项目状态](STATUS_PROJECT.md)、[下一阶段](PLAN_NEXT_STAGE.md) 和 [系统架构](design/DESIGN_SYSTEM_ARCHITECTURE.md)。先看 git status / log；用户编辑不能覆盖。
+开始前依次读取 [长期约定](MEMORY_PROJECT.md)、[当前交接](handoff/CURRENT.md)、项目状态、下一阶段 和 [系统架构](design/DESIGN_SYSTEM_ARCHITECTURE.md)。先看 git status / log；用户编辑不能覆盖。
 
 当前后端目录已迁至 domain/application/runtime/agents/intelligence/infrastructure/interfaces。旧的 masa.runtime、masa.agent、masa.web 等文件导入路径不再适用。前端从 app/App.jsx 和 features 开始阅读；不要恢复巨型 main.jsx。
 

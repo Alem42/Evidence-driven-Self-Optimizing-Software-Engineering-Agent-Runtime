@@ -1,6 +1,6 @@
 # 进展013：cmd 弹窗根因 · 前端默认值与“实际模型”显示 · 证据片段 / 尝试摘要 / import 自动修复
 
-2026-10-04。分支 `feature/multi-model`。前置：[进展012](PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)。方案与出处：[PLAN_LOW_MODEL_QUALITY](../PLAN_LOW_MODEL_QUALITY.md)；M2 细化：[PLAN_MULTI_MODEL_RUNTIME §10](../PLAN_MULTI_MODEL_RUNTIME.md)。
+2026-10-04。分支 `feature/multi-model`。前置：[进展012](PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)。方案与出处：[PLAN_LOW_MODEL_QUALITY](../reference/LOW_MODEL_QUALITY.md)；M2 细化：[PLAN_MULTI_MODEL_RUNTIME §10](../reference/MULTI_MODEL_RUNTIME_PLAN.md)。
 
 ## 1. cmd 窗口：实机排查与真正根因
 

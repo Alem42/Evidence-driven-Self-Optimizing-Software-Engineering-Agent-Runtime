@@ -1,7 +1,7 @@
 # 设计与执行说明：动态角色（RoleSpec + 混合式指挥者 + 工作流调优器 + MCP）
 
 2026-10-06。**这份文档写给负责执行的会话**：它是自包含的，按“背景 → 设计 → 分阶段任务与验收 → 约束”读即可。
-决策背景与路线对比见 [ROADMAP §5](ROADMAP.md)；项目整体见 [PROJECT_OVERVIEW](PROJECT_OVERVIEW.md)。**不做**：通用化为通用 Agent 平台、评审（review）任务类型、非 Go 语言包（全部后置）。
+决策背景与路线对比见 [ROADMAP §5](../ROADMAP.md)；项目整体见 [PROJECT_OVERVIEW](../PROJECT_OVERVIEW.md)。**不做**：通用化为通用 Agent 平台、评审（review）任务类型、非 Go 语言包（全部后置）。
 
 ## 0. 目标与原则
 

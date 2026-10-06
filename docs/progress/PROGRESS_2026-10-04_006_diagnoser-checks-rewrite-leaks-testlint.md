@@ -1,6 +1,6 @@
 # 进展014：Diagnoser 逐条核对 · 整体重写 · 提示泄漏检查 · 测试静态检查
 
-2026-10-04。分支 `feature/multi-model`。前置：[进展013](PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。方案与出处：[PLAN_LOW_MODEL_QUALITY](../PLAN_LOW_MODEL_QUALITY.md)。
+2026-10-04。分支 `feature/multi-model`。前置：[进展013](PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。方案与出处：[PLAN_LOW_MODEL_QUALITY](../reference/LOW_MODEL_QUALITY.md)。
 
 ## 1. 做了什么（按你的顺序）
 

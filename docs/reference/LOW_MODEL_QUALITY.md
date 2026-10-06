@@ -1,6 +1,6 @@
 # 方案：让低质量模型完成高难度工作（上下文、反馈与自学习）
 
-2026-10-04（随实现持续更新）。前置：[进展011](progress/PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)、[进展012](progress/PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)、[进展013](progress/PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。
+2026-10-04（随实现持续更新）。前置：[进展011](../progress/PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)、[进展012](../progress/PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)、[进展013](../progress/PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。
 约束：没有比 DeepSeek v4-pro 更强的 API，只能在 runtime 里想办法。
 
 > **关于“别人怎么做”的出处说明**：下面对其他项目/论文的描述来自公开论文与文档的要点，是为了说明“我们为什么这么做、取什么不取什么”。
@@ -201,7 +201,7 @@ DSPy 类的提示优化与 LoRA 微调需要离线评测集与算力。**现在�
 
 ## 6. 评测集（所有“学习”类做法的前置）
 
-**状态：✅ 已实现为一键评测（设置→评测，见 [USER_BENCHMARK](guides/USER_BENCHMARK.md)）。**
+**状态：✅ 已实现为一键评测（设置→评测，见 [USER_BENCHMARK](../guides/USER_BENCHMARK.md)）。**
 
 没有评测集就无法判断某项改动是否真的变好。账本里每个真实任务已有（需求、失败链、最终是否通过、调用数、token）。**方案**：导出为回归基准；固定一组任务（含你测过的 CSV、文本统计、动态规划），每次 runtime 改动后跑，报告 通过率 / 平均调用 / 云端 token / 耗时。SWE-bench 与 Agentless 的评测方式（固定集 + 报告 resolve rate 与成本）即是参照。放 M2。
 
