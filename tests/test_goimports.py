@@ -1,7 +1,7 @@
 """确定性 import 修复。Deterministic import fixing — cases taken from real weak-model output."""
 import unittest
 
-from masa.application.goimports import fix_imports, fix_module_imports
+from masa.application.checks.goimports import fix_imports, fix_module_imports
 
 NL = chr(10)
 

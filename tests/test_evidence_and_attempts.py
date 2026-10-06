@@ -1,9 +1,9 @@
 """失败证据的源码片段与尝试摘要。Source snippets in failure evidence and the attempt summary."""
 import unittest
 
-from masa.application import attempts
+from masa.application.orchestration import attempts
 from masa.application.generation import concise_failure_evidence
-from masa.application.snippets import source_snippets
+from masa.application.checks.snippets import source_snippets
 
 SOURCE = '\n'.join(f'line{n}' for n in range(1, 31))
 FILES = {'internal/wc/wc.go': SOURCE, 'cmd/app/main.go': 'package main\n', 'internal/wc/wc_test.go': 'package wc\n'}

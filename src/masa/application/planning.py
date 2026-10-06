@@ -8,7 +8,7 @@ from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
 from masa.domain.clarification import validate_question, validate_answers
-from masa.application.test_review import review_test_plan
+from masa.application.review.test_review import review_test_plan
 
 
 

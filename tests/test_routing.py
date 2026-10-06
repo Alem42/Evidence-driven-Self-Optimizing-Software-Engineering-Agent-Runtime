@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.coordinator import WorkflowCoordinator
-from masa.application.router import Router, RoutingStop, build_snapshot
-from masa.application.routing import (Candidate, DEFAULT_POLICY, estimate_tokens, route, spend_from_report, unlimited_budget,
+from masa.application.orchestration.coordinator import WorkflowCoordinator
+from masa.application.orchestration.router import Router, RoutingStop, build_snapshot
+from masa.application.orchestration.routing import (Candidate, DEFAULT_POLICY, estimate_tokens, route, spend_from_report, unlimited_budget,
                                       validate_budget)
 from masa.domain.models import MasaError
 from masa.infrastructure.jobs import Jobs

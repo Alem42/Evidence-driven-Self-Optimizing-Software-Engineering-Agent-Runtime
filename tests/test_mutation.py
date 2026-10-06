@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from masa.application.mutation import evaluate_mutations
+from masa.application.review.mutation import evaluate_mutations
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.runtime.engine import Runtime

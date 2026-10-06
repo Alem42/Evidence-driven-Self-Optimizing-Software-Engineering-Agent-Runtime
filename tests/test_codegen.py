@@ -3,7 +3,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from masa.application.single_file import CodeGeneration
+from masa.application.review.single_file import CodeGeneration
 from masa.infrastructure.store import Store
 from masa.domain.models import MasaError
 from masa.runtime.engine import Runtime

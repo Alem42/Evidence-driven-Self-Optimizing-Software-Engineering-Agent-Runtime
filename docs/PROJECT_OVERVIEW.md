@@ -115,6 +115,6 @@
 ```bash
 python -m masa serve --port 8765            # 后端
 cd frontend && npm run dev                  # 前端
-python scripts/bench.py --suite canary      # 5 分钟评测（会调用模型）
+python scripts/eval/bench.py --suite canary      # 5 分钟评测（会调用模型）
 python -m unittest discover -s tests        # 全部测试（不调用真实模型）
 ```

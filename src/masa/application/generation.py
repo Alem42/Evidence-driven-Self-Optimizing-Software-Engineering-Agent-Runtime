@@ -14,11 +14,11 @@ from masa.application.planning import ProjectPlanning, validate_spec
 from masa.infrastructure.workspaces import verify_snapshot
 
 
-from masa.application.snippets import source_snippets  # noqa: E402
-from masa.application.goimports import fix_imports, fix_module_imports  # noqa: E402
-from masa.application.leaks import leak_messages  # noqa: E402
-from masa.application.testlint import test_problem_messages  # noqa: E402
-from masa.application.entrypoint import entry_problem_messages  # noqa: E402
+from masa.application.checks.snippets import source_snippets  # noqa: E402
+from masa.application.checks.goimports import fix_imports, fix_module_imports  # noqa: E402
+from masa.application.checks.leaks import leak_messages  # noqa: E402
+from masa.application.checks.testlint import test_problem_messages  # noqa: E402
+from masa.application.checks.entrypoint import entry_problem_messages  # noqa: E402
 
 
 def concise_failure_evidence(result, files=None):

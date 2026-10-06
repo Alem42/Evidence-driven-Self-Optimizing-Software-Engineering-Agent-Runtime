@@ -14,7 +14,7 @@ from role_contexts import CONTEXTS  # noqa: E402
 from masa.agents import protocol  # noqa: E402
 from masa.agents.protocol import instruction_for, validate_response  # noqa: E402
 from masa.agents.schemas import response_schema  # noqa: E402
-from masa.application import routing  # noqa: E402
+from masa.application.orchestration import routing  # noqa: E402
 from masa.domain.models import MasaError  # noqa: E402
 from masa.infrastructure.llm import validate_config  # noqa: E402
 from masa.roles import registry  # noqa: E402

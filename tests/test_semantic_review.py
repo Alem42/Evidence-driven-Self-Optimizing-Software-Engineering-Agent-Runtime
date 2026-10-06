@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from masa.domain.test_review import validate_semantic_review
 from masa.domain.models import MasaError
-from masa.application.semantic_review import review_test_semantics
+from masa.application.review.semantic_review import review_test_semantics
 from masa.application.planning import ProjectPlanning
 from masa.infrastructure.store import Store
 from test_project_plan import SPEC,CHECKS,PlannerProvider

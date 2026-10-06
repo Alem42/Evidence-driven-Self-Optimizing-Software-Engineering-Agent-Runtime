@@ -204,7 +204,7 @@ def _process_data(event):
 def _routing_section(report_calls, tools, totals, budget_events, decisions):
     """路由与预算：模式、限额、当前花费（含预留）、每次决策与升级链。没有 task_budget 事件的旧任务返回 None。
     Routing and budget view; legacy tasks without a task_budget event yield None."""
-    from masa.application.routing import spend_from_report
+    from masa.application.orchestration.routing import spend_from_report
     if not budget_events:
         return None
     latest = max(budget_events, key=lambda e: e['created'])['payload']

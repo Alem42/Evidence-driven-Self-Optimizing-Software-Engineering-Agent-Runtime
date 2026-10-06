@@ -24,7 +24,7 @@ class PatchIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.original = manifest(SOURCE)
         self.patch_file = self.root / 'patch.json'
-        subprocess.run([sys.executable, str(ROOT / 'scripts/demo_patch.py'), '--output', str(self.patch_file)],
+        subprocess.run([sys.executable, str(ROOT / 'scripts/smoke/demo_patch.py'), '--output', str(self.patch_file)],
                        cwd=ROOT, check=True, capture_output=True)
 
     def tearDown(self):

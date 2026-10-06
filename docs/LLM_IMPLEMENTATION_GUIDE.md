@@ -17,6 +17,6 @@ npm test
 npm run build
 ```
 
-真实完整验收使用 `scripts/evaluate_seeded_random.py`，默认调用付费 API；`--run ID` 只复验成功项目，`--plan ID` 是显式新自动任务，复用已批准方案，不恢复失败调用。更小的人工草稿流程使用 `scripts/smoke_project_live.py`。不要无意义重复付费验证。Go runner 有变动补跑 `go test ./...`；前端视觉验收要明确说明是否有真实浏览器，不以构建代替点击。重新安装包使用 uv pip install --python .venv/Scripts/python.exe --no-deps -e .。
+真实完整验收使用 `scripts/eval/evaluate_seeded_random.py`，默认调用付费 API；`--run ID` 只复验成功项目，`--plan ID` 是显式新自动任务，复用已批准方案，不恢复失败调用。更小的人工草稿流程使用 `scripts/smoke/smoke_project_live.py`。不要无意义重复付费验证。Go runner 有变动补跑 `go test ./...`；前端视觉验收要明确说明是否有真实浏览器，不以构建代替点击。重新安装包使用 uv pip install --python .venv/Scripts/python.exe --no-deps -e .。
 
 每轮结束写 `docs/progress/PROGRESS_日期_序号_主题.md`，更新 CURRENT、STATUS 和 PLAN_NEXT_STAGE。额度将尽时优先保存具体提交、未验证改动、命令、run ID 和恢复步骤；不得将“已编码”标成“已验收”。旧设计已归档，除非调查历史，不应把归档文件当作当前指令。

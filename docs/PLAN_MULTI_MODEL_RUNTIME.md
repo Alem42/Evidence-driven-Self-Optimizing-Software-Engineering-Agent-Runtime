@@ -64,7 +64,7 @@ flowchart TD
 | 事件账本（`events.seq` 自增）+ SQLite WAL | `infrastructure/store.py` | 事件溯源；`seq` 可直接当变更游标/SSE 游标 |
 | 内容寻址不可变产物 | `store.put/read` | 证据永不被覆盖；断点就是引用 |
 | 角色调用账本 `role_invocations` | `runtime/roles.py` | 已有“意图先落盘 → 调用 → 结果落盘”，已完成的调用恢复时直接复用；**未知结果拒绝静默重放** |
-| 任务检查点 `workflow_jobs` + `WorkflowCheckpoint` | `infrastructure/jobs.py`、`application/workflow.py` | 阶段/轮次/重复断言跨重启保留 |
+| 任务检查点 `workflow_jobs` + `WorkflowCheckpoint` | `infrastructure/jobs.py`、`application/orchestration/workflow.py` | 阶段/轮次/重复断言跨重启保留 |
 | 每次调用的路由快照 `route_ref` | `role_invocations` | 每次调用已记录实际模型与参数（只是还没有“多候选”） |
 | 预算与期限（单 run） | `domain/models.Budget`、`engine` | 调用次数、工具次数、截止时间 |
 | OS 级独占锁 | `infrastructure/locking.py` | 进程异常退出由 OS 释放锁 |
@@ -247,7 +247,7 @@ M1 已完成的与 M2 的分界：M1 解决“**流程对不对**”（路由、
 
 ### W0 评测基线（最先做，约 1–2 天）
 **状态：✅ 已实现（进展015）**：17 个任务 × 10 级、独立判官、三层上限、一键运行（设置→评测）与命令行、历史对比；第一批基线见进展015。下面保留原设计供对照。
-- **做什么**：把账本里每个真实任务导出为回归基准（需求、模型配置、失败链、最终是否通过、调用数、云端 token、耗时）；固定一组任务（文本统计、CSV 费用汇总、动态规划、随机整数 CLI、LRU 缓存……）；脚本 `scripts/bench.py` 跑一遍并输出对照表。
+- **做什么**：把账本里每个真实任务导出为回归基准（需求、模型配置、失败链、最终是否通过、调用数、云端 token、耗时）；固定一组任务（文本统计、CSV 费用汇总、动态规划、随机整数 CLI、LRU 缓存……）；脚本 `scripts/eval/bench.py` 跑一遍并输出对照表。
 - **为什么**：SWE-bench / Agentless 的评测方式——固定集合，报告“解决率 + 成本”，而不是只看单个任务是否过。后面的 W3/W4 的价值只能靠它证明。
 - **验收**：同一套任务在 固定模型 / 本地优先有界升级 / 带 Diagnoser 三种策略下各跑 ≥3 次，产出通过率、平均云端 token、平均耗时的对照；结果可重复（同种子/温度）。
 

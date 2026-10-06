@@ -55,4 +55,4 @@
 
 - 本地模型的权重摘要在任务开始时记录；**恢复任务时**如果发现本地模型被替换过，该模型会被视为不可用（Ollama 不可达时不检查）。
 - 输入大小是**估算**（系数来自真实调用拟合：ASCII 约 3.6 字符/token，中文约 0.54 token/字符），用来避免明显放不下的调用，不等于服务端的真实分词。
-- 复验真实升级：`scripts/e2e_live.py --routing ladder --keep <本地id>,legacy`（会占用 GPU，跑完记得卸载模型）。
+- 复验真实升级：`scripts/smoke/e2e_live.py --routing ladder --keep <本地id>,legacy`（会占用 GPU，跑完记得卸载模型）。

@@ -162,7 +162,7 @@ class Settings:
     # ───────────── 路由默认值（可在设置页编辑）/ routing defaults editable in Settings ─────────────
     def routing(self):
         """已保存的路由默认值（策略与预算）；文件缺失或损坏时回到内置默认。 Saved routing defaults, built-in defaults when absent."""
-        from masa.application.routing import validate_budget, validate_policy
+        from masa.application.orchestration.routing import validate_budget, validate_policy
         raw = {}
         try:
             raw = json.loads(self.routing_path.read_text(encoding='utf-8')) if self.routing_path.exists() else {}
@@ -175,7 +175,7 @@ class Settings:
 
     def save_routing(self, body):
         """校验后原子保存。只保存与默认值不同的部分之外的完整规范化结果。 Validate, then save atomically."""
-        from masa.application.routing import validate_budget, validate_policy
+        from masa.application.orchestration.routing import validate_budget, validate_policy
         policy = validate_policy(body.get('policy'))
         budget = validate_budget(body.get('budget'))
         with self.lock:

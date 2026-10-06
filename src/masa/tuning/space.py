@@ -13,9 +13,9 @@ After applying a patch the result must pass validate_policy() AND flow.validate(
 import copy
 import json
 
-from masa.application import flow
-from masa.application.routing import DEFAULT_POLICY, validate_policy
-from masa.application.workflows import FIX_V1
+from masa.application.orchestration import flow
+from masa.application.orchestration.routing import DEFAULT_POLICY, validate_policy
+from masa.application.orchestration.workflows import FIX_V1
 from masa.domain.models import MasaError
 
 MAX_OPS = 3

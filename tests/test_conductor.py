@@ -3,10 +3,12 @@ P2 Conductor: unchanged when off; on, a single obvious candidate takes the fast 
 answers fall back to the rules and leave a trace. Everything runs on scripted fake models."""
 import unittest
 
-from masa.application import conductor, flow
-from masa.application.flow import FlowError
-from masa.application.routing import DEFAULT_POLICY, validate_policy
-from masa.application.workflows import FIX_V1
+from masa.application.orchestration import conductor
+
+from masa.application.orchestration import flow
+from masa.application.orchestration.flow import FlowError
+from masa.application.orchestration.routing import DEFAULT_POLICY, validate_policy
+from masa.application.orchestration.workflows import FIX_V1
 from masa.domain.models import MasaError
 from masa.roles import registry
 
@@ -71,7 +73,7 @@ class ConductorCase(FixFlowCase):
             'owner': 'test', 'rationale': '期望写错', 'implementation_instructions': '', 'test_instructions': '改期望', 'expectation_checks': []})
         store, jobs, router = self.build(local, cloud, world, policy=policy)
         from unittest.mock import patch
-        from masa.application.coordinator import WorkflowCoordinator
+        from masa.application.orchestration.coordinator import WorkflowCoordinator
         with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
             WorkflowCoordinator(store, AssertExecutor(world), None, jobs['job'], router=router).run()
         return world, store, jobs['job'], local, cloud

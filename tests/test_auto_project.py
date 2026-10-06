@@ -24,7 +24,7 @@ class CompositeProvider:
 class AutomaticProjectTests(unittest.TestCase):
     def test_private_toolchain_import_is_a_test_preparation_error(self):
         """真实本地模型的私有测试工具导入须修测试，不改冻结边界。 Private toolchain imports route to test repair without relaxing frozen boundaries."""
-        from masa.application.check_policy import test_revision_needed
+        from masa.application.checks.check_policy import test_revision_needed
         self.assertTrue(test_revision_needed('sum_test.go:8:2: use of internal package internal/testenv not allowed'))
         self.assertFalse(test_revision_needed('sum.go:8:2: use of internal package internal/testenv not allowed'))
         self.assertTrue(test_revision_needed('main_test.go:59:50: cannot use "0" (untyped string constant) as int value in argument to formatExitCode'))

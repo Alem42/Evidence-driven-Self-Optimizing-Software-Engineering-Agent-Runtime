@@ -22,7 +22,7 @@ docker compose up --build -d
 想有内容可展示：
 
 ```bash
-python scripts/make_demo_state.py            # 只复制 .masa/bench/results/*.json，并扫描密钥，发现即中止
+python scripts/ops/make_demo_state.py            # 只复制 .masa/bench/results/*.json，并扫描密钥，发现即中止
 MASA_STATE=./demo-state docker compose up -d # 目录要对容器用户 uid 10001 可读写
 ```
 
@@ -83,7 +83,7 @@ docker run --rm -p 127.0.0.1:8765:8765 -e MASA_DEMO=0 -e MASA_ALLOWED_HOSTS=loca
 docker build -t masa:test .
 docker run -d --name masa-test -p 18765:8765 -e MASA_ALLOWED_HOSTS=localhost:18765,127.0.0.1:18765 masa:test
 export MSYS_NO_PATHCONV=1   # Git Bash on Windows：否则 /tmp/... 会被改写成 Windows 路径
-docker cp scripts/docker_smoke.py masa-test:/tmp/docker_smoke.py
+docker cp scripts/smoke/docker_smoke.py masa-test:/tmp/docker_smoke.py
 docker exec masa-test python /tmp/docker_smoke.py                # 预期 ALL PASS
 docker rm -f masa-test
 ```

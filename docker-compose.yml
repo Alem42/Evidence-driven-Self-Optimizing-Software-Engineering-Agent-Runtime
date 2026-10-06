@@ -16,8 +16,8 @@ services:
     ports:
       - "${MASA_BIND_ADDRESS:-127.0.0.1}:${MASA_PORT:-8765}:8765"
     volumes:
-      # 演示：把 scripts/make_demo_state.py 生成的目录放到 ./demo-state（没有就用命名卷，空历史）。
-      # Demo: put the directory made by scripts/make_demo_state.py at ./demo-state (otherwise a named volume with empty history is used).
+      # 演示：把 scripts/ops/make_demo_state.py 生成的目录放到 ./demo-state（没有就用命名卷，空历史）。
+      # Demo: put the directory made by scripts/ops/make_demo_state.py at ./demo-state (otherwise a named volume with empty history is used).
       - "${MASA_STATE:-masa-data}:/data"
     security_opt:
       - no-new-privileges:true

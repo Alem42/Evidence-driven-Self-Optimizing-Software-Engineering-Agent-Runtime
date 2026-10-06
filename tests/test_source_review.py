@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from masa.application.source_review import review_sources
+from masa.application.review.source_review import review_sources
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.infrastructure.store import Store

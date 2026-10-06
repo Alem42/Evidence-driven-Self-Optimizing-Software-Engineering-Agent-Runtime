@@ -216,7 +216,7 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     from masa.infrastructure import orphans
                     result = orphans.clean_orphans()
                 elif path == '/api/workflows/fix-v1' and not write:
-                    from masa.application.workflows import FIX_V1
+                    from masa.application.orchestration.workflows import FIX_V1
                     result = FIX_V1
                 elif path == '/api/roles' and not write:
                     # 角色清单来自 RoleSpec 注册表（只读，不含提示词全文）：前端的阶段标签与顺序据此显示。

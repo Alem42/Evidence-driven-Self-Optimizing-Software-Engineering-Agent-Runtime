@@ -15,17 +15,17 @@
 
 ## 1. 现状（改动前必须知道的事实）
 
-- 协调器：`src/masa/application/coordinator.py`（`WorkflowCoordinator`）。修复子图：`application/flow.py`（`FlowEngine`、`guard()` 注册、`validate()`）与 `application/workflows.py`（`FIX_V1` 数据定义）。guard 目前有 `format_only`、`primary_is`、`needs_diagnosis`、`arbitrate_due`、`rewrite_due`、`diagnosis_is`、`noop*`、`flip_to_tests`、`halted`、`always`。
+- 协调器：`src/masa/application/orchestration/coordinator.py`（`WorkflowCoordinator`）。修复子图：`application/orchestration/flow.py`（`FlowEngine`、`guard()` 注册、`validate()`）与 `application/orchestration/workflows.py`（`FIX_V1` 数据定义）。guard 目前有 `format_only`、`primary_is`、`needs_diagnosis`、`arbitrate_due`、`rewrite_due`、`diagnosis_is`、`noop*`、`flip_to_tests`、`halted`、`always`。
 - **角色元数据散落在多处**（这是 RoleSpec 要收拢的）：
   - 提示词 if 链：`src/masa/agents/protocol.py`（`instruction_for`、`validate_response`）
   - 输出 schema：`src/masa/agents/schemas.py`（`response_schema`）
   - 校验器：`src/masa/domain/proposals.py`（`validate_spec/checks/repair/test_revision/diagnosis/triage/file_proposal`）
-  - 路由里的角色表：`src/masa/application/routing.py`（`ROLES`、`prefer_highest_roles`、`DEFAULT_POLICY`、`validate_policy`）
+  - 路由里的角色表：`src/masa/application/orchestration/routing.py`（`ROLES`、`prefer_highest_roles`、`DEFAULT_POLICY`、`validate_policy`）
   - 配置的角色白名单：`src/masa/infrastructure/llm.py::validate_config`（`allowed={...}`）
   - 前端标签：`frontend/src/entities/status.ts`（`stageLabels`）、`features/thread/Thread.tsx`（`ROLE_ORDER`）
 - 现有角色（purpose 名）：`project_planner`、`project_tester`、`project_developer`、`project_repair`、`project_test_revision`、`project_diagnoser`、`project_triage`（另有历史的 `project_test_reviewer` 等）。
-- 角色调用统一经 `runtime/roles.py::RoleRuntime.call(rid, provider, purpose, values, invocation_id=…, freeze_key=…)`（exactly-once、写 `model_requested/completed/failed`）。模型选择经 `application/router.py::Router.decide` → 纯函数 `routing.route()`。
-- 评测：`src/masa/bench/`（`tasks.py` 23 题、`oracle.py` 独立判官、`runner.py`、`report.py`），设置页“评测”与 `scripts/bench.py`。**调优器要复用它。**
+- 角色调用统一经 `runtime/roles.py::RoleRuntime.call(rid, provider, purpose, values, invocation_id=…, freeze_key=…)`（exactly-once、写 `model_requested/completed/failed`）。模型选择经 `application/orchestration/router.py::Router.decide` → 纯函数 `routing.route()`。
+- 评测：`src/masa/bench/`（`tasks.py` 23 题、`oracle.py` 独立判官、`runner.py`、`report.py`），设置页“评测”与 `scripts/eval/bench.py`。**调优器要复用它。**
 - 测试：`python -m unittest discover -s tests`（当前 404 项 + 前端 31 项，都不调用真实模型）。
 
 ## 2. 设计
@@ -85,7 +85,7 @@ prompt: |                           # 系统提示词（支持占位符）；现
 - **评分**：在“快速”套餐（6 题）上跑，目标函数 = 加权通过率 − λ·每次通过的云端 token − μ·假通过率（λ、μ 可配）；每个候选最多重复 N 次取均值。
 - **搜索策略**：先做逐轮淘汰（successive halving）：每代 4 个候选，淘汰一半；以后可以换 MCTS 式。**每个候选的 token/时间上限沿用评测的三层上限**，并设“整个调优预算”（云端 token、墙钟、候选数）。
 - 产物：`.masa/tuning/<id>/`：每代配置、得分、对比；最优配置可一键保存为“预设”（`routing.json` 与图定义的版本化副本），报告里列出“相对基线的变化”。
-- 实现位置：`src/masa/tuning/`（`space.py` 描述可调空间与 patch 校验，`proposer.py`，`search.py`，`score.py`）；`bench/runner.py` 需要支持“用覆盖配置运行”（传入策略与图定义覆盖，不写入用户设置）；命令行 `scripts/tune.py`；设置页后续再加（本阶段只要 CLI + 报告文件）。
+- 实现位置：`src/masa/tuning/`（`space.py` 描述可调空间与 patch 校验，`proposer.py`，`search.py`，`score.py`）；`bench/runner.py` 需要支持“用覆盖配置运行”（传入策略与图定义覆盖，不写入用户设置）；命令行 `scripts/eval/tune.py`；设置页后续再加（本阶段只要 CLI + 报告文件）。
 
 ### 2.5 MCP 服务
 - 目的：生态对接。把验证与评测能力暴露给任何 MCP 客户端；并让 RoleSpec 的 `tools` 可以引用 MCP 工具（**仅声明与白名单校验，本阶段不要求实际调用外部 MCP 服务器**）。

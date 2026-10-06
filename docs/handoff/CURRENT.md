@@ -1,12 +1,12 @@
 # 当前接续点
 
-**2026-10-07（上午）**：用户选路线 A（保持实验、默认关闭）。已做：设置页开关加风险提示与确认；可选角色不再进入默认 `prefer_highest_roles`（默认策略与之前逐项相同）；差分检查 `scripts/loop_equivalence.py`（6 个脚本化场景 × 约 520 事件，与 ceda2ae 逐项相同）；收尾真实验证 ¥1.83（默认流程 3/5，设置→实际流程通路验证通过）；总结文档 `docs/M2_DYNAMIC_ROLES_AND_EVAL.md`。下一步 P4 MCP。
+**2026-10-07（上午）**：用户选路线 A（保持实验、默认关闭）。已做：设置页开关加风险提示与确认；可选角色不再进入默认 `prefer_highest_roles`（默认策略与之前逐项相同）；差分检查 `scripts/eval/loop_equivalence.py`（6 个脚本化场景 × 约 520 事件，与 ceda2ae 逐项相同）；收尾真实验证 ¥1.83（默认流程 3/5，设置→实际流程通路验证通过）；总结文档 `docs/M2_DYNAMIC_ROLES_AND_EVAL.md`。下一步 P4 MCP。
 
 **2026-10-07（凌晨）**：**P2 真实对照评测完成（进展005，花费 ¥8.02）**：关 10/11 通过 ¥0.235/次，开 10/14 ¥0.29–0.46/次；**未见收益，保持默认关闭**。评测中修了：流式上限按原始 SSE 字节计（真实缺陷，影响所有云端长回答）、reason 超长整条被拒、指挥者能 halt（已移除）、首轮就触发（改为仅停滞触发）。前端：新任务页三个推荐从题库随机抽低等级任务；设置新增“动态角色”页。待用户选路线（A 保持关闭 / B 顾问模式 / C 去掉）。
 
-**2026-10-06（深夜）**：**P3 调优器完成**（进展004-p3，离线测试 473，**未做真实调优运行**）：`src/masa/tuning/`（space/score/proposer/search/evaluate/apply）、`scripts/tune.py`、评测运行器 `overrides`、数据角色 `workflow_tuner`。下一步 P4 MCP 服务。
+**2026-10-06（深夜）**：**P3 调优器完成**（进展004-p3，离线测试 473，**未做真实调优运行**）：`src/masa/tuning/`（space/score/proposer/search/evaluate/apply）、`scripts/eval/tune.py`、评测运行器 `overrides`、数据角色 `workflow_tuner`。下一步 P4 MCP 服务。
 
-**2026-10-06（晚）**：**P2 指挥者完成**（进展003-p2，默认关闭，仅假模型测试，未做真实运行）：`llm_choice` 节点 + `application/conductor.py` + 三个数据角色（project_conductor / test_skeptic / code_reviewer）；策略 `conductor`、`conductor_max_calls`、`conductor_cascade`；非法/崩溃/超限回退到规则并写 `conductor_rejected`。后端 448 / 前端 33。下一步 P3 调优器。
+**2026-10-06（晚）**：**P2 指挥者完成**（进展003-p2，默认关闭，仅假模型测试，未做真实运行）：`llm_choice` 节点 + `application/orchestration/conductor.py` + 三个数据角色（project_conductor / test_skeptic / code_reviewer）；策略 `conductor`、`conductor_max_calls`、`conductor_cascade`；非法/崩溃/超限回退到规则并写 `conductor_rejected`。后端 448 / 前端 33。下一步 P3 调优器。
 
 **2026-10-06**：分支 `feature/dynamic-roles`。**P1 RoleSpec 注册表完成**（进展018）：角色元数据收拢到 `src/masa/roles/specs/*.json`，路由、配置白名单、提示词/校验器分发、前端标签都从注册表读；黄金样本（`tests/golden/`）证明提示词与 schema 逐字节不变；404 项旧测试不改断言即全绿，现 423+33。下一步 P2 指挥者（见 DESIGN_DYNAMIC_ROLES）。注意：`protocol.py` 现在是按注册表分发的，新增角色只加 JSON+MD；若有意修改提示词，需重新生成黄金样本（`python tests/golden/capture_roles.py`）并在提交说明里写明原因。
 
@@ -14,17 +14,17 @@
 
 **2026-10-05（下午）**：见进展016。评测实时显示、23 题、云端逐文件生成、入口规则（main.go 不许读输入）、Tester 重试带原因。**真实对比：混合（本地起步）目前不如纯云端**（57% vs 79%，云端 token 基本持平，慢 1.75 倍），简历里“降本 62%”已删除；精简版简历 378 字。用量提醒：用户在意 token，之后只重跑单个任务。已知剩余：Tester 偶发无效输出、coins 的整包语法门、maze/L9 过不去。
 
-**2026-10-05（白天）**：见进展015。W0 评测基线完成（设置→评测、scripts/bench.py、17 题 10 级、独立判官、三层上限）；评测抓到假通过（hello 的退出码）、wc 的修复改测试失败，均已修。纯云端基线：L0–L6 约 92%，L7–L8 云端能做，L9 regex 死在“云端一次生成被截断”（下一步：云端也逐文件生成）。**本地评测基线待 GPU 空出来再补**（用户在用显卡，不要跑本地模型）。
+**2026-10-05（白天）**：见进展015。W0 评测基线完成（设置→评测、scripts/eval/bench.py、17 题 10 级、独立判官、三层上限）；评测抓到假通过（hello 的退出码）、wc 的修复改测试失败，均已修。纯云端基线：L0–L6 约 92%，L7–L8 云端能做，L9 regex 死在“云端一次生成被截断”（下一步：云端也逐文件生成）。**本地评测基线待 GPU 空出来再补**（用户在用显卡，不要跑本地模型）。
 
 **2026-10-05 凌晨**：见进展014。新增：Diagnoser 逐条核对 + 确定性改判（修了“测试源码从未送进 Diagnoser”的 bug）、整体重写（fix-v1 的 rewrite 节点）、提示泄漏检查（leaks.py）、测试静态检查（testlint.py）、module 前缀修复、模型梯子上限 4→6、测试文件紧凑提示。CSV 任务真实通过，但盲测核对与整体重写**尚未被真实运行触发**（仅测试覆盖）。下一步：W0 评测基线（多次重复统计通过率）。
 
-**2026-10-04（深夜）**：见进展013。**cmd 弹窗根因**：我的 Ollama 演练脚本用 DETACHED_PROCESS 重启了 `ollama serve`，无控制台的服务每次加载/卸载模型拉起的 3 个子进程各弹一个窗口；已用隐藏窗口重启并实机复测，脚本已改；监控工具 `scripts/watch_procs.py`。前端：各角色实际使用的模型（取自账本）、默认自动+有界升级且不再选模型、设置返回/关闭、随机建议任务、报告“修复过程”。后端：证据源码片段、前几轮账本摘要、确定性 import 修复、Planner 钉死边界语义。M2 已细化为 W0–W7（PLAN_MULTI_MODEL_RUNTIME §10）。**重启 API 服务**后新 runner/前端才生效。
+**2026-10-04（深夜）**：见进展013。**cmd 弹窗根因**：我的 Ollama 演练脚本用 DETACHED_PROCESS 重启了 `ollama serve`，无控制台的服务每次加载/卸载模型拉起的 3 个子进程各弹一个窗口；已用隐藏窗口重启并实机复测，脚本已改；监控工具 `scripts/ops/watch_procs.py`。前端：各角色实际使用的模型（取自账本）、默认自动+有界升级且不再选模型、设置返回/关闭、随机建议任务、报告“修复过程”。后端：证据源码片段、前几轮账本摘要、确定性 import 修复、Planner 钉死边界语义。M2 已细化为 W0–W7（PLAN_MULTI_MODEL_RUNTIME §10）。**重启 API 服务**后新 runner/前端才生效。
 
 **2026-10-04（晚）**：见进展012 与 PLAN_LOW_MODEL_QUALITY。新增：逐文件语法门、测试先行（强模型写测试）、Planner/Tester/测试修订最高等级、按进展延长轮数、实现无改动⇒转修订测试、子进程不弹 cmd（需重启 API 服务）。文本统计 CLI 仍未稳定通过（规格边界语义/弱模型方案）；下一步见 PLAN §5：尝试摘要、证据带源码片段、约束解码、冻结前红灯检查、Planner 钉死边界语义。M1 不推进 M2，路线待重新明确。
 
 **2026-10-04 M1 后半完成**：见进展011。新增 application/{ownership,flow,workflows}.py（归属分析、声明式引擎、fix-v1）、Diagnoser 角色、无进展拒收、`POST /api/runs/<id>/auto-fix`（失败后一键继续）、`GET /api/workflows/fix-v1`、失败卡“自动修复（推荐）”。真实模拟暴露并修复：云端返回截断 JSON 被当成传输失败而不升级。下一步：Worker 租约/自动续跑、报告页显示修复子图轨迹、M2。显卡归用户，跑完确认 /api/ps 为空。
 
-**2026-10-04 M0.5 收尾 + M1 前半完成**：见进展010。新增：application/triage.py（可行性预检）、infrastructure/orphans.py（孤儿 llama-server 检测/清理）、providers.py（API 账户：官方 /models 与余额）、TransportFailure + 账本层免费本地重试（roles.py `_free_retry`）、failure_signature 卡死检测、模型次序/API 账户/路由默认值三个设置页。下一步：Diagnoser、声明式工作流、Worker 租约。**运维要点**：杀 ollama serve 会留下占显存的孤儿 llama-server（本地运行时页可清理，scripts/drill_ollama.py 已自动清）；跑完本地模型要卸载，并确认显存回落。
+**2026-10-04 M0.5 收尾 + M1 前半完成**：见进展010。新增：application/checks/triage.py（可行性预检）、infrastructure/orphans.py（孤儿 llama-server 检测/清理）、providers.py（API 账户：官方 /models 与余额）、TransportFailure + 账本层免费本地重试（roles.py `_free_retry`）、failure_signature 卡死检测、模型次序/API 账户/路由默认值三个设置页。下一步：Diagnoser、声明式工作流、Worker 租约。**运维要点**：杀 ollama serve 会留下占显存的孤儿 llama-server（本地运行时页可清理，scripts/smoke/drill_ollama.py 已自动清）；跑完本地模型要卸载，并确认显存回落。
 
 **2026-10-04 M0.5 前两项完成**：硬上下文拦截（domain/tokens.py、llm.py）、崩溃恢复演练（tests/test_recovery_drill.py，真硬杀子进程）、真实升级验证；共修 4 个缺陷（被中断验证、澄清后重规划、规划重试挤占修复轮次、准入过严）。恢复语义：已完成调用不重复；结果未知的请求明确停下不重放；被中断的验证新建验证 run。下一步：M0.5 剩余项，再 M1（首项：幂等分级——免费本地调用结果未知时自动重试，演练场景 B/C 目前需人工）。显卡归用户，跑完本地模型要卸载（keep_alive 0）。
 
@@ -32,7 +32,7 @@
 
 **2026-10-03 深夜**：git 已修复（main 原为无关历史的 Initial commit，现已并入 develop 并快进，二者同为 f5fd53d）；新分支 `feature/multi-model`，下一步按 PLAN_MULTI_MODEL_RUNTIME 做 M0（任务级预算 + RoutingSnapshot + route() + 修复升级阶梯）。
 
-**2026-10-03 晚**：新增任务报告（usage.py）与自动化修复（gofmt 规范化/契约重试/测试规格仲裁/Go 预检），见进展007；`scripts/e2e_live.py` 可用任意 profile 做真实端到端并打印逐次用量，`scripts/show_failures.py` 打印版本链失败证据。
+**2026-10-03 晚**：新增任务报告（usage.py）与自动化修复（gofmt 规范化/契约重试/测试规格仲裁/Go 预检），见进展007；`scripts/smoke/e2e_live.py` 可用任意 profile 做真实端到端并打印逐次用量，`scripts/eval/show_failures.py` 打印版本链失败证据。
 
 **2026-10-03 前端 v3**：前后端已分离。后端 `python -m masa serve`（纯 API，/api/session 发令牌，CORS 白名单），前端在 `frontend/`（React19+TS+Vite+TanStack Query+zustand+CodeMirror），`npm run dev` 或 `scripts/dev.ps1`。旧 `frontend/src` 与 `interfaces/http/static` 已删除。结构、扩展点、已知后端卡顿根因与待办见 [PLAN_FRONTEND_REDESIGN](../PLAN_FRONTEND_REDESIGN.md)（第 5、6 节）。下一步后端优先：只读连接/增量接口/变更游标，再做路由与预算；前端按扩展点接入。
 
@@ -52,4 +52,4 @@ Qwen uppercase 明确测试修订最终 dd9ea5f962dc437bb523a34a79c44423：Go/Ga
 
 Python186、前端13/构建、Go runner测试通过；视觉未验收。服务启动用新版，读取正在执行的任务用既有 HTTP 或只读 SQLite，别为查询初始化 Jobs/Console（会恢复任务）。每部分验证后提交，密钥/.masa/.tools 不入 Git，核心函数中英文注释。
 
-**断点（2026-10-07，token 吃紧）**：用户要求先整理结构（只动结构，S1 目录整理 + S2 拆 `application/`），并先分析“经验库”想法（见 `docs/design/IDEA_EXPERIENCE_LIBRARY.md`）。失败分类已完成（进展 PROGRESS_2026-10-07_001）。结构整理前的基线提交：`951ad90`（后端 475 通过、前端 40）；回滚用 `git reset --hard 951ad90`。整理期间不改行为，验证 = 全量测试 + `scripts/loop_equivalence.py`。之后：用户的“多加测试暴露常见问题 → 做工具”“经验库”“MCP”都等结构整理完再决定。
+**断点（2026-10-07，token 吃紧）**：用户要求先整理结构（只动结构，S1 目录整理 + S2 拆 `application/`），并先分析“经验库”想法（见 `docs/design/IDEA_EXPERIENCE_LIBRARY.md`）。失败分类已完成（进展 PROGRESS_2026-10-07_001）。结构整理前的基线提交：`951ad90`（后端 475 通过、前端 40）；回滚用 `git reset --hard 951ad90`。整理期间不改行为，验证 = 全量测试 + `scripts/eval/loop_equivalence.py`。之后：用户的“多加测试暴露常见问题 → 做工具”“经验库”“MCP”都等结构整理完再决定。

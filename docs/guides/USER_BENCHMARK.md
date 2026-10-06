@@ -1,6 +1,6 @@
 # 评测使用指南
 
-用来回答一个问题：**我刚改的 runtime，让系统变强了吗？** 设置 → “评测” 一键运行，或命令行 `python scripts/bench.py`。
+用来回答一个问题：**我刚改的 runtime，让系统变强了吗？** 设置 → “评测” 一键运行，或命令行 `python scripts/eval/bench.py`。
 
 ## 1. 它测什么
 
@@ -47,7 +47,7 @@
 ## 5. 注意
 
 - **评测不能与正在执行的任务同时运行**（占用 GPU 和云端额度）；评测中新建任务会被拒绝。
-- 评测在 `.masa/bench/state/<id>` 这个临时目录里跑，**不写入你的历史**；全部通过就自动清理，**有失败时保留账本（只留最近 3 份）**，方便用 `scripts/show_failures.py .masa/bench/state/<id> <run_id>` 排查；run_id 在结果 JSON 里。结果保存在 `.masa/bench/results/<id>.json`（不进 git）。
+- 评测在 `.masa/bench/state/<id>` 这个临时目录里跑，**不写入你的历史**；全部通过就自动清理，**有失败时保留账本（只留最近 3 份）**，方便用 `scripts/eval/show_failures.py .masa/bench/state/<id> <run_id>` 排查；run_id 在结果 JSON 里。结果保存在 `.masa/bench/results/<id>.json`（不进 git）。
 - 评测使用设置里**已启用**的模型与次序；命令行可用 `--models id1,id2` 限定。
 - 判官会在本机构建并运行生成的小程序（10 秒超时、临时目录、精简环境变量），与系统自己的 runner 隔离强度不同——评测任务都是纯标准库的小程序，不要把它指向不可信的输入。
 - 云端价格按模型单价估算，价格没配置时 `cost` 为“未知”，token 数仍然准确。
@@ -55,11 +55,11 @@
 ## 6. 命令行
 
 ```bash
-python scripts/bench.py --list                                   # 任务与套餐
-python scripts/bench.py --suite canary                           # 金丝雀
-python scripts/bench.py --suite quick --repeats 2 --total-tokens 350000 --total-minutes 50
-python scripts/bench.py --tasks hello,wc --repeats 3             # 自选，重复 3 次
-python scripts/bench.py --compare <旧id> <新id>                  # 两次结果的差异（JSON）
+python scripts/eval/bench.py --list                                   # 任务与套餐
+python scripts/eval/bench.py --suite canary                           # 金丝雀
+python scripts/eval/bench.py --suite quick --repeats 2 --total-tokens 350000 --total-minutes 50
+python scripts/eval/bench.py --tasks hello,wc --repeats 3             # 自选，重复 3 次
+python scripts/eval/bench.py --compare <旧id> <新id>                  # 两次结果的差异（JSON）
 ```
 
 ## 7. 加一个任务

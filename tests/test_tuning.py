@@ -292,7 +292,7 @@ class OverrideTests(ConductorCase):
         local = Scripted('small', 'local', world)
         cloud = Scripted('big', 'cloud', world, diagnosis={'owner': 'test', 'rationale': 'r', 'implementation_instructions': '', 'test_instructions': 'x', 'expectation_checks': []})
         store, jobs, router = self.build(local, cloud, world, request=request)
-        from masa.application.coordinator import WorkflowCoordinator
+        from masa.application.orchestration.coordinator import WorkflowCoordinator
         with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
             WorkflowCoordinator(store, AssertExecutor(world), None, jobs['job'], router=router).run()
         return world, store, jobs['job'], local, cloud

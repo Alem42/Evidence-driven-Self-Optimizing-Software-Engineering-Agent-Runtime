@@ -16,14 +16,14 @@ from masa.application.reports import render
 from masa.runtime.engine import Runtime
 from masa.infrastructure.settings import Settings
 from masa.runtime.graph import full_verification_policy, collaboration_policy, harness_policy
-from masa.application.single_file import CodeGeneration
+from masa.application.review.single_file import CodeGeneration
 from masa.infrastructure.workspaces import verify_snapshot
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 from masa.application.usage import task_report
-from masa.application.router import Router, build_snapshot
-from masa.application.routing import DEFAULT_BUDGET, DEFAULT_POLICY
+from masa.application.orchestration.router import Router, build_snapshot
+from masa.application.orchestration.routing import DEFAULT_BUDGET, DEFAULT_POLICY
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
@@ -32,7 +32,7 @@ from masa.infrastructure import capability
 from masa.infrastructure.diagnostics import DiagnosticLog
 
 
-from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature
+from masa.application.checks.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature
 
 
 class Console:
@@ -45,7 +45,7 @@ class Console:
             Path(project),
         )
         self.settings = Settings(self.root)
-        # 如果跑过 scripts/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
+        # 如果跑过 scripts/eval/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
         from masa.domain.tokens import configure as configure_tokens
         configure_tokens(self.root / 'token-calibration.json')
         self.hardware = HardwareMonitor()
@@ -118,7 +118,7 @@ class Console:
         goal = body.get('goal')
         if not isinstance(goal, str) or len(goal) > 16000:
             raise MasaError('goal must be text up to 16000 characters')
-        from masa.application.triage import assess
+        from masa.application.checks.triage import assess
         return assess(goal)
 
     def project_report(self, rid):
@@ -304,7 +304,7 @@ class Console:
                  'result': store.read(row['result_ref']) if row['result_ref'] else None}
                 for row in store.tools(rid)]
             completed=[(c['operation'],c['result']) for c in checks if c['result']]
-            from masa.application import ownership
+            from masa.application.checks import ownership
             analysis=ownership.analyse(completed)
             return {'checks':checks,'repair_advice':repair_advice(completed),
                     'ownership':{'primary':analysis['primary'],'lines':ownership.describe(analysis)}}
@@ -549,7 +549,7 @@ class Console:
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
             if workflow:
-                from masa.application import flow
+                from masa.application.orchestration import flow
                 flow.validate(workflow)  # 图只能引用已注册的 guard 与动作 / the graph may only reference registered guards and actions
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
@@ -559,7 +559,7 @@ class Console:
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
                               'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
-            from masa.application.coordinator import WorkflowCoordinator
+            from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
                 runner=Runner(self.runner_path,self.go_path)
@@ -673,7 +673,7 @@ class Console:
 
     def review_project_sources(self, rid, body):
         """解析可见草稿，结果只用于审查而不替代 Gate。 Parse the visible draft without replacing Gate verification."""
-        from masa.application.source_review import review_sources
+        from masa.application.review.source_review import review_sources
         with self.lock:
             self._available()
             store=Store(self.root)

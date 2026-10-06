@@ -7,15 +7,15 @@
 | 目录/文件 | 功能 |
 |---|---|
 | application/console.py | 浏览器请求、配置选择、线程生命周期 |
-| application/coordinator.py | 自动规划、等待、生成、检查、修复、恢复 |
-| application/workflow.py | 原子阶段检查点和重复断言计数 |
+| application/orchestration/coordinator.py | 自动规划、等待、生成、检查、修复、恢复 |
+| application/orchestration/workflow.py | 原子阶段检查点和重复断言计数 |
 | application/planning.py | Planner/Tester 服务、澄清回答、规格批准 |
 | application/generation.py | 代码草稿、测试修订、实现修复、快照发布 |
-| application/check_policy.py | 根据真实工具诊断分类失败 |
-| application/test_review.py | 测试计划规则审查 |
-| application/source_review.py | 临时副本上的 Go AST 解析 |
-| application/semantic_review.py | 新增独立模型测试计划评审 |
-| application/mutation.py | 显式变异、真实测试、结果分类 |
+| application/checks/check_policy.py | 根据真实工具诊断分类失败 |
+| application/review/test_review.py | 测试计划规则审查 |
+| application/review/source_review.py | 临时副本上的 Go AST 解析 |
+| application/review/semantic_review.py | 新增独立模型测试计划评审 |
+| application/review/mutation.py | 显式变异、真实测试、结果分类 |
 | domain/ | 纯数据协议及校验，不调用模型/工具 |
 | runtime/roles.py | 模型请求意图、预算、输出及调用身份持久化 |
 | runtime/engine.py | 检查图调度、工具权限与 Evidence Gate |
@@ -38,10 +38,10 @@ Tester 提出具体用例，规则审查报告给用户。批准绑定完整规�
 
 新增 semantic_review.py 创建单独的评审运行，绑定 input_ref。domain/test_review.py 验证每条 finding 的 acceptance/check/case 索引，并要求 evidence 是对应输入中的原文片段。模型不能用不存在的引用支持意见。report 包含 summary、findings 与 needs_attention/reviewed；reviewed 只说明意见记录完成。
 
-评审运行禁止 Runtime 工具执行。它不能修改父项目、批准方案或改变父 Gate。恢复使用 --resume-id，匹配输入和模型配置；结果已保存时不重复请求。脚本为 scripts/review_test_semantics.py。Reviewer 目前可与其他角色使用同一模型，独立的是角色职责和输入，不是独立供应商或训练模型。
+评审运行禁止 Runtime 工具执行。它不能修改父项目、批准方案或改变父 Gate。恢复使用 --resume-id，匹配输入和模型配置；结果已保存时不重复请求。脚本为 scripts/smoke/review_test_semantics.py。Reviewer 目前可与其他角色使用同一模型，独立的是角色职责和输入，不是独立供应商或训练模型。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/review_test_semantics.py d50899063f04459daf4bfdd0a806f85f
+.\.venv\Scripts\python.exe scripts/smoke/review_test_semantics.py d50899063f04459daf4bfdd0a806f85f
 ```
 
 完整历史计划的真实 API 两次未通过引用校验，当前不能承诺复杂计划评审稳定。不得放宽引用来掩盖问题。后续应采用字段标识+Runtime抽取原文，再逐条审查。

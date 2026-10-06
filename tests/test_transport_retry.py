@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.coordinator import WorkflowCoordinator
-from masa.application.router import Router
-from masa.application.routing import DEFAULT_POLICY, validate_policy
+from masa.application.orchestration.coordinator import WorkflowCoordinator
+from masa.application.orchestration.router import Router
+from masa.application.orchestration.routing import DEFAULT_POLICY, validate_policy
 from masa.domain.models import MasaError, TransportFailure
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.llm import ChatProvider

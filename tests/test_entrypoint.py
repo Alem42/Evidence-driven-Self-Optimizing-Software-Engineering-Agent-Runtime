@@ -1,7 +1,7 @@
 """入口检查：main.go 里不许读输入。Entrypoint check: main.go may not read input. The two mains below are copied from real benchmark output."""
 import unittest
 
-from masa.application.entrypoint import entry_problem_messages
+from masa.application.checks.entrypoint import entry_problem_messages
 from masa.application.generation import ProjectGeneration
 from masa.domain.models import MasaError
 

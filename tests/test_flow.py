@@ -1,9 +1,9 @@
 """声明式工作流引擎与归属分析。Declarative workflow engine and failure-ownership analysis."""
 import unittest
 
-from masa.application import ownership
-from masa.application.flow import FlowEngine, FlowError, GUARDS, guard, next_edge, validate
-from masa.application.workflows import FIX_V1
+from masa.application.checks import ownership
+from masa.application.orchestration.flow import FlowEngine, FlowError, GUARDS, guard, next_edge, validate
+from masa.application.orchestration.workflows import FIX_V1
 
 # ───── c903b2b7 的真实验证输出（节选）/ real verification output from task c903b2b7 (excerpt) ─────
 CYCLE_AND_SYNTAX = [

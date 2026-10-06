@@ -90,7 +90,7 @@ class ProjectGenerationTests(unittest.TestCase):
 
     def test_format_only_failure_in_implementation_is_fixed_without_a_model(self):
         """实现文件仅格式失败（如人工编辑）也可零模型调用修复。 Source-only gofmt failures need no model call."""
-        from masa.application.check_policy import format_only
+        from masa.application.checks.check_policy import format_only
         binary,go=self._real_go()
         messy={**FILES,'internal/app/app.go':MESSY_APP}
         with tempfile.TemporaryDirectory() as temp:

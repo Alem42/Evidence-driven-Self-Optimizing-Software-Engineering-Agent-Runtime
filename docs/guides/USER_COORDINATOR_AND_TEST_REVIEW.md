@@ -30,7 +30,7 @@ flowchart TD
 - 终止：预算/次数达到上限、相同断言停滞、结果未知等状态不继续盲目调用。
 - 恢复：读取 plan_id/draft_id/run_id/attempt，复用已落盘输出和已验证版本。
 
-本轮已将整个自动执行循环从 console.py 移到 application/coordinator.py，并将错误分类函数移到 check_policy.py。workflow.py 保留阶段提交和停滞计数。现有 HTTP/API 不改，Coordinator 能在没有 Console 和 HTTP 的测试中独立运行。
+本轮已将整个自动执行循环从 console.py 移到 application/orchestration/coordinator.py，并将错误分类函数移到 check_policy.py。workflow.py 保留阶段提交和停滞计数。现有 HTTP/API 不改，Coordinator 能在没有 Console 和 HTTP 的测试中独立运行。
 
 这仍是有界串行工作流协调器。任意角色动态 DAG、每个角色的统一 Step 状态、并行任务调度和所有中断窗口尚未完成。单纯搬出代码不等于获得这些能力。后续应逐阶段提取 transition 方法，统一恢复入口，再把角色转换映射到持久 Step/Attempt。
 
@@ -52,7 +52,7 @@ Tester 提出用例，Developer 实现测试；如果生成测试的人同时决
 
 ## 4. 本轮首版如何执行
 
-application/test_review.py 是独立纯规则模块，不接收生成实现，也不会执行工具。Planner/Tester 计划生成后保存 review；用户修改计划批准时重新评审，报告包含输入摘要，以免旧评审对应新方案。
+application/review/test_review.py 是独立纯规则模块，不接收生成实现，也不会执行工具。Planner/Tester 计划生成后保存 review；用户修改计划批准时重新评审，报告包含输入摘要，以免旧评审对应新方案。
 
 明确可疑的“每次随机输出都不同”和“用被测实现算预期”阻止批准；缺少具体用例、重复用例、覆盖遗漏警告。前端方案页展示评审意见。规则是有限启发式，可能有误报；不放回抽样等特殊契约需补充明确规格和测试策略。报告 status=reviewed 只表示已执行规则审查，不等于测试正确，更不等于 Gate 通过。
 
