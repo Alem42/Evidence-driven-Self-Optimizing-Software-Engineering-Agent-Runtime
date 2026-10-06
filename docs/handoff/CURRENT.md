@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-07（凌晨）**：**P2 真实对照评测完成（进展005，花费 ¥8.02）**：关 10/11 通过 ¥0.235/次，开 10/14 ¥0.29–0.46/次；**未见收益，保持默认关闭**。评测中修了：流式上限按原始 SSE 字节计（真实缺陷，影响所有云端长回答）、reason 超长整条被拒、指挥者能 halt（已移除）、首轮就触发（改为仅停滞触发）。前端：新任务页三个推荐从题库随机抽低等级任务；设置新增“动态角色”页。待用户选路线（A 保持关闭 / B 顾问模式 / C 去掉）。
+
 **2026-10-06（深夜）**：**P3 调优器完成**（进展004-p3，离线测试 473，**未做真实调优运行**）：`src/masa/tuning/`（space/score/proposer/search/evaluate/apply）、`scripts/tune.py`、评测运行器 `overrides`、数据角色 `workflow_tuner`。下一步 P4 MCP 服务。
 
 **2026-10-06（晚）**：**P2 指挥者完成**（进展003-p2，默认关闭，仅假模型测试，未做真实运行）：`llm_choice` 节点 + `application/conductor.py` + 三个数据角色（project_conductor / test_skeptic / code_reviewer）；策略 `conductor`、`conductor_max_calls`、`conductor_cascade`；非法/崩溃/超限回退到规则并写 `conductor_rejected`。后端 448 / 前端 33。下一步 P3 调优器。

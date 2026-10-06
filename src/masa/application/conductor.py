@@ -14,7 +14,7 @@ NODE_ROLE = {'repair': 'project_repair', 'revise': 'project_test_revision', 'dia
 # 没有独立角色的节点用固定说明。 Nodes without a role of their own use fixed text.
 NODE_TEXT = {
     'rewrite': '整体重写实现：丢弃现有结构，由最高等级模型对着冻结的测试重新写（只在最强模型已试过补丁后可选）',
-    'halt': '停止并交给人：同一失败反复出现且最强模型已试过时才可选',
+    'halt': '停止并交给人（保留在图里供规则使用；指挥者不能选）',
 }
 MAX_BRIEF = 300
 MAX_REASON = 200
@@ -30,15 +30,17 @@ def candidate_nodes(flags: dict) -> list[str]:
         out.append('rewrite')
     if flags.get('skeptic_possible'):
         out.append('skeptic')
-    if flags.get('halt_possible'):
-        out.append('halt')
+    # halt 不再是候选：真实评测里指挥者在第 3 轮选了 halt，任务被它自己终止（wc：规则路径历史上 3/4 通过）。停止由确定性规则（stuck_after、轮数上限、预算）负责，指挥者只能“选路”，不能“放弃”。
+    # halt is no longer a candidate: in the real evaluation the conductor halted a task in round 3 (wc passes 3/4 on the rules path). Stopping belongs to the deterministic rules (stuck_after, round cap, budget); the conductor routes, it does not give up.
     return out
 
 
 def is_ambiguous(flags: dict) -> bool:
-    """规则无法明确给出下一步：归属不明、补丁停滞或同一签名反复出现。否则走快路径（不问模型）。
-    The rules cannot name one next step: ownership unclear, patching stalled or the same signature repeating. Otherwise the fast path (no model call)."""
-    return flags.get('primary') == 'ambiguous' or int(flags.get('stall', 0)) >= 1 or int(flags.get('repeats', 0)) >= 2
+    """规则已经试过而没有进展：补丁停滞或同一失败签名重复。否则走快路径（不问模型）。
+    The rules were tried without progress: stalled patches or a repeating failure signature. Otherwise the fast path (no model call).
+    真实评测（round 1/2）：归属不明（只剩断言失败）几乎每个任务的第一轮都会出现，指挥者在那里的选择和规则一样（diagnose），白花一次 pro 调用，并让任务更早触到单任务 token 上限。
+    In the real evaluation, "ownership unclear" shows up in the first round of almost every task, where the conductor picked what the rules pick (diagnose): a wasted pro call that also hit the per-task token cap sooner."""
+    return int(flags.get('stall', 0)) >= 1 or int(flags.get('repeats', 0)) >= 2
 
 
 def due(policy: dict, flags: dict, calls: int, conducted: bool, nodes: list[str]) -> bool:
@@ -85,9 +87,9 @@ def check_choice(raw, nodes: list[str]):
         return None, 'malformed'
     if raw['next'] not in nodes:
         return None, f"not_a_candidate:{raw['next'][:40]}"
-    if len(raw['reason']) > MAX_REASON or len(raw['brief']) > MAX_BRIEF:
-        return None, 'too_long'
-    return {'next': raw['next'], 'reason': raw['reason'].strip(), 'brief': raw['brief'].strip()}, None
+    # 真实评测里模型写的 reason 超过 200 字被整个拒绝，白白浪费一次调用：选择本身是合法的，只是啰嗦。所以只截断，不拒绝（schema 里 1000 字是防滥用的硬上限）。
+    # In the real evaluation a reason over 200 characters made the whole proposal fail although the choice was legal: truncate, do not reject (the schema keeps a hard 1000-character abuse cap).
+    return {'next': raw['next'], 'reason': raw['reason'].strip()[:MAX_REASON], 'brief': raw['brief'].strip()[:MAX_BRIEF]}, None
 
 
 def check_optional_roles():

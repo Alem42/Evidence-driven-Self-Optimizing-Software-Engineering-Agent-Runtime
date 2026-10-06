@@ -62,6 +62,7 @@ def main():
     ap.add_argument('--only', help='指定任务（逗号分隔），不随机 / explicit tasks, no sampling')
     ap.add_argument('--state', type=Path, default=ROOT / '.masa')
     ap.add_argument('--name', default='p2eval')
+    ap.add_argument('--arms', default='off,on', help='只跑哪些组（逗号分隔） / which arms to run')
     ap.add_argument('--round', type=int, default=1, help='第几轮重复（同一任务多次，看噪声） / repetition round, to see noise')
     args = ap.parse_args()
     folder = args.state / args.name
@@ -75,7 +76,7 @@ def main():
     done = {(r['task'], r['arm'], r.get('round', 1)) for r in summary['runs']}
     for index, task in enumerate(tasks):
         order = ['off', 'on'] if index % 2 == 0 else ['on', 'off']  # 交替先后，避免时段偏差 / alternate the order to avoid time-of-day bias
-        for arm in order:
+        for arm in [a for a in order if a in args.arms.split(',')]:
             if (task, arm, args.round) in done:
                 continue
             left = args.yuan - spent
