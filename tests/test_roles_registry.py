@@ -47,7 +47,9 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
         legacy = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
         optional = ('project_conductor', 'test_skeptic', 'code_reviewer')
         self.assertEqual(current.routable_ids(), legacy + optional)
-        self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser', *optional])
+        # 默认的“直接用最高等级”名单与 P1 之前逐项相同（可选角色不在其中），只有 conductor 打开时才加入。 The default start-at-top list equals the pre-P1 one; optional roles join only when `conductor` is on.
+        self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'])
+        self.assertEqual(current.optional_top_ids(), optional)
         self.assertEqual(current.config_roles(), {'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
                                                   'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'workflow_tuner', *optional})
         self.assertEqual(routing.DEFAULT_POLICY['prefer_highest_roles'], list(current.top_ids()))

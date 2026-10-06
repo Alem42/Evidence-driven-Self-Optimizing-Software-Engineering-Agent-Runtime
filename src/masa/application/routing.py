@@ -299,4 +299,8 @@ def validate_policy(policy) -> dict:
             out[key] = value
         else:
             raise MasaError(f'unknown policy field: {key}')
+    # 实验性的可选角色（指挥者、怀疑者、审阅者）只在 conductor 打开时才加入“直接用最高等级”的名单；默认策略与之前完全一致。
+    # The optional experimental roles join the start-at-top list only when `conductor` is on; the default policy is exactly what it was before.
+    if out['conductor']:
+        out['prefer_highest_roles'] = list(dict.fromkeys([*out['prefer_highest_roles'], *registry.current().optional_top_ids()]))
     return out

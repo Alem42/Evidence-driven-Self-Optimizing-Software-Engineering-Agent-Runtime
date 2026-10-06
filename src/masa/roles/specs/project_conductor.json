@@ -4,6 +4,7 @@
   "description": "验证失败后在已注册的候选步骤里选下一步（规则歧义或停滞时才被问；默认关闭）",
   "order": 80,
   "level": "top",
+  "optional": true,
   "routable": true,
   "config_allowed": true,
   "permissions": {

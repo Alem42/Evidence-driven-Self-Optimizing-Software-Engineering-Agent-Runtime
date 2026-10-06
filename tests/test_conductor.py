@@ -213,6 +213,17 @@ class DefinitionTests(unittest.TestCase):
             with self.assertRaises(MasaError):
                 validate_policy(bad)
 
+    def test_the_default_policy_is_exactly_the_old_one_and_optional_roles_join_only_with_the_conductor(self):
+        legacy = ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser']
+        self.assertEqual(DEFAULT_POLICY['prefer_highest_roles'], legacy)
+        self.assertEqual(validate_policy({})['prefer_highest_roles'], legacy)
+        self.assertEqual(validate_policy({'conductor': False})['prefer_highest_roles'], legacy)
+        on = validate_policy({'conductor': True})['prefer_highest_roles']
+        self.assertEqual(on, legacy + ['project_conductor', 'test_skeptic', 'code_reviewer'])
+        self.assertEqual(validate_policy({'conductor': True, 'prefer_highest_roles': ['project_planner']})['prefer_highest_roles'][0], 'project_planner')
+        for role in ('project_conductor', 'test_skeptic', 'code_reviewer'):
+            self.assertTrue(registry.get(role).optional)
+
     def test_the_new_roles_are_pure_data_and_their_guards_exist(self):
         for role in ('project_conductor', 'test_skeptic', 'code_reviewer'):
             spec = registry.get(role)

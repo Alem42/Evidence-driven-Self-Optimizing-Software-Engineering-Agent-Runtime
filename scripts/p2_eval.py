@@ -63,10 +63,14 @@ def main():
     ap.add_argument('--state', type=Path, default=ROOT / '.masa')
     ap.add_argument('--name', default='p2eval')
     ap.add_argument('--arms', default='off,on', help='只跑哪些组（逗号分隔） / which arms to run')
+    ap.add_argument('--saved-conductor', action='store_true', help='不用覆盖项，而是把 conductor 写进（副本的）路由设置，验证“设置页开关 → 实际流程”这条路 / set the conductor in the (copied) saved routing settings instead of an override')
     ap.add_argument('--round', type=int, default=1, help='第几轮重复（同一任务多次，看噪声） / repetition round, to see noise')
     args = ap.parse_args()
     folder = args.state / args.name
     ids = prepare(args.state, folder)
+    if args.saved_conductor:
+        from masa.infrastructure.settings import Settings
+        Settings(folder).save_routing({'policy': {'conductor': True}})
     pool = [t.id for t in TASKS if args.min_level <= t.level <= args.max_level]
     tasks = args.only.split(',') if args.only else random.Random(args.seed).sample(pool, min(args.tasks, len(pool)))
     print(f'抽到的任务 / tasks: {tasks}（池 {pool}，seed {args.seed}）；费用上限 {args.yuan} 元，单次 {args.per_run} 元', flush=True)

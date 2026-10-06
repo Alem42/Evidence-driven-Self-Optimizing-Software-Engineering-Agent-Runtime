@@ -8,7 +8,7 @@
 | [PROJECT_OVERVIEW](PROJECT_OVERVIEW.md) | 项目是什么、解决什么问题、一次任务怎么跑、**Gate 到底是什么**、每个术语的白话解释、模块地图、做了/没做什么 |
 | [ROADMAP](ROADMAP.md) | 项目定位、主流岗位要求对照、**动态角色的六条路线与选择理由**、重新判断后的路线与优先级、各项优化的理由与出处 |
 | [RESUME_PROJECT_DESCRIPTION](RESUME_PROJECT_DESCRIPTION.md) | 精简版/标准版简历、面试问答、数据备忘 |
-| [DESIGN_DYNAMIC_ROLES](DESIGN_DYNAMIC_ROLES.md) | **执行说明（P1、P2 已完成）**：动态角色（RoleSpec、混合式指挥者、工作流调优器、MCP）的设计、分阶段验收与执行约束 |
+| [**M2 总结与实测**](M2_DYNAMIC_ROLES_AND_EVAL.md)（简短版/详细版描述 + 数据，给你改简历用）· [DESIGN_DYNAMIC_ROLES](DESIGN_DYNAMIC_ROLES.md) | **执行说明（P1、P2 已完成）**：动态角色（RoleSpec、混合式指挥者、工作流调优器、MCP）的设计、分阶段验收与执行约束 |
 
 ## 使用指南
 [工作台](guides/USER_WORKBENCH.md) · [本地模型](guides/USER_LOCAL_MODELS.md) · [Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) · [路由与预算](guides/USER_ROUTING_AND_BUDGET.md) · [**评测**](guides/USER_BENCHMARK.md) · [**Docker 部署**](guides/DEPLOY_DOCKER.md) · [Ollama 控制页](guides/USER_OLLAMA_CONTROLLER.md) · [Runtime 与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)

@@ -4,6 +4,7 @@
   "description": "只读：对已通过 Gate 但经过多轮修复的实现给出风险提示，只作建议，不影响裁决（指挥者开启时才运行）",
   "order": 100,
   "level": "top",
+  "optional": true,
   "routable": true,
   "config_allowed": true,
   "permissions": {

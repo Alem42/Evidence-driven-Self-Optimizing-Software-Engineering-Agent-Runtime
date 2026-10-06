@@ -6,6 +6,7 @@ import { qk, useProfiles, useRoles } from '../../api/queries';
 import type { RoutingBudget, RoutingPolicy } from '../../api/types';
 import { useActivity } from '../../app/activity';
 import { byRouting, profileLabel, profileLevel, profileReady } from '../../entities/profiles';
+import { CONDUCTOR_RISK } from '../../entities/roles';
 import { stageLabels } from '../../entities/status';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 
@@ -104,10 +105,14 @@ export function RoutingSection() {
           </Field>
         </div>
         <h4>指挥者（实验，默认关闭）</h4>
-        <p className="hint">验证失败后规则无法明确下一步（归属不明、补丁停滞）时，让最强模型在已注册的候选步骤里选一个；不合法的提议会被拒绝并回到规则。每次约 2–3k token。</p>
+        <Notice tone="warn">{CONDUCTOR_RISK}</Notice>
+        <p className="hint">只在补丁停滞或同一失败反复出现时，才让最强模型在已注册的候选步骤里选一个（它不能终止任务）；不合法的提议会被拒绝并回到规则。默认流程就是之前测试正常的那一套，不受这个开关影响。</p>
         <div className="grid2">
           <Field label="启用指挥者">
-            <input type="checkbox" checked={!!draft.policy.conductor} onChange={(e) => setPolicy({ conductor: e.target.checked })} />
+            <input type="checkbox" checked={!!draft.policy.conductor} onChange={(e) => {
+              if (e.target.checked && !window.confirm('开启实验性的指挥者？ ' + CONDUCTOR_RISK)) return;
+              setPolicy({ conductor: e.target.checked });
+            }} />
           </Field>
           <Field label="每个任务最多询问次数">
             <input type="number" min={1} max={12} value={draft.policy.conductor_max_calls ?? 6} onChange={(e) => setPolicy({ conductor_max_calls: Number(e.target.value) })} />

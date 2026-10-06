@@ -4,6 +4,7 @@
   "description": "只读：当只剩断言失败时，逐条核对测试期望是否算错或与需求矛盾（仅在指挥者开启时可被选中）",
   "order": 90,
   "level": "top",
+  "optional": true,
   "routable": true,
   "config_allowed": true,
   "permissions": {

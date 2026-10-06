@@ -33,4 +33,8 @@ export function roleGroups(roles: RoleInfo[]): { core: RoleInfo[]; dynamic: Role
 export const levelText = (level: RoleInfo['level']): string => (level === 'top' ? '最高等级' : level === 'low' ? '低等级起步' : level === null ? '只用本地模型' : 'L' + level);
 export const writesText = (writes: RoleInfo['permissions']['writes']): string => ({ none: '只读', tests: '可改测试', implementation: '可改实现' })[writes];
 
+/** 指挥者的风险提示：数字来自 2026-10-06 的真实对照评测（docs/progress/PROGRESS_2026-10-06_005）。 The conductor's risk note; numbers come from the real A/B evaluation. */
+export const CONDUCTOR_RISK =
+  '实验功能，默认关闭。真实对照评测（25 次运行）里未见通过率提升：关闭 10/11 通过，开启 10/14 通过；开启后每个任务平均多花 24%～96% 的费用（额外的 Pro 调用、怀疑者、审阅者）。样本很小，结论不确定。只在你想试验时开启。';
+
 export const FALLBACK_ORDER = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];

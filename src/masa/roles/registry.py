@@ -22,7 +22,7 @@ from masa.domain.models import MasaError
 SPEC_DIR = Path(__file__).resolve().parent / 'specs'
 _ID = re.compile(r'^[a-z][a-z0-9_]{1,63}$')
 _KEYS = {'id', 'label', 'description', 'order', 'level', 'routable', 'config_allowed', 'permissions', 'validator', 'prompt', 'prompt_builder',
-         'output_schema', 'max_output_tokens', 'when', 'legacy', 'tunable', 'tools', 'input'}
+         'output_schema', 'max_output_tokens', 'when', 'legacy', 'tunable', 'tools', 'input', 'optional'}
 _WRITES = {'none', 'tests', 'implementation'}
 
 
@@ -47,6 +47,7 @@ class RoleSpec:
     max_output_tokens: object = None
     when: object = None  # 允许被选中的条件（guard 名 + 参数），供指挥者使用 / when the role may be chosen (guard name + params), used by the conductor
     legacy: bool = False
+    optional: bool = False  # 实验性可选角色：只在对应的策略开关打开时才参与（默认流程里完全不存在）/ experimental optional role: part of the loop only when its policy switch is on
     tunable: tuple = field(default_factory=tuple)
     tools: tuple = field(default_factory=tuple)
     input: tuple = field(default_factory=tuple)
@@ -105,12 +106,14 @@ def _parse(path, raw, folder):
     when = raw.get('when')
     if when is not None and not (isinstance(when, dict) and isinstance(when.get('guard'), str)):
         _fail(spec_id, "when must be {'guard': <name>, ...}")
+    if type(raw.get('optional', False)) is not bool:
+        _fail(spec_id, 'optional must be true or false')
     for name in ('tunable', 'tools', 'input'):
         if not isinstance(raw.get(name, []), list) or any(not isinstance(x, str) for x in raw.get(name, [])):
             _fail(spec_id, f'{name} must be a list of strings')
     return RoleSpec(id=spec_id, label=raw['label'], description=raw['description'], order=raw['order'], level=level, routable=raw['routable'],
                     config_allowed=raw['config_allowed'], permissions=perms, validator=raw['validator'], prompt=prompt, prompt_builder=raw.get('prompt_builder'),
-                    output_schema=schema, max_output_tokens=limit, when=when, legacy=bool(raw.get('legacy', False)), tunable=tuple(raw.get('tunable', [])),
+                    output_schema=schema, max_output_tokens=limit, when=when, legacy=bool(raw.get('legacy', False)), optional=bool(raw.get('optional', False)), tunable=tuple(raw.get('tunable', [])),
                     tools=tuple(raw.get('tools', [])), input=tuple(raw.get('input', [])))
 
 
@@ -133,7 +136,11 @@ class Registry:
 
     def top_ids(self):
         """默认直接用最高等级的角色（规格、测试、测试修订、诊断……）。 Roles that start at the top level by default."""
-        return tuple(s.id for s in self._specs.values() if s.routable and s.level == 'top')
+        return tuple(s.id for s in self._specs.values() if s.routable and s.level == 'top' and not s.optional)
+
+    def optional_top_ids(self):
+        """可选角色里默认用最高等级的：策略 conductor 打开时才加进 prefer_highest_roles。 Optional roles that start at the top level: added to prefer_highest_roles only when policy `conductor` is on."""
+        return tuple(s.id for s in self._specs.values() if s.routable and s.level == 'top' and s.optional)
 
     def config_roles(self):
         """模型配置 roles 白名单允许的角色。 Roles a model profile's allow-list may name."""

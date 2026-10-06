@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useBootstrap, useRoles } from '../../api/queries';
-import { levelText, roleGroups, writesText, type RoleInfo } from '../../entities/roles';
-import { Badge, Card } from '../../shared/ui';
+import { CONDUCTOR_RISK, levelText, roleGroups, writesText, type RoleInfo } from '../../entities/roles';
+import { Badge, Card, Notice } from '../../shared/ui';
 
 // 动态角色：角色清单来自后端 RoleSpec 注册表（/api/roles），指挥者状态来自路由默认策略。只读展示；开关在“路由与预算”。
 // Dynamic roles: the list comes from the backend RoleSpec registry, the conductor state from the routing defaults. Read-only; the switch lives in Routing & budget.
@@ -37,6 +37,7 @@ export function RolesSection() {
   const groups = roleGroups(roles ?? []);
   return (
     <div className="stack">
+      <Notice tone="warn">{CONDUCTOR_RISK}</Notice>
       <Card title="指挥者" subtitle="验证失败后，规则无法明确下一步时，才让最强模型在已注册的候选步骤里选一个。" actions={<Badge tone={on ? 'ok' : 'neutral'} dot>{on ? '已开启' : '默认关闭'}</Badge>}>
         <dl className="facts">
           <dt>每个任务最多询问</dt><dd>{policy?.conductor_max_calls ?? 6} 次</dd>
