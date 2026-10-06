@@ -1,0 +1,82 @@
+{
+  "id": "test_skeptic",
+  "label": "测试怀疑者",
+  "description": "只读：当只剩断言失败时，逐条核对测试期望是否算错或与需求矛盾（仅在指挥者开启时可被选中）",
+  "order": 90,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "test_files",
+      "failure_evidence"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "test_skeptic.prompt.md",
+  "max_output_tokens": 1500,
+  "when": {
+    "guard": "only_assertions"
+  },
+  "input": [
+    "goal",
+    "acceptance",
+    "files",
+    "failure_evidence"
+  ],
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "cases",
+      "verdict",
+      "instructions"
+    ],
+    "properties": {
+      "cases": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "case",
+            "requirement_says",
+            "test_expects",
+            "matches"
+          ],
+          "properties": {
+            "case": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requirement_says": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "test_expects": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "matches": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "verdict": {
+        "enum": [
+          "tests_wrong",
+          "tests_ok"
+        ]
+      },
+      "instructions": {
+        "type": "string",
+        "maxLength": 800
+      }
+    }
+  }
+}

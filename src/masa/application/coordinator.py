@@ -4,14 +4,17 @@ from masa.application.generation import ProjectGeneration
 from masa.application.workflow import WorkflowCheckpoint
 from masa.application.check_policy import failure_signature, format_only, test_revision_needed, repeated_assertion_signature
 from masa.application.router import Router, RoutingStop
-from masa.application import attempts, ownership
-from masa.application.flow import FlowEngine
+from masa.application import attempts, ownership, conductor
+from masa.application.flow import FlowEngine, GUARDS
+from masa.roles import registry
 from masa.application.workflows import FIX_V1
 from masa.application.triage import assess
 from masa.runtime.engine import Runtime
 from masa.runtime.roles import RoleRuntime
-from masa.domain.models import ContextOverflow, MasaError, TransportFailure
+from masa.domain.models import CallCancelled, ContextOverflow, MasaError, TransportFailure
 import time
+
+conductor.check_optional_roles()  # 可选角色的 when 引用的 guard 必须存在 / the guard named by an optional role's `when` must exist
 
 
 class NoChange(MasaError):
@@ -261,6 +264,7 @@ class WorkflowCoordinator:
                                 note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
                 return
             if result['status']=='succeeded':
+                self._maybe_review(verified)  # 只读建议，永远不影响裁决；策略 conductor 关闭时什么都不做 / advisory only, never affects the verdict; a no-op unless policy `conductor` is on
                 self.job.update(status='completed',result={'id':verified})
                 return
             if result['status']=='cancelled':
@@ -355,11 +359,14 @@ class WorkflowCoordinator:
             only_assertions=bool(analysis['items']) and all(i['kind']=='assertion' for i in analysis['items'])
             wants=(repeats>=2 or (primary=='ambiguous' and history>=2) or (only_assertions and not self.job.get('diagnoses')))
             can=bool(self._ladder and self.router.policy.get('diagnose') and diagnoses<int(self.router.policy.get('diagnose_max',0)))
-            return {'primary':primary,'format_only':format_only(checks),'can_diagnose':can,
+            result={'primary':primary,'format_only':format_only(checks),'can_diagnose':can,
                     'arbitrate_due':bool(assertion) and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'),
                     'needs_diagnosis':bool(can and wants),
                     'rewrite_due':bool(self._ladder and primary in ('implementation','ambiguous') and int(self.job.get('stall',0))>=REWRITE_AFTER_STALLS
                                        and int(self.job.get('rewrites',0))<MAX_REWRITES and self._strongest_tried())}
+            if self._ladder and self.router.policy.get('conductor'):
+                result.update(self._conductor_facts(ctx,result,analysis,repeats,only_assertions))
+            return result
 
         def diagnose(ctx):
             try:
@@ -378,6 +385,10 @@ class WorkflowCoordinator:
             if diagnosis:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
                 if diagnosis.get(key):parts.append('【Diagnoser 的诊断】'+diagnosis['rationale']+'\n【Diagnoser 的指导】'+diagnosis[key])
+            if facts.get('conductor_brief'):parts.append('【指挥者的指示】'+facts['conductor_brief'])
+            skeptic=facts.get('skeptic')
+            if owner=='test' and skeptic and skeptic.get('verdict')=='tests_wrong' and skeptic.get('instructions'):
+                parts.append('【测试怀疑者逐条核对的结论】'+skeptic['instructions'])
             return '\n'.join(p for p in parts if p)
 
         def ctx_diagnosis():
@@ -462,9 +473,30 @@ class WorkflowCoordinator:
             return run_fix('fix:ambiguous','project_test_revision','arbitration',lambda provider,fb:generation.revise_tests(
                 verified,provider,'\n'.join(x for x in (base,fb) if x),lambda rid:phase('test_revision',rid,attempt+1)))
 
+        def conduct(ctx):
+            # 指挥者：只在规则有歧义/停滞时被问一次；返回合法的候选 id，或 None（回到规则）。
+            # Conductor: asked once, only on ambiguity or a stall; returns a legal candidate id or None (back to the rules).
+            choice=self._conduct(verified,ctx,analysis,checks,bundle,attempt)
+            out={'conducted':True,'conductor_choice':choice['next'] if choice else None,'conductor_brief':choice['brief'] if choice else ''}
+            if choice and choice['next']=='halt':out['halt_reason']='conductor: '+choice['reason']
+            return out
+
+        def test_skeptic(ctx):
+            try:
+                verdict=self._skeptic(verified,analysis,checks,bundle)
+            except RoutingStop:
+                verdict=None
+            except CallCancelled:
+                raise
+            except Exception as exc:  # 只读建议：失败不能挡住修复 / advisory: a failure must not block the fix
+                verdict=None
+                self.store.event(verified,'skeptic_failed',{'error':str(exc)[:200]})
+            return {'skeptic':verdict or {'verdict':'tests_ok','cases':[],'instructions':''}}
+
         actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
-                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation}
-        engine=FlowEngine(FIX_V1,actions,on_step=lambda step:self._trace_step(step,verified))
+                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation,
+                 'conduct':conduct,'test_skeptic':test_skeptic}
+        engine=FlowEngine(FIX_V1,actions,max_steps=16 if self.router.policy.get('conductor') else 12,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
 
     def _log_fix(self, stage, draft, used):
@@ -491,9 +523,9 @@ class WorkflowCoordinator:
         if time.time()>=run['data']['deadline_at']-60:
             self.store.save_metadata(run_id,'deadline_at',time.time()+3600,'deadline_extended',payload={'reason':'continued by the user'})
 
-    def _diagnose(self, verified, analysis, checks, bundle):
-        """Diagnoser：只读、用最高等级、判断“谁的问题”并给出具体指导。结果持久化在角色账本里。
-        Read-only Diagnoser at the strongest level: decides whose problem it is and gives concrete instructions."""
+    def _failure_context(self, verified, analysis, checks, bundle):
+        """Diagnoser、测试怀疑者、指挥者共用的输入片段：任务目标、已批准的规格、失败涉及的文件、失败证据。
+        Shared input of the Diagnoser, the Test Skeptic and the Conductor: goal, approved spec, the files the failures point at, failure evidence."""
         store=self.store
         run=store.run(verified)
         approved=store.read(store.read(run['data']['project_bundle']['approval_ref'])['spec_approval_ref'])
@@ -507,9 +539,121 @@ class WorkflowCoordinator:
             full=keys[0] if len(keys)==1 else None
             if full and full not in files and budget>0:
                 files[full]=bundle[full][:6000];budget-=len(files[full])
+        evidence=[{'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3]
+        return run,approved,files,evidence
+
+    # ───────────── 指挥者与可选角色 / the conductor and the optional roles ─────────────
+    def _conductor_facts(self, ctx, rules, analysis, repeats, only_assertions):
+        """指挥者需要的确定性事实：候选节点、是否该问。只读，不产生副作用。
+        The deterministic facts the conductor needs: candidate nodes and whether to ask. Read-only."""
+        strongest=self._strongest_tried()
+        primary=rules['primary']
+        flags={'primary':primary,'format_only':rules['format_only'],'can_diagnose':rules['can_diagnose'],'diagnosed':bool(ctx.get('diagnosed')),
+               'stall':int(self.job.get('stall',0)),'repeats':repeats,'unresolved':len(analysis['items']),'strongest_tried':strongest,
+               'rewrite_possible':bool(primary in ('implementation','ambiguous') and int(self.job.get('rewrites',0))<MAX_REWRITES and strongest),
+               'halt_possible':bool(repeats>=2 and strongest)}
+        skeptic=registry.get('test_skeptic')
+        flags['skeptic_possible']=bool(skeptic and skeptic.when and not ctx.get('skeptic')
+                                       and GUARDS[skeptic.when['guard']]({'only_assertions':only_assertions},skeptic.when.get('params',{})))
+        nodes=conductor.candidate_nodes(flags)
+        return {'only_assertions':only_assertions,'conductor_flags':flags,'conductor_nodes':nodes,
+                'conductor_due':conductor.due(self.router.policy,flags,int(self.job.get('conductor_calls',0)),bool(ctx.get('conducted')),nodes)}
+
+    def _conduct(self, verified, ctx, analysis, checks, bundle, attempt):
+        """向指挥者要一个决定。任何失败（预算、崩溃、超时、非法提议）都回退到规则并留下 conductor_rejected 事件。
+        Ask the conductor for one decision. Any failure (budget, crash, timeout, illegal proposal) falls back to the rules and leaves a conductor_rejected event."""
+        store,policy=self.store,self.router.policy
+        nodes=ctx['conductor_nodes']
+        run,approved,_,_=self._failure_context(verified,analysis,checks,bundle)
+        brief=conductor.briefing(goal=run['data']['goal'],acceptance=approved['spec']['acceptance'],ownership_lines=ownership.describe(analysis),
+                                 attempt_summary=self._attempt_summary(),flags=ctx['conductor_flags'],nodes=nodes,spend=self.router.spend(verified),
+                                 budget=self.router.budget,decisions=list(self.job.get('conductor_log',[])),round_no=attempt+1)
+        self._extend_deadline(verified)
+
+        def reject(reason,proposed=None):
+            store.event(verified,'conductor_rejected',{'reason':reason,'proposed':proposed,'candidates':nodes,'fallback':'rules'})
+
+        for n in range(2 if policy.get('conductor_cascade') else 1):
+            if int(self.job.get('conductor_calls',0))>=int(policy.get('conductor_max_calls',0)):
+                reject('call_limit')
+                break
+            try:
+                provider,decision=self._pick('project_conductor','conduct',need=brief,anchor=verified,stage='conduct')
+            except RoutingStop as stop:
+                reject('routing:'+stop.reason)
+                return None
+            self.job['conductor_calls']=int(self.job.get('conductor_calls',0))+1
+            try:
+                raw=RoleRuntime(store).call(verified,provider,'project_conductor',{'briefing':brief},
+                                            invocation_id='initial' if n==0 else f'cascade{n}',freeze_key=f'conductor_snapshot_ref_{n}')
+            except CallCancelled:
+                raise
+            except Exception as exc:  # 崩溃/超时/契约不合法：不能让指挥者拖垮修复 / a crash, timeout or contract violation must not take the repair down
+                if store.run(verified)['cancel_requested']:
+                    raise
+                self._fail('conduct',decision)
+                reject(f'call_failed:{type(exc).__name__}: {str(exc)[:120]}')
+                continue
+            choice,why=conductor.check_choice(raw,nodes)
+            if choice is None:
+                self._fail('conduct',decision)  # 级联：下一次由路由器升级到更高等级 / cascade: the router escalates the next attempt
+                reject(why,raw.get('next') if isinstance(raw,dict) else None)
+                continue
+            self.job['conductor_log']=(list(self.job.get('conductor_log',[]))+[{'next':choice['next'],'reason':choice['reason']}])[-6:]
+            store.event(verified,'conductor_decided',{**choice,'candidates':nodes,'by':(provider.profile or {}).get('model'),'level':decision.level,
+                                                      'calls':int(self.job['conductor_calls']),'escalated':n>0})
+            return choice
+        return None
+
+    def _skeptic(self, verified, analysis, checks, bundle):
+        """测试怀疑者：只读，逐条核对失败断言的期望值。结论由代码按逐条核对结果重新推导（任何一条不一致即 tests_wrong）。
+        Test Skeptic: read-only, recomputes the expected value of each failing assertion; the verdict is re-derived by code from its own per-case checks."""
+        run,approved,files,evidence=self._failure_context(verified,analysis,checks,bundle)
+        context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'files':files,'failure_evidence':evidence}
+        provider,_=self._pick('test_skeptic','skeptic',need=context,anchor=verified,stage='skeptic')
+        self._extend_deadline(verified)
+        result=RoleRuntime(self.store).call(verified,provider,'test_skeptic',context,freeze_key='skeptic_snapshot_ref')
+        wrong=[c['case'] for c in result['cases'] if not c['matches']]
+        result={**result,'verdict':'tests_wrong' if wrong else 'tests_ok'}
+        self.store.event(verified,'skeptic_verdict',{'verdict':result['verdict'],'mismatches':wrong[:6],'by':(provider.profile or {}).get('model')})
+        return result
+
+    def _maybe_review(self, verified):
+        """通过 Gate 之后的只读审阅：只在策略 conductor 开启、且这个任务经过修复时运行一次；只写 code_review 事件，不改文件、不影响结果。
+        Advisory review after the Gate passed: runs once, only with policy `conductor` on and only for a task that needed repairs; it writes a code_review event and nothing else."""
+        spec=registry.get('code_reviewer')
+        if not (self._ladder and self.router.policy.get('conductor') and spec and spec.when):
+            return
+        if not GUARDS[spec.when['guard']]({'repaired':bool(self.job.get('fix_log'))},spec.when.get('params',{})):
+            return
+        try:
+            store=self.store
+            run=store.run(verified)
+            bundle=store.read(run['data']['project_bundle']['approval_ref'])
+            approved=store.read(bundle['spec_approval_ref'])
+            files,budget={},24000
+            for path,text in bundle['files'].items():
+                if path.endswith('.go') and not path.endswith('_test.go') and budget>0:
+                    files[path]=text[:6000];budget-=len(files[path])
+            context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'files':files}
+            provider,_=self._pick('code_reviewer','review',need=context,anchor=verified,stage='review')
+            self._extend_deadline(verified)
+            result=RoleRuntime(store).call(verified,provider,'code_reviewer',context,freeze_key='reviewer_snapshot_ref')
+            store.event(verified,'code_review',{'summary':result['summary'],'risks':[f"{r['severity']}: {r['file']}: {r['risk']}" for r in result['risks']],
+                                                'by':(provider.profile or {}).get('model')})
+        except CallCancelled:
+            raise
+        except Exception as exc:  # 建议性的：预算不够、模型失败都不影响已通过的结果 / advisory: budget or model failures never touch a passed result
+            try:self.store.event(verified,'code_review_skipped',{'reason':str(exc)[:200]})
+            except Exception:pass
+
+    def _diagnose(self, verified, analysis, checks, bundle):
+        """Diagnoser：只读、用最高等级、判断“谁的问题”并给出具体指导。结果持久化在角色账本里。
+        Read-only Diagnoser at the strongest level: decides whose problem it is and gives concrete instructions."""
+        store=self.store
+        run,approved,files,evidence=self._failure_context(verified,analysis,checks,bundle)
         context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'all_files':sorted(bundle),'files':files,
-                 'ownership':ownership.describe(analysis),'failure_evidence':[
-                     {'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3],
+                 'ownership':ownership.describe(analysis),'failure_evidence':evidence,
                  'history':list(self.job.get('fix_log',[])),'noop_streak':int(self.job.get('noop_streak',0))}
         provider,decision=self._pick('project_diagnoser','diagnose',need=context,anchor=verified,stage='diagnose')
         self._extend_deadline(verified)

@@ -1,5 +1,7 @@
 # 当前接续点
 
+**2026-10-06（晚）**：**P2 指挥者完成**（进展003-p2，默认关闭，仅假模型测试，未做真实运行）：`llm_choice` 节点 + `application/conductor.py` + 三个数据角色（project_conductor / test_skeptic / code_reviewer）；策略 `conductor`、`conductor_max_calls`、`conductor_cascade`；非法/崩溃/超限回退到规则并写 `conductor_rejected`。后端 448 / 前端 33。下一步 P3 调优器。
+
 **2026-10-06**：分支 `feature/dynamic-roles`。**P1 RoleSpec 注册表完成**（进展018）：角色元数据收拢到 `src/masa/roles/specs/*.json`，路由、配置白名单、提示词/校验器分发、前端标签都从注册表读；黄金样本（`tests/golden/`）证明提示词与 schema 逐字节不变；404 项旧测试不改断言即全绿，现 423+33。下一步 P2 指挥者（见 DESIGN_DYNAMIC_ROLES）。注意：`protocol.py` 现在是按注册表分发的，新增角色只加 JSON+MD；若有意修改提示词，需重新生成黄金样本（`python tests/golden/capture_roles.py`）并在提交说明里写明原因。
 
 **2026-10-05（傍晚）**：见进展017。M2 W1 完成：流式传输（NDJSON/SSE）、真取消、stall 检测、实时进度；坑：套接字读超时后响应对象不能再读、同步 close 被读取线程卡住（改读取线程+队列+异步关闭）。测试阶段按用户要求到此为止；简历新增“理想目标版”（带 ※ 的占位数字，与实测版分开）。下一步：W6 动态角色（RoleSpec 注册表、受限子图提议）。

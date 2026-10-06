@@ -72,7 +72,7 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
 
 const NODE_TEXT: Record<string, string> = {
   classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: 'gofmt 格式化',
-  repair: '修复实现', revise: '修订测试', arbitrate: '测试↔规格仲裁', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
+  repair: '修复实现', conduct: '指挥者选择', skeptic: '测试怀疑者', revise: '修订测试', arbitrate: '测试↔规格仲裁', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
 };
 const OWNER_TEXT: Record<string, string> = { implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' };
 
@@ -88,6 +88,10 @@ function ProcessBlock({ items, t0 }: { items: NonNullable<TaskReport['process']>
       if (d.mismatches?.length) text += ` · 期望与需求不一致的用例：${d.mismatches.join('、')}`;
     } else if (p.kind === 'rewrite_started') { text = `补丁连续没有改善，由最高等级整体重写实现（当时未解决 ${d.unresolved ?? '?'} 条）`; tone = 'p-ok'; }
     else if (p.kind === 'imports_fixed') { text = `确定性修复 import（无模型调用）：${Object.entries(d.files ?? {}).map(([f, c]) => f + ' ' + (c as string[]).join('、')).join('；')}`; tone = 'p-ok'; }
+    else if (p.kind === 'conductor_decided') { text = `指挥者（${d.by}${d.escalated ? '，升级后' : ''}）选择“${NODE_TEXT[d.next] ?? d.next}”：${d.reason ?? ''}`; tone = 'p-ok'; }
+    else if (p.kind === 'conductor_rejected') { text = `指挥者的提议被拒绝（${d.reason}），回到规则`; tone = 'p-bad'; }
+    else if (p.kind === 'skeptic_verdict') { text = `测试怀疑者（${d.by}）：${d.verdict === 'tests_wrong' ? '测试期望有误' : '测试期望没问题'}${d.mismatches?.length ? ' · ' + d.mismatches.join('、') : ''}`; }
+    else if (p.kind === 'code_review') { text = `代码审阅（仅建议，不影响结果）：${d.summary ?? ''}${d.risks?.length ? ' · ' + d.risks.join('；') : ''}`; }
     else if (p.kind === 'diagnosis_failed') text = 'Diagnoser 未能给出诊断，按规则继续';
     else if (p.kind === 'models_released') { text = `释放本地模型：${(d.models ?? []).join('、')}${d.reason === 'switching' ? '（切换模型）' : '（任务结束）'}`; tone = 'p-ok'; }
     else if (p.kind === 'rounds_extended') { text = `仍在收敛（未解决 ${d.was} → ${d.unresolved}），多给一轮修复`; tone = 'p-ok'; }

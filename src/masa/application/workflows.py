@@ -13,6 +13,7 @@ fix-v1: what to do after a failed verification. It replaces the hard-coded if/el
             ├─ 测试有编译/准备错 ───► revise ────────────────────────┤
             ├─ 同一断言反复失败 ────► arbitrate ─────────────────────┤
             └─ 其它 ───────────────► repair ─────────────────────────┘
+  （可选，策略 conductor 开启）规则有歧义时 classify → conduct：指挥者在候选里选一个（含 skeptic = 测试怀疑者）；不合法则回到规则
   任一修复节点“没有任何改动且已无更强模型” → halt（修复实现例外：先转去修订测试一次）
 """
 from masa.application.flow import guard, validate
@@ -30,10 +31,16 @@ FIX_V1 = {
         'revise': {'action': 'revise_tests', 'label': '修订测试（实现冻结）', 'kind': 'role'},
         'arbitrate': {'action': 'arbitrate_tests', 'label': '测试↔规格仲裁', 'kind': 'role'},
         'rewrite': {'action': 'rewrite_implementation', 'label': '整体重写实现（最高等级，对着冻结的测试）', 'kind': 'role'},
+        # 指挥者（默认关闭，由策略 conductor 开启）：规则有歧义/停滞时，让模型在已声明的候选里选一个；不合法就回到确定性规则。
+        # Conductor (off by default, policy `conductor`): on ambiguity or a stall the model picks one DECLARED candidate; an illegal pick falls back to the deterministic rules.
+        'conduct': {'action': 'conduct', 'label': '指挥者选择下一步（规则有歧义时）', 'kind': 'llm_choice',
+                    'candidates': ['repair', 'revise', 'diagnose', 'rewrite', 'skeptic', 'halt']},
+        'skeptic': {'action': 'test_skeptic', 'label': '测试怀疑者核对期望（只读）', 'kind': 'role'},
         'drafted': {'end': 'drafted', 'label': '得到新草稿 → 去验证', 'kind': 'end'},
         'halt': {'end': 'halt', 'label': '停止并交给人', 'kind': 'end'},
     },
     'edges': [
+        {'from': 'classify', 'to': 'conduct', 'when': 'conductor_due'},
         {'from': 'classify', 'to': 'format', 'when': 'format_only'},
         {'from': 'classify', 'to': 'diagnose', 'when': 'needs_diagnosis'},
         # 补丁连续没有改善、最强模型也试过：与其继续补一个结构错误的实现，不如整体重写一次。
@@ -48,6 +55,10 @@ FIX_V1 = {
         {'from': 'diagnose', 'to': 'rewrite', 'when': 'rewrite_due'},
         {'from': 'diagnose', 'to': 'repair'},
         {'from': 'format', 'to': 'drafted'},
+        *[{'from': 'conduct', 'to': node, 'when': 'chosen', 'params': {'node': node}} for node in ('repair', 'revise', 'diagnose', 'rewrite', 'skeptic', 'halt')],
+        {'from': 'conduct', 'to': 'classify'},  # 指挥者不可用或提议非法：回到确定性规则（conducted 已置位，不会再问）/ unavailable or illegal: back to the rules (conducted is set, so it is not asked again)
+        {'from': 'skeptic', 'to': 'revise', 'when': 'skeptic_says_wrong'},
+        {'from': 'skeptic', 'to': 'repair'},
         # 修复节点之后：没有改动 → 先让 Diagnoser 看看（若可用）→ 再试（路由器会换更强的模型）→ 仍无改动就停。
         # After a fix node: nothing changed → let the Diagnoser look (if available) → try again (the router escalates) → halt if still nothing.
         # 最强模型反复“不改实现”＝它认为实现没错：错的很可能是测试（例如手算的期望值错了）。转去修订测试一次，而不是直接停下。
@@ -61,6 +72,31 @@ FIX_V1 = {
             {'from': node, 'to': 'drafted'})],
     ],
 }
+
+
+@guard('conductor_due')
+def _conductor_due(facts, params):
+    return bool(facts.get('conductor_due')) and not facts.get('conducted')
+
+
+@guard('chosen')
+def _chosen(facts, params):
+    return facts.get('conductor_choice') == params['node']
+
+
+@guard('skeptic_says_wrong')
+def _skeptic_says_wrong(facts, params):
+    return (facts.get('skeptic') or {}).get('verdict') == 'tests_wrong'
+
+
+@guard('only_assertions')
+def _only_assertions(facts, params):
+    return bool(facts.get('only_assertions'))
+
+
+@guard('repaired_before_pass')
+def _repaired_before_pass(facts, params):
+    return bool(facts.get('repaired'))
 
 
 @guard('format_only')

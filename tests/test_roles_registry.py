@@ -41,11 +41,15 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
                 self.assertEqual(json.dumps(got, ensure_ascii=False), json.dumps(GOLDEN[name]['schema'], ensure_ascii=False))
 
     def test_the_sets_the_router_and_config_derive_equal_the_old_hard_coded_ones(self):
+        """P2 在后面追加了三个可选角色（指挥者、测试怀疑者、代码审阅者）：旧的 6 个角色的集合与顺序保持不变。
+        P2 appended three optional roles (conductor, test skeptic, code reviewer): the six legacy roles keep their set and order."""
         current = registry.current()
-        self.assertEqual(current.routable_ids(), ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'))
-        self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'])
+        legacy = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
+        optional = ('project_conductor', 'test_skeptic', 'code_reviewer')
+        self.assertEqual(current.routable_ids(), legacy + optional)
+        self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser', *optional])
         self.assertEqual(current.config_roles(), {'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
-                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier'})
+                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier', *optional})
         self.assertEqual(routing.DEFAULT_POLICY['prefer_highest_roles'], list(current.top_ids()))
 
     def test_every_registered_role_names_an_existing_validator_and_builder(self):

@@ -1,0 +1,44 @@
+{
+  "id": "project_conductor",
+  "label": "指挥者",
+  "description": "验证失败后在已注册的候选步骤里选下一步（规则歧义或停滞时才被问；默认关闭）",
+  "order": 80,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "briefing"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "project_conductor.prompt.md",
+  "max_output_tokens": 600,
+  "input": [
+    "briefing"
+  ],
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "next",
+      "reason",
+      "brief"
+    ],
+    "properties": {
+      "next": {
+        "type": "string",
+        "maxLength": 40
+      },
+      "reason": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "brief": {
+        "type": "string",
+        "maxLength": 300
+      }
+    }
+  }
+}

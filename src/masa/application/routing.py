@@ -33,6 +33,11 @@ DEFAULT_POLICY = {
     'prefer_highest_roles': list(registry.current().top_ids()),
     'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
+    # 指挥者（默认关闭）：规则有歧义或补丁停滞时，让模型在候选步骤里选一个；非法提议回退到规则。cascade = 先用低等级，提议非法再升级。
+    # Conductor (off by default): on ambiguity or a stall the model picks one candidate step; an illegal proposal falls back to the rules. cascade = start low, escalate on an illegal proposal.
+    'conductor': False,
+    'conductor_max_calls': 6,
+    'conductor_cascade': False,
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
@@ -197,7 +202,7 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
         # 某些角色可以从更高等级起步（例如 Planner/Tester 的输出短但影响大）；没有可用的就退回到任意等级。
         # Some roles may start higher (short but decisive outputs); fall back to any level when none is usable.
         start = policy.get('start_level_by_role', {}).get(role)
-        if role in policy.get('prefer_highest_roles', ()):
+        if role in policy.get('prefer_highest_roles', ()) and not (role == 'project_conductor' and policy.get('conductor_cascade')):
             start = top  # 诊断者：判断一次，值得用最强的模型 / the diagnoser judges once, so it is worth the strongest model
         c, why = (pick(lambda lv: lv >= start) if start is not None else (None, None))
         if not c:
@@ -253,7 +258,7 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'transport_wait_seconds': (10, 86400)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
 # 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
 # The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.
@@ -283,7 +288,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

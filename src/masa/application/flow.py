@@ -54,6 +54,18 @@ def validate(defn: dict) -> dict:
             continue
         if not isinstance(spec.get('action'), str):
             raise FlowError(f'node {nid} needs an action or must be an end node')
+    for nid, spec in nodes.items():
+        # llm_choice：让指挥者在“声明过的候选节点”里选一个。候选必须是图里的节点，且每个候选都有 `chosen` 边；
+        # 另外要有 always 兜底边（指挥者不可用/提议非法时回到确定性规则）。
+        # llm_choice: the conductor picks one DECLARED candidate node. Every candidate must be a node with a `chosen` edge,
+        # and an `always` fallback edge returns to the deterministic rules when the proposal is illegal or unavailable.
+        if spec.get('kind') == 'llm_choice':
+            options = spec.get('candidates')
+            if not isinstance(options, list) or len(options) < 2 or any(o not in nodes or o == nid for o in options):
+                raise FlowError(f'llm_choice node {nid} needs at least two candidate nodes that exist')
+            chosen = {e['params'].get('node') for e in edges if e.get('from') == nid and e.get('when') == 'chosen' and isinstance(e.get('params'), dict)}
+            if set(options) - chosen:
+                raise FlowError(f'llm_choice node {nid} lacks a chosen edge for {sorted(set(options) - chosen)}')
     outgoing: dict[str, list[dict]] = {nid: [] for nid in nodes}
     for edge in edges:
         if edge.get('from') not in nodes or edge.get('to') not in nodes:

@@ -103,6 +103,19 @@ export function RoutingSection() {
             <input type="number" min={1} max={4} value={draft.policy.planner_retries} onChange={(e) => setPolicy({ planner_retries: Number(e.target.value) })} />
           </Field>
         </div>
+        <h4>指挥者（实验，默认关闭）</h4>
+        <p className="hint">验证失败后规则无法明确下一步（归属不明、补丁停滞）时，让最强模型在已注册的候选步骤里选一个；不合法的提议会被拒绝并回到规则。每次约 2–3k token。</p>
+        <div className="grid2">
+          <Field label="启用指挥者">
+            <input type="checkbox" checked={!!draft.policy.conductor} onChange={(e) => setPolicy({ conductor: e.target.checked })} />
+          </Field>
+          <Field label="每个任务最多询问次数">
+            <input type="number" min={1} max={12} value={draft.policy.conductor_max_calls ?? 6} onChange={(e) => setPolicy({ conductor_max_calls: Number(e.target.value) })} />
+          </Field>
+          <Field label="级联（先低等级，提议不合法再升级）">
+            <input type="checkbox" checked={!!draft.policy.conductor_cascade} onChange={(e) => setPolicy({ conductor_cascade: e.target.checked })} />
+          </Field>
+        </div>
         <h4>按角色的起始等级</h4>
         <p className="hint">留空 = 从最低等级起。例如让 Planner 从 L2 起：规划输出短、影响大，值得用更强的模型。</p>
         <div className="grid2">

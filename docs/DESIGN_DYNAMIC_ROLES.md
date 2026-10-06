@@ -99,7 +99,7 @@ prompt: |                           # 系统提示词（支持占位符）；现
 | 阶段 | 内容 | 验收（硬标准） |
 |---|---|---|
 | **P1 RoleSpec 注册表** ✅ **已完成（进展018，分支 `feature/dynamic-roles`）**：格式用 JSON + Markdown（项目零依赖，没有用 YAML）；5 个共用提示词族的角色用 `prompt_builder` 而不是静态文件（原因见进展018 §4） | 建立 `roles/` 与 `registry.py`；把 7 个现有角色迁入；`protocol.py/schemas.py/proposals.py/routing.py/llm.py` 的角色信息改为从注册表读；前端标签从 `/api/roles`（新只读端点）读 | 现有全部后端/前端测试**不改断言**即全绿；新增注册表校验测试（缺字段、未注册 validator、重复 id、未知 guard 都在加载时报错）；新增一个测试角色，**只加 yaml 不改 Python** 即可被路由器与 `llm.validate_config` 接受 |
-| **P2 指挥者** | `llm_choice` 节点、简报生成、校验器、回退、`project_conductor` RoleSpec、策略开关；`test_skeptic`、`code_reviewer` 两个可选角色 | 开关关闭时与改动前**行为完全一致**（用现有 fix-flow 测试证明）；开启后：单候选走快路径且**零指挥者调用**；多候选时调用指挥者；非法提议（越界 id、超预算、越过 Gate）被拒绝、留痕并回退；指挥者调用数受上限约束；全部用脚本化假模型测试，包含“指挥者崩溃/超时 → 回退”。账本事件：`conductor_decided`、`conductor_rejected`；报告“修复过程”里能看到 |
+| **P2 指挥者** ✅ **已完成（进展 PROGRESS_2026-10-06_003，默认关闭，仅假模型验证）** | `llm_choice` 节点、简报生成、校验器、回退、`project_conductor` RoleSpec、策略开关；`test_skeptic`、`code_reviewer` 两个可选角色 | 开关关闭时与改动前**行为完全一致**（用现有 fix-flow 测试证明）；开启后：单候选走快路径且**零指挥者调用**；多候选时调用指挥者；非法提议（越界 id、超预算、越过 Gate）被拒绝、留痕并回退；指挥者调用数受上限约束；全部用脚本化假模型测试，包含“指挥者崩溃/超时 → 回退”。账本事件：`conductor_decided`、`conductor_rejected`；报告“修复过程”里能看到 |
 | **P3 调优器** | 见 §2.4 | 离线测试：patch 校验（非法 patch 被拒）、评分函数、淘汰逻辑、预算耗尽即停、结果文件结构；用假的评测运行器跑通一次完整搜索。**真实运行只做一次小规模烟测**（≤2 代、候选 2、快速套餐 ×1，严格限制 token） |
 | **P4 MCP 服务** | 见 §2.5 | 工具函数的单测（含超大输入、非白名单检查被拒、超时）；用 MCP 官方 SDK 的进程内客户端或直接调用做一次集成测试（若 SDK 不可用则跳过并注明）；README 片段说明如何接入 Claude Desktop/Claude Code |
 | **收口** | 更新 `docs/`：PROJECT_OVERVIEW §7 状态表、ROADMAP §5.3 状态、新增 `progress/PROGRESS_…` 进展记录；`handoff/CURRENT.md`；设置页展示角色清单（只读） | 文档如实标注“已实现/默认关闭/实测收益”；**不要写没有实测的收益** |

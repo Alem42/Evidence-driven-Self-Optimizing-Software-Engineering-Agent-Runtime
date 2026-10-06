@@ -295,6 +295,9 @@ export interface RoutingPolicy {
   max_escalations: number;
   planner_retries: number;
   start_level_by_role: Record<string, number>;
+  conductor?: boolean;
+  conductor_max_calls?: number;
+  conductor_cascade?: boolean;
 }
 
 export interface RouteDecision {
