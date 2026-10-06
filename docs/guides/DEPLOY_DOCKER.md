@@ -69,6 +69,14 @@ docker run --rm -p 127.0.0.1:8765:8765 -e MASA_DEMO=0 -e MASA_ALLOWED_HOSTS=loca
 - 健康检查：`GET /`。
 - Linux 上 runner 的隔离方式：Windows 用 Job Object；Linux 把被测进程放进新会话，超时/取消时整组 `SIGKILL`，不留孤儿进程。
 
+## 本地模型保护 / Local-model guard
+
+服务启动时做一次轻量检测（`src/masa/infrastructure/capability.py`，Windows 与 Linux 通用）：NVIDIA 显存 >= 6 GB 且内存 >= 16 GB 才允许本地模型。
+检测不通过（云端小服务器、没有显卡的容器、演示部署）时：本地模型配置不会进入路由，`/api/ollama` 的加载/测试被拒绝，`ChatProvider` 拒绝构造本地 provider，云端模型不受影响。
+结果写在启动日志里（`local models: enabled/DISABLED (...)`），也在 `/api/bootstrap` 的 `local_models` 字段。
+环境变量 `MASA_LOCAL_MODELS`：`0` 强制禁用，`1` 强制放行（检测不到但你确定能跑，如 AMD/Apple），默认 `auto`。
+实测：本机（5070 Ti 16 GB + 64 GB）放行；Docker 容器无显卡，被禁用。
+
 ## 7. 验证 / Verifying
 
 ```bash

@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit
 from masa.domain.models import MasaError
 from masa.application.console import Console
 from masa.infrastructure.locking import owner_lock
+from masa.infrastructure import capability
 
 
 # 前端独立部署（Vite dev/preview 或任意静态服务器），后端只提供 API；默认放行本机 Vite 端口。
@@ -331,6 +332,8 @@ def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS, *,
     # 独立锁不与 Runtime 的短期工具锁混用，所有端口共享同一目录独占权。
     # A separate lifetime lock leaves Runtime tool locks free and covers every port.
     with owner_lock(Path(state_dir).resolve() / "console.lock"):
+        state = capability.configure(demo=demo)
+        print("local models: " + ("enabled" if state["allowed"] else "DISABLED") + f" ({state['reason']}; GPU {state['vram_gb']} GB, RAM {state['ram_gb']} GB)")
         console = Console(state_dir, runner, go, project)
         server = None
         try:

@@ -14,6 +14,7 @@ from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, Str
 from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
 from masa.roles import registry
+from masa.infrastructure import capability
 from masa.agents.schemas import response_schema
 
 
@@ -111,6 +112,8 @@ class ChatProvider:
     def __init__(self, config, key=''):
         """固定本次运行配置，密钥不进入 profile。 Freeze run configuration without exposing credentials."""
         self.config = validate_config(config)
+        if self.config['model_type'] == 'local' and not capability.local_allowed():
+            raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
         if not self.config["base_url"] or not self.config["model"] or (self.config['model_type']=='cloud' and not key):
             raise MasaError("provider requires Base URL, model and API key")
         if not isinstance(key, str) or len(key) > 8192 or "\n" in key or "\r" in key:

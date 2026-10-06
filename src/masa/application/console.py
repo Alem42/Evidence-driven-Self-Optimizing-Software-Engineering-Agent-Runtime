@@ -28,6 +28,7 @@ from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
 from masa.infrastructure.hardware import HardwareMonitor
+from masa.infrastructure import capability
 from masa.infrastructure.diagnostics import DiagnosticLog
 
 
@@ -75,6 +76,7 @@ class Console:
                     break
         return {
             "console_version": "workspace-console-v2",
+            "local_models": dict(capability.STATE),  # 本机能否跑本地模型（启动时检测）/ whether this host can run local models (checked at start)
             "demo": bool(getattr(self, "demo", False)),  # 只读演示部署：前端据此显示提示条 / read-only demo deployment: the UI shows a banner
             # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
             "routing_defaults": self.settings.routing(),
@@ -635,6 +637,7 @@ class Console:
     def ollama_action(self,body):
         """受控动作共用单后台槽，避免与项目推理争抢。 Use one worker slot for local controls and project inference."""
         action=body.get('action');model=body.get('model');control=OllamaControl()
+        if not capability.local_allowed():raise MasaError('local models are disabled on this host: '+capability.STATE['reason'])
         if action=='show':return control.show(model)
         if action not in {'select','load','unload','test'}:raise MasaError('unsupported Ollama action')
         with self.lock:
