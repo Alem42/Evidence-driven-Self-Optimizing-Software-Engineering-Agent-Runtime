@@ -1,6 +1,6 @@
 """Bounded stdio protocol with explicit cancellation and parent-loss cleanup."""
 
-from masa.infrastructure.proc import NO_WINDOW
+from masa.infrastructure.proc import NEW_SESSION, NO_WINDOW, kill_group
 import json
 import os
 from pathlib import Path
@@ -25,7 +25,7 @@ class Runner:
         env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
         env["GOROOT"] = str(self.go_executable.parent.parent)
         proc = subprocess.Popen([str(self.executable), "--workspace", str(workspace), "--go", str(self.go_executable)],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **NO_WINDOW)
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **NO_WINDOW, **NEW_SESSION)
         output: queue.Queue = queue.Queue()
         limit = request["max_output_bytes"] * 12 + 65536
 
@@ -82,6 +82,9 @@ class Runner:
             if proc.poll() is None:
                 proc.kill()  # Coordinator job teardown also kills its worker and children.
             proc.wait(timeout=5)
+            # Linux：整组 kill，等价于 Windows 的 kill-on-close Job Object（没有它，超时后 go test 起的测试进程可能变成孤儿继续跑）。
+            # Linux: kill the whole process group, the equivalent of the Windows kill-on-close Job Object (without it a test binary started by go test could outlive a timeout).
+            kill_group(proc.pid)
             for t in threads:
                 t.join(timeout=2)
             for pipe in (proc.stdin, proc.stdout, proc.stderr):

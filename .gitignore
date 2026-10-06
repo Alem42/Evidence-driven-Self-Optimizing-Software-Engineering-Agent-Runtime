@@ -11,3 +11,5 @@ __pycache__/
 .env
 !.env.example
 frontend/node_modules/
+
+demo-state/

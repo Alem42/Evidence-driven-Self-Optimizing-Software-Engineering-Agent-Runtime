@@ -1,6 +1,9 @@
 // 后端 API 客户端：会话令牌通过 /api/session 获取（仅白名单来源可得），403 时自动重取一次。
 // API client: obtains the session token from /api/session and refreshes it once on 403.
-export const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || 'http://127.0.0.1:8765';
+// 未设置 VITE_API_BASE：开发时直连本机后端；设置为空字符串（Docker 构建）：与页面同源，由同一个服务托管前端和 API。
+// Unset: dev talks to the local backend; set to an empty string (Docker build): same origin, one server hosts the frontend and the API.
+const RAW_BASE = import.meta.env.VITE_API_BASE as string | undefined;
+export const API_BASE: string = RAW_BASE === undefined ? 'http://127.0.0.1:8765' : RAW_BASE.replace(/\/$/, '');
 
 export class ApiError extends Error {
   status: number;

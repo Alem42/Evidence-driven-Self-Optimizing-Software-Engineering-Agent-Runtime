@@ -1,0 +1,23 @@
+# 不进镜像的东西：本地状态（含历史与密钥）、工具链、依赖目录、构建产物、缓存、文档与测试
+# Never in the image: local state (history and keys), toolchains, dependency folders, build output, caches, docs and tests
+.git
+.venv
+.tools
+.masa
+.cache
+.env
+provider-keys.local.json
+provider-keys.local.tmp
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+frontend/node_modules
+frontend/dist
+docs
+tests
+examples
+scripts
+compact.txt
+demo-state

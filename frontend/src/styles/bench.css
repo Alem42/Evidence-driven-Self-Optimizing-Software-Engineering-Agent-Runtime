@@ -36,3 +36,6 @@
 
 /* streaming indicator in the top bar */
 .chip-static .spin { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent, #4c6ef5); animation: bench-spin 0.9s linear infinite; vertical-align: -1px; }
+
+.demo-banner { padding: 6px 14px; background: #fff4d6; color: #5c4400; border-bottom: 1px solid #e8d28c; font-size: 13px; }
+[data-theme="dark"] .demo-banner { background: #3a3012; color: #f0dca0; border-color: #6b5a22; }

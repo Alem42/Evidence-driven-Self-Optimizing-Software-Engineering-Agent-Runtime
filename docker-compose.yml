@@ -1,0 +1,50 @@
+# 部署：docker compose up --build -d
+#   默认 = 只读演示（MASA_DEMO=1）。要完整模式见 docs/guides/DEPLOY_DOCKER.md。
+#   公网访问请加上 `--profile proxy`（Caddy，自动 HTTPS + 基本认证），不要把 8765 直接暴露到公网。
+# Deploy: docker compose up --build -d. Default = read-only demo. For a public host add `--profile proxy` (Caddy: automatic HTTPS + basic auth); never expose 8765 directly.
+services:
+  masa:
+    build: .
+    image: masa:latest
+    restart: unless-stopped
+    environment:
+      MASA_DEMO: "${MASA_DEMO:-1}"
+      # 允许的 Host：本机端口 + 你的域名（如 demo.example.com）。防 DNS rebinding，所以不是随便什么 Host 都能访问。
+      # Allowed Host headers: the published port plus your domain; defends against DNS rebinding, so not any Host works.
+      MASA_ALLOWED_HOSTS: "localhost:${MASA_PORT:-8765},127.0.0.1:${MASA_PORT:-8765},${MASA_DOMAIN:-}"
+      MASA_ORIGINS: "http://localhost:${MASA_PORT:-8765},https://${MASA_DOMAIN:-localhost}"
+    ports:
+      - "${MASA_BIND_ADDRESS:-127.0.0.1}:${MASA_PORT:-8765}:8765"
+    volumes:
+      # 演示：把 scripts/make_demo_state.py 生成的目录放到 ./demo-state（没有就用命名卷，空历史）。
+      # Demo: put the directory made by scripts/make_demo_state.py at ./demo-state (otherwise a named volume with empty history is used).
+      - "${MASA_STATE:-masa-data}:/data"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/masa/.cache
+    cap_drop:
+      - ALL
+
+  proxy:
+    profiles: ["proxy"]
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - masa
+    environment:
+      MASA_DOMAIN: "${MASA_DOMAIN:?set MASA_DOMAIN to the public host name}"
+      MASA_BASIC_USER: "${MASA_BASIC_USER:-demo}"
+      MASA_BASIC_HASH: "${MASA_BASIC_HASH:?set MASA_BASIC_HASH (caddy hash-password)}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  masa-data:
+  caddy-data:

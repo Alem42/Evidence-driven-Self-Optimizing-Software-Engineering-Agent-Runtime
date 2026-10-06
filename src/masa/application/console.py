@@ -75,6 +75,7 @@ class Console:
                     break
         return {
             "console_version": "workspace-console-v2",
+            "demo": bool(getattr(self, "demo", False)),  # 只读演示部署：前端据此显示提示条 / read-only demo deployment: the UI shows a banner
             # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
             "routing_defaults": self.settings.routing(),
             "default_repo": str(self.project / "tests/fixtures/go-pass"),

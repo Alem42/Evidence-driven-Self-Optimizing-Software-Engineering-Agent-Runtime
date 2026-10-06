@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -26,7 +27,15 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True)
     ui = sub.add_parser("serve", aliases=["ui"], help="launch the local API server (frontend runs separately)")
     ui.add_argument("--port", type=int, default=8765)
-    ui.add_argument("--origin", action="append", default=None, help="allowed frontend origin (repeatable); default: local Vite dev/preview ports")
+    ui.add_argument("--origin", action="append", default=None, help="allowed frontend origin (repeatable); default: local Vite dev/preview ports (env MASA_ORIGINS, comma separated)")
+    # 部署（Docker）用的选项；默认值取环境变量，方便在容器里配置。没有设置时行为与以前完全一致（只监听本机回环）。
+    # Deployment (Docker) options; defaults come from environment variables so a container can be configured. When unset the behaviour is exactly as before (loopback only).
+    ui.add_argument("--bind", default=os.environ.get("MASA_BIND", "127.0.0.1"), help="address to listen on (env MASA_BIND); anything but loopback is a deployment")
+    ui.add_argument("--host", action="append", default=None, help="extra allowed Host header, e.g. demo.example.com (repeatable; env MASA_ALLOWED_HOSTS, comma separated)")
+    ui.add_argument("--static-dir", type=Path, default=Path(os.environ["MASA_STATIC_DIR"]) if os.environ.get("MASA_STATIC_DIR") else None,
+                    help="serve the built frontend from this directory on the same origin (env MASA_STATIC_DIR)")
+    ui.add_argument("--demo", action="store_true", default=os.environ.get("MASA_DEMO", "").lower() in ("1", "true", "yes"),
+                    help="read-only demo: refuse everything that starts, changes or deletes work (env MASA_DEMO=1)")
     run = sub.add_parser("run")
     run.add_argument("--repo", required=True, type=Path)
     run.add_argument("--goal", default="Verify the selected Go check; do not modify source.")
@@ -59,7 +68,10 @@ def main(argv=None) -> int:
     try:
         if args.command in ("serve", "ui"):
             from masa.interfaces.http.server import serve, DEFAULT_ORIGINS
-            serve(args.state_dir, args.runner, args.go, PROJECT, args.port, tuple(args.origin) if args.origin else DEFAULT_ORIGINS)
+            env_list = lambda name: [x.strip() for x in os.environ.get(name, "").split(",") if x.strip()]  # noqa: E731
+            origins = tuple(args.origin or env_list("MASA_ORIGINS")) or DEFAULT_ORIGINS
+            serve(args.state_dir, args.runner, args.go, PROJECT, args.port, origins,
+                  bind=args.bind, hosts=tuple(args.host or env_list("MASA_ALLOWED_HOSTS")), static_dir=args.static_dir, demo=args.demo)
             return 0
         store = Store(args.state_dir)
         if args.command == 'inspect':

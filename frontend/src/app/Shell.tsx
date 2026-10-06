@@ -5,6 +5,7 @@ import { Sidebar } from '../features/sidebar/Sidebar';
 import { Toasts } from '../shared/Toasts';
 import { ReportDialog } from '../features/report/ReportDialog';
 import { useUi } from '../stores/ui';
+import { useBootstrap } from '../api/queries';
 
 /** 拖动分隔条调整面板宽度。 Drag handle for resizing a pane. */
 export function Resizer({ side, min, max }: { side: 'sidebarWidth' | 'inspectorWidth'; min: number; max: number }) {
@@ -27,6 +28,14 @@ export function Resizer({ side, min, max }: { side: 'sidebarWidth' | 'inspectorW
   return <div className={`resizer resizer-${side}`} onPointerDown={down} role="separator" aria-orientation="vertical" />;
 }
 
+// 演示部署的提示条：告诉访客这里是只读展示，避免“点了没反应”的困惑。
+// Banner for demo deployments: tells visitors this is a read-only showcase so a click that does nothing is not a mystery.
+function DemoBanner() {
+  const demo = useBootstrap().data?.demo;
+  if (!demo) return null;
+  return <div className="demo-banner" role="status">演示模式（只读）：可以浏览历史任务、报告、评测结果与设置；不能发起或修改任务。 Read-only demo.</div>;
+}
+
 export function Shell() {
   const theme = useUi((s) => s.theme);
   const sidebarWidth = useUi((s) => s.sidebarWidth);
@@ -41,6 +50,7 @@ export function Shell() {
         <Sidebar />
         <Resizer side="sidebarWidth" min={220} max={420} />
         <main className="main">
+          <DemoBanner />
           <Outlet />
         </main>
       </div>

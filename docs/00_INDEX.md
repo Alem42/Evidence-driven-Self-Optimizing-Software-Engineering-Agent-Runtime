@@ -11,7 +11,7 @@
 | [DESIGN_DYNAMIC_ROLES](DESIGN_DYNAMIC_ROLES.md) | **执行说明**：动态角色（RoleSpec、混合式指挥者、工作流调优器、MCP）的设计、分阶段验收与执行约束 |
 
 ## 使用指南
-[工作台](guides/USER_WORKBENCH.md) · [本地模型](guides/USER_LOCAL_MODELS.md) · [Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) · [路由与预算](guides/USER_ROUTING_AND_BUDGET.md) · [**评测**](guides/USER_BENCHMARK.md) · [Ollama 控制页](guides/USER_OLLAMA_CONTROLLER.md) · [Runtime 与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)
+[工作台](guides/USER_WORKBENCH.md) · [本地模型](guides/USER_LOCAL_MODELS.md) · [Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) · [路由与预算](guides/USER_ROUTING_AND_BUDGET.md) · [**评测**](guides/USER_BENCHMARK.md) · [**Docker 部署**](guides/DEPLOY_DOCKER.md) · [Ollama 控制页](guides/USER_OLLAMA_CONTROLLER.md) · [Runtime 与恢复讲解](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)
 
 ## 方案与细节（仍有参考价值，优先级以 ROADMAP 为准）
 | 文档 | 内容 |
