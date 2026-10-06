@@ -53,3 +53,5 @@ Qwen uppercase 明确测试修订最终 dd9ea5f962dc437bb523a34a79c44423：Go/Ga
 Python186、前端13/构建、Go runner测试通过；视觉未验收。服务启动用新版，读取正在执行的任务用既有 HTTP 或只读 SQLite，别为查询初始化 Jobs/Console（会恢复任务）。每部分验证后提交，密钥/.masa/.tools 不入 Git，核心函数中英文注释。
 
 **断点（2026-10-07，token 吃紧）**：用户要求先整理结构（只动结构，S1 目录整理 + S2 拆 `application/`），并先分析“经验库”想法（见 `docs/design/IDEA_EXPERIENCE_LIBRARY.md`）。失败分类已完成（进展 PROGRESS_2026-10-07_001）。结构整理前的基线提交：`951ad90`（后端 475 通过、前端 40）；回滚用 `git reset --hard 951ad90`。整理期间不改行为，验证 = 全量测试 + `scripts/eval/loop_equivalence.py`。之后：用户的“多加测试暴露常见问题 → 做工具”“经验库”“MCP”都等结构整理完再决定。
+
+**断点更新（2026-10-07）**：结构整理完成并推送（`80ae13e`，475 测试通过，差分检查与改动前一致；结构见 docs/STRUCTURE.md）。经验库分析已写（docs/design/IDEA_EXPERIENCE_LIBRARY.md）。等用户决定：1) 工具方向（建议先做“字符串度量”确定性核对，单独开关，A/B）；2) 是否做 S3（拆 console.py）；3) 经验库是否先做最小原型；4) MCP。
