@@ -16,4 +16,6 @@
 
 **文档入口**：[00_INDEX](../00_INDEX.md)。
 
+**测试可靠性测量完成（2026-10-07，花费约 ¥1.1）**：见进展 003 与 reference/TEST_RELIABILITY.md；组件 `application/checks/consensus.py`（盲推导+表决+机械比较，带测试）已就绪但**还没接进流程**，等用户在 A（Tester 用例审计）/B/C 中选。
+
 **已完成（2026-10-07）**：best-of-N（验证选择的多次尝试），真实 A/B 未见收益（见进展 002），保留为可选开关、默认关闭；下一步建议“让测试更可靠”（ROADMAP 当前路线第 2 条）。设计：策略 `best_of_n`（1=关，默认）；在修复/修订测试阶段，第一个候选之外再让最便宜的合格模型生成 N-1 个候选，逐个验证，选“通过 > 未解决条目最少”的；选中的 verified run 记入 job['preverified']，主循环跳过重复验证。A/B 用 `scripts/eval/p2_eval.py --arms off,bon3`，费用上限 ¥6。

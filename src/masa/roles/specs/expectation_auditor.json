@@ -1,0 +1,64 @@
+{
+  "id": "expectation_auditor",
+  "label": "期望值审计者",
+  "description": "独立核对测试用例声明的期望输出是否算对（只读）；多次并行采样取多数",
+  "order": 121,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "cases"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "expectation_auditor.prompt.md",
+  "max_output_tokens": 3000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "stdout",
+            "exit_code",
+            "verdict"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stdout": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "exit_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "verdict": {
+              "enum": [
+                "correct",
+                "wrong"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

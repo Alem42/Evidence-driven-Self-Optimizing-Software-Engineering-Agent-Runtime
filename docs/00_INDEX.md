@@ -18,7 +18,7 @@
 [动态角色（RoleSpec / 指挥者 / 调优器 / MCP）](design/DYNAMIC_ROLES.md) · [经验库想法分析](design/IDEA_EXPERIENCE_LIBRARY.md) · [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md) · [硬件监控](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md)
 
 ## 参考（reference/，仍有参考价值但不再更新）
-[低质量模型的 16 项主流做法](reference/LOW_MODEL_QUALITY.md) · [多模型 Runtime 原始设计](reference/MULTI_MODEL_RUNTIME_PLAN.md)（§8–§10 的优先级已被 ROADMAP 取代）· [面试技术问答](reference/INTERVIEW_TECHNICAL_QA.md)
+[低质量模型的 16 项主流做法](reference/LOW_MODEL_QUALITY.md) · [多模型 Runtime 原始设计](reference/MULTI_MODEL_RUNTIME_PLAN.md)（§8–§10 的优先级已被 ROADMAP 取代）· [面试技术问答](reference/INTERVIEW_TECHNICAL_QA.md) · [**测试可靠性与任务难度表**](reference/TEST_RELIABILITY.md)
 
 ## 开发接续
 [handoff/CURRENT](handoff/CURRENT.md)（当前断点）· [长期约定](MEMORY_PROJECT.md) · [实施入口](LLM_IMPLEMENTATION_GUIDE.md) · [验收场景](scenarios/SCENARIO_SEEDED_RANDOM.md) · progress/ 只保留 2026-10-04 以来的迭代记录（更早的在 git 历史里）
