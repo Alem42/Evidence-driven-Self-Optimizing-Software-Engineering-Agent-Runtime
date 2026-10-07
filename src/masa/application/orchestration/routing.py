@@ -38,6 +38,8 @@ DEFAULT_POLICY = {
     'conductor': False,
     'conductor_max_calls': 6,
     'conductor_cascade': False,
+    # 验证选择的多次尝试（默认关闭）：修复阶段每次生成 N 个候选，逐个真实验证，选最好的。1 = 关。 Verification-selected attempts (off by default): N candidates per repair, each really verified, the best wins. 1 = off.
+    'best_of_n': 1,
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
@@ -258,7 +260,7 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'transport_wait_seconds': (10, 86400)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'best_of_n': (1, 5), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
 # 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
 # The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.

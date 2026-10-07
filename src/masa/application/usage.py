@@ -192,7 +192,7 @@ def task_report(store, run_id):
 # 修复过程里值得在报告里展示的事件：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收、停止原因。
 # Events shown as the "process" of a task: workflow steps, diagnoses, model releases, extended rounds, rejected no-op fixes, stop reasons.
 _PROCESS_EVENTS = {'workflow_node', 'diagnosis', 'diagnosis_failed', 'models_released', 'rounds_extended', 'noop_revision', 'task_stopped', 'transport_retry',
-                   'rewrite_started', 'imports_fixed', 'conductor_decided', 'conductor_rejected', 'skeptic_verdict', 'skeptic_failed', 'code_review', 'code_review_skipped'}
+                   'rewrite_started', 'imports_fixed', 'conductor_decided', 'conductor_rejected', 'skeptic_verdict', 'skeptic_failed', 'code_review', 'code_review_skipped', 'best_of_n', 'best_of_n_skipped'}
 
 
 def _process_data(event):

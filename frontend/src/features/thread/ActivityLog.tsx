@@ -20,6 +20,7 @@ const MAP: Record<string, Mapper> = {
     return p.escalated ? { text: `升级 → L${p.level} ${p.model}（${role(e)}）`, tone: 'run' } : null;
   },
   diagnosis: (e) => ({ text: `Diagnoser 诊断：${{ implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' }[e.payload.owner as string] ?? e.payload.owner}`, tone: 'run' }),
+  best_of_n: (e) => ({ text: `多次尝试：${e.payload.tried} 个候选，选第 ${Number(e.payload.chosen) + 1} 个`, tone: 'run' }),
   conductor_decided: (e) => ({ text: `指挥者选择：${e.payload.next}`, tone: 'run' }),
   conductor_rejected: (e) => ({ text: `指挥者的提议被拒绝（${e.payload.reason}），回到规则`, tone: 'bad' }),
   skeptic_verdict: (e) => ({ text: `测试怀疑者：${e.payload.verdict === 'tests_wrong' ? '测试期望有误' : '测试期望没问题'}`, tone: 'run' }),

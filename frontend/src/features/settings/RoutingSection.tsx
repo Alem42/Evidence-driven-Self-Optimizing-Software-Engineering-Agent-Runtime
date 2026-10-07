@@ -104,6 +104,13 @@ export function RoutingSection() {
             <input type="number" min={1} max={4} value={draft.policy.planner_retries} onChange={(e) => setPolicy({ planner_retries: Number(e.target.value) })} />
           </Field>
         </div>
+        <h4>多次尝试（best-of-N，实验，默认 1 = 关）</h4>
+        <p className="hint">修复实现失败时，让最便宜的合格模型再生成 N-1 个候选，逐个真实验证，选通过的（或未解决条目最少的）。第一个候选通过就不再多花钱；只对“修复实现”生效，不对修订测试生效。真实评测（6 个任务配对）里通过率没有变化（4/6 对 4/6）、费用约 +15%，额外采样只在 1 个任务里触发且没有改善；主要失败（测试期望算错）不是它能解决的。</p>
+        <div className="grid2">
+          <Field label="每次修复的候选数 N（1–5）">
+            <input type="number" min={1} max={5} value={draft.policy.best_of_n ?? 1} onChange={(e) => setPolicy({ best_of_n: Number(e.target.value) })} />
+          </Field>
+        </div>
         <h4>指挥者（实验，默认关闭）</h4>
         <Notice tone="warn">{CONDUCTOR_RISK}</Notice>
         <p className="hint">只在补丁停滞或同一失败反复出现时，才让最强模型在已注册的候选步骤里选一个（它不能终止任务）；不合法的提议会被拒绝并回到规则。默认流程就是之前测试正常的那一套，不受这个开关影响。</p>

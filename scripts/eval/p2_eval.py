@@ -24,7 +24,8 @@ from masa.bench.tasks import BY_ID, TASKS  # noqa: E402
 # 保守的价格（元 / 百万 token）：Pro 取高峰价（官方：未命中缓存输入 9、输出 27），Flash 取折合人民币的上沿。价格只用于费用上限的估算。
 # Conservative prices (yuan per million tokens): Pro at the peak rate, Flash at the upper end. They only drive the cost cap.
 PRICES = {'deepseek-v4-pro': (9.0, 27.0), 'deepseek-flash': (1.0, 4.0)}
-ARMS = {'off': {'policy': {}, 'drop_edges': []}, 'on': {'policy': {'conductor': True}, 'drop_edges': []}}
+ARMS = {'off': {'policy': {}, 'drop_edges': []}, 'on': {'policy': {'conductor': True}, 'drop_edges': []},
+        'bon2': {'policy': {'best_of_n': 2}, 'drop_edges': []}, 'bon3': {'policy': {'best_of_n': 3}, 'drop_edges': []}}
 
 
 def prepare(source, folder):
@@ -79,8 +80,9 @@ def main():
     spent = round(sum(r['cost'] for r in summary['runs'] + summary.get('invalid', [])), 4)  # 作废的运行也花了钱 / invalidated runs still cost money
     done = {(r['task'], r['arm'], r.get('round', 1)) for r in summary['runs']}
     for index, task in enumerate(tasks):
-        order = ['off', 'on'] if index % 2 == 0 else ['on', 'off']  # 交替先后，避免时段偏差 / alternate the order to avoid time-of-day bias
-        for arm in [a for a in order if a in args.arms.split(',')]:
+        order = args.arms.split(',')
+        order = order if index % 2 == 0 else order[::-1]  # 交替先后，避免时段偏差 / alternate the order to avoid time-of-day bias
+        for arm in order:
             if (task, arm, args.round) in done:
                 continue
             left = args.yuan - spent

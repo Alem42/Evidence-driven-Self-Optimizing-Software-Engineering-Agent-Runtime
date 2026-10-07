@@ -246,6 +246,12 @@ class WorkflowCoordinator:
                 resume_failed=None
                 result={'status':'failed'}
                 phase('verification',verified,attempt)
+            elif draft in self.job.get('preverified',{}):
+                # best-of-N 已经验证过被选中的候选：直接用那次验证（终态的 run 再 execute 只是返回它），不重复验证。
+                # best-of-N already verified the chosen candidate: reuse that run (executing a finished run just returns it).
+                verified=self.job['preverified'][draft]
+                phase('verification',verified,attempt)
+                result=Runtime(store,runner).execute(verified)
             else:
                 meta=store.run(draft)['data']['project_plan']
                 phase('verification',draft,attempt)
@@ -415,6 +421,7 @@ class WorkflowCoordinator:
                     self._emit('repair_wants_tests',{'reason':str(exc)[:200]},verified,always=True)
                     return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
                 raise
+            draft=self._best_of_n(chain,role,stage,make,draft,used,verified,generation,need)
             if used:self.job['pending_fix']={**used,'chain':chain}
             self._log_fix(stage,draft,used)
             return {'draft':draft,'noop':False,'halted':False,'halt_kind':None}
@@ -500,6 +507,56 @@ class WorkflowCoordinator:
                  'conduct':conduct,'test_skeptic':test_skeptic}
         engine=FlowEngine(self.job['request'].get('workflow') or FIX_V1,actions,max_steps=16 if self.router.policy.get('conductor') else 12,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
+
+    # ───────────── best-of-N：验证选择的多次尝试 / verification-selected multiple attempts ─────────────
+    def _best_of_n(self, chain, role, stage, make, first, used, verified, generation, need):
+        """把时间和便宜的调用换成可靠性：第一个候选之外，再让**最便宜的合格模型**生成 N-1 个候选，逐个真实验证，选“通过 > 未解决条目最少”的。
+        Gate 是独立的裁判，所以多采样不会降低可信度。策略 best_of_n=1（默认）时什么都不做。每个候选的调用都计入预算；预算不够就用已有的候选。
+        Trade time and cheap calls for reliability: besides the first candidate, the CHEAPEST eligible model produces N-1 more, each is really verified, and the best
+        (passing > fewest unresolved items) wins. The Gate is an independent judge, so extra sampling cannot weaken trust. best_of_n=1 (default) does nothing; every call counts against the budget."""
+        n=int(self.router.policy.get('best_of_n',1)) if self._ladder else 1
+        # 只对“修复实现”多采样。修订测试不行：按“能通过”来选，会偏向迁就有缺陷实现的测试（假通过）。
+        # Only for implementation repairs. Not for test revisions: choosing by "passes" would favour tests that bend to a defective implementation (false passes).
+        if n<=1 or chain!='fix:implementation':return first
+        store=self.store
+        def evaluate(draft):
+            meta=store.run(draft)['data']['project_plan']
+            ident=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),'review_mode':'automatic'})
+            result=Runtime(store,self.runner).execute(ident)
+            if result['status']=='succeeded':return ident,True,0
+            checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref'])) for t in store.tools(ident) if t['result_ref']]
+            return ident,False,len(ownership.analyse(checks)['items']) if checks else 10**6
+        candidates=[]  # (draft, verified, passed, items, candidate id, level)
+        try:
+            ident,passed,items=evaluate(first)
+            candidates.append((first,ident,passed,items,used.get('candidate'),used.get('level')))
+        except CallCancelled:
+            raise
+        except MasaError as exc:
+            self._emit('best_of_n_skipped',{'reason':'first candidate could not be verified: '+str(exc)[:160]},verified,always=True)
+            return first
+        for _ in range(n-1):
+            if candidates[-1][2] or any(c[2] for c in candidates):break  # 已经有通过的候选：不再多花钱 / a passing candidate exists: stop spending
+            try:
+                provider,decision=self._pick(role,chain+':bon',need=need,anchor=verified,stage='best_of_n')
+            except RoutingStop:
+                break  # 预算/等级不允许：用已有的 / budget or levels do not allow it: use what exists
+            try:
+                draft=make(provider,None)
+                if not store.run(draft)['data'].get('project_plan',{}).get('changed_files'):continue  # 原样返回：没有意义 / unchanged: pointless
+                ident,passed,items=evaluate(draft)
+            except CallCancelled:
+                raise
+            except (MasaError,ContextOverflow):
+                continue  # 这个候选被校验拒绝：只是少一个样本 / rejected by validation: one sample fewer
+            entry=self.router.entry_of(provider) or {}
+            candidates.append((draft,ident,passed,items,entry.get('id'),entry.get('level')))
+        best=min(range(len(candidates)),key=lambda i:(not candidates[i][2],candidates[i][3],i))
+        draft,ident,passed,items,candidate,level=candidates[best]
+        if candidate:used.update(candidate=candidate,level=level)
+        self.job['preverified']={**self.job.get('preverified',{}),draft:ident}
+        self._emit('best_of_n',{'stage':stage,'n':n,'tried':len(candidates),'chosen':best,'passed':[bool(c[2]) for c in candidates],'unresolved':[c[3] for c in candidates]},verified,always=True)
+        return draft
 
     def _log_fix(self, stage, draft, used):
         """记录每次修复产出了什么（谁做的、改了哪些文件），Diagnoser 据此知道“已经试过什么”。

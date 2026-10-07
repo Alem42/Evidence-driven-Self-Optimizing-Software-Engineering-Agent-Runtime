@@ -88,6 +88,7 @@ function ProcessBlock({ items, t0 }: { items: NonNullable<TaskReport['process']>
       if (d.mismatches?.length) text += ` · 期望与需求不一致的用例：${d.mismatches.join('、')}`;
     } else if (p.kind === 'rewrite_started') { text = `补丁连续没有改善，由最高等级整体重写实现（当时未解决 ${d.unresolved ?? '?'} 条）`; tone = 'p-ok'; }
     else if (p.kind === 'imports_fixed') { text = `确定性修复 import（无模型调用）：${Object.entries(d.files ?? {}).map(([f, c]) => f + ' ' + (c as string[]).join('、')).join('；')}`; tone = 'p-ok'; }
+    else if (p.kind === 'best_of_n') { text = `多次尝试（${d.stage}）：生成 ${d.tried} 个候选并逐个验证，选第 ${Number(d.chosen) + 1} 个（通过：${(d.passed ?? []).map((x: boolean) => (x ? '是' : '否')).join('/')}；未解决：${(d.unresolved ?? []).join('/')}）`; tone = 'p-ok'; }
     else if (p.kind === 'conductor_decided') { text = `指挥者（${d.by}${d.escalated ? '，升级后' : ''}）选择“${NODE_TEXT[d.next] ?? d.next}”：${d.reason ?? ''}`; tone = 'p-ok'; }
     else if (p.kind === 'conductor_rejected') { text = `指挥者的提议被拒绝（${d.reason}），回到规则`; tone = 'p-bad'; }
     else if (p.kind === 'skeptic_verdict') { text = `测试怀疑者（${d.by}）：${d.verdict === 'tests_wrong' ? '测试期望有误' : '测试期望没问题'}${d.mismatches?.length ? ' · ' + d.mismatches.join('、') : ''}`; }

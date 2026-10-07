@@ -299,6 +299,7 @@ export interface RoutingPolicy {
   conductor?: boolean;
   conductor_max_calls?: number;
   conductor_cascade?: boolean;
+  best_of_n?: number;
 }
 
 export interface RouteDecision {
