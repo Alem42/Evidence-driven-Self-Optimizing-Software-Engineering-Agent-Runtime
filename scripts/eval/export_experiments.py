@@ -14,8 +14,8 @@ import expectation_accuracy as base  # noqa: E402
 
 ROOT = base.ROOT
 OUT = ROOT / 'frontend/src/data/experiments.json'
-TITLES = {'p2eval': '指挥者（动态角色）', 'p2eval_bon': 'best-of-N', 'p2eval_audit': 'Tester 用例审计（第 1 轮）', 'p2eval_audit2': 'Tester 用例审计（第 2 轮，复测）', 'p2eval_audit3': 'Tester 用例审计（第 3 轮，全部 L2–L6）', 'p2eval_final': '默认流程（再验证）', 'p2eval_switch': '设置开关通路'}
-ARM_TEXT = {'off': '关（默认流程）', 'on': '开', 'bon3': 'N=3', 'audit': '开'}
+TITLES = {'p2eval': '指挥者（动态角色）', 'p2eval_bon': 'best-of-N', 'p2eval_audit': 'Tester 用例审计（第 1 轮）', 'p2eval_audit2': 'Tester 用例审计（第 2 轮，复测）', 'p2eval_audit3': 'Tester 用例审计（第 3 轮，全部 L2–L6）', 'p2eval_final': '默认流程（再验证）', 'p2eval_switch': '设置开关通路', 'p2eval_sw': '大项目 bank（修复前，只有基线跑完）', 'p2eval_sw3': '大项目 bank（修复后，各 1 次）'}
+ARM_TEXT = {'off': '关（默认流程）', 'on': '开', 'bon3': 'N=3', 'audit': '开', 'contract': '开：包间契约', 'referee': '开：断言裁判'}
 
 
 def ab():

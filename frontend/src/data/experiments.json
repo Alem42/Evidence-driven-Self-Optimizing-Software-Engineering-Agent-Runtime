@@ -205,6 +205,54 @@
    ]
   },
   {
+   "experiment": "p2eval_sw",
+   "title": "大项目 bank（修复前，只有基线跑完）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 1,
+     "passed": 0,
+     "cost": 1.72,
+     "tokens": 216228,
+     "seconds": 187
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_sw3",
+   "title": "大项目 bank（修复后，各 1 次）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 1,
+     "passed": 1,
+     "cost": 0.171,
+     "tokens": 32216,
+     "seconds": 54
+    },
+    {
+     "arm": "contract",
+     "label": "开：包间契约",
+     "runs": 1,
+     "passed": 1,
+     "cost": 0.374,
+     "tokens": 119695,
+     "seconds": 100
+    },
+    {
+     "arm": "referee",
+     "label": "开：断言裁判",
+     "runs": 1,
+     "passed": 1,
+     "cost": 1.103,
+     "tokens": 142491,
+     "seconds": 130
+    }
+   ]
+  },
+  {
    "experiment": "p2eval_switch",
    "title": "设置开关通路",
    "arms": [
