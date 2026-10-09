@@ -268,6 +268,13 @@ class ProjectGeneration:
                 again = dict(values, previous_attempt_error='The file you just wrote was rejected by deterministic checks (syntax, harness text, or tests that cannot fail). Fix exactly these problems and return the complete file again:' + chr(10) + broken[path])
                 generated = roles.call(rid, author, 'project_developer', again, invocation_id=f'{invocation}:syntax{retry}', **slot)
                 validate_file_proposal(generated, spec, path)
+            else:
+                # 重写次数用完仍不合格：这些检查都只看本文件和规格，后面的文件改变不了结论——立刻失败，不要再生成剩下的文件（真实运行里 main.go 三轮都过不了，每轮白白多写 8 个文件，把 token 上限耗光）。
+                # Rewrites exhausted and still rejected: these checks look only at this file and the spec, later files cannot change the verdict - fail now instead of writing the remaining files
+                # (a real run's main.go failed three rounds in a row, each round writing 8 more files for nothing until the token limit was gone).
+                broken = self._syntax_errors(self._gofmt({**files, **generated}, [path], rid), [path], spec, approved.get('contract'))
+                if broken:
+                    raise MasaError('generated Go files do not parse (fix these first): ' + f'{path}: {broken[path]}')
             files.update(generated)
             metadata['partial_files_ref'] = self.store.put(files)
             metadata['gen_progress'] = {'completed': ordinal + 1, 'total': len(paths), 'current': None}

@@ -332,6 +332,19 @@ class GhostImportDeveloper(LocalDeveloper):
         return super().respond(context)
 
 
+class StubbornGhostDeveloper(LocalDeveloper):
+    """main.go 每次都导入不存在的内部包（真实运行里 main.go 三轮过不了）。 main.go imports the missing package every single time (a real run's main.go failed three rounds)."""
+    def respond(self, context):
+        path = context.get('target_path')
+        if path == 'cmd/app/main.go':
+            self.contexts.append(copy.deepcopy(context))
+            nl = chr(10)
+            source = 'package main' + nl + nl + 'import (' + nl + chr(9) + '"os"' + nl + nl + chr(9) + '"example.com/task/internal/ghost"' + nl + ')' + nl + nl
+            source += 'func main() { os.Exit(ghost.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }' + nl
+            return validate_response(context, {'files': {path: source}}, '')
+        return super().respond(context)
+
+
 @unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
 class SyntaxGateTests(unittest.TestCase):
     approved_parent = LocalGenerationTests.approved_parent
@@ -426,6 +439,19 @@ class SyntaxGateTests(unittest.TestCase):
                 self.assertIn('example.com/task/internal/ghost', tries[1]['previous_attempt_error'])
                 self.assertIn('example.com/task/internal/app', tries[1]['previous_attempt_error'])  # 列出真正能导入的包 / lists what can really be imported
                 self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref'])['cmd/app/main.go'], FILES['cmd/app/main.go'])
+            finally:
+                store.close()
+
+    def test_a_file_still_rejected_after_its_rewrites_stops_the_stage_before_the_other_files_are_written(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = StubbornGhostDeveloper()
+                with self.assertRaisesRegex(Exception, 'internal/ghost'):
+                    ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                asked = [c.get('target_path') for c in provider.contexts]
+                self.assertEqual(asked, ['cmd/app/main.go'] * 3)  # 1 次生成 + 2 次重写，然后停 / one write + two rewrites, then stop
             finally:
                 store.close()
 

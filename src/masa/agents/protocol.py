@@ -78,7 +78,9 @@ def _project_roles_prompt(context):
             'implementation and _test.go files. Paths are relative and portable. Only .go files and go.mod. '
             'Avoid unnecessary layers; explain each file responsibility. Use the user language for descriptions. '
             'Layout rule: NEVER put .go files at the module root; only go.mod lives there. cmd/app/main.go is the only package main; '
-            'put logic in subdirectories such as internal/<name>/<name>.go and tests next to it as <name>_test.go (same package).')
+            'put logic in subdirectories such as internal/<name>/<name>.go and tests next to it as <name>_test.go (same package). '
+            'Entry rule: cmd/app/main.go is a thin wrapper that only calls <pkg>.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr) and exits; its purpose line must say so and must never say it reads stdin. '
+            'Reading input, dispatching commands and printing belong to Run in an internal package; with three or more internal packages add internal/app (app.go, app_test.go) as the package that owns Run and wires the others.')
     elif context['purpose'] == 'project_tester':
         instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
             'one to three objects chosen for this project: operation (go_test required; go_vet and go_fmt_check recommended, each at most once), purpose (concrete verification strategy), '
