@@ -17,6 +17,8 @@ from masa.domain.models import CallCancelled, ContextOverflow, MasaError, Transp
 import os
 import time
 
+from masa.application.checks import referee
+
 conductor.check_optional_roles()  # 可选角色的 when 引用的 guard 必须存在 / the guard named by an optional role's `when` must exist
 
 
@@ -335,6 +337,15 @@ class WorkflowCoordinator:
                     for t in store.tools(verified) if t['result_ref']]
             analysis=ownership.analyse(checks)
             self._close_attempt(analysis)
+            # 测试修订之后同一批断言原样还在失败：说明修订没有真正改到点子上（策略 assertion_referee 时给出明确提示）。
+            # The same assertions still fail unchanged after a test revision: the revision did not hit the point (a clear hint when policy assertion_referee is on).
+            assertions=sorted(i['message'] for i in analysis['items'] if i['kind']==ownership.ASSERTION)
+            if self._ladder and self.router.policy.get('assertion_referee') and assertions and assertions==self.job.get('last_assertions') \
+                    and str((self.job.get('pending_fix') or {}).get('chain','')).endswith('test'):
+                self.job['revision_ineffective']=assertions[:3]
+            else:
+                self.job.pop('revision_ineffective',None)
+            self.job['last_assertions']=assertions
             pending_lib=self.job.get('lib_pending')
             self._library_settle(bool(pending_lib) and len(analysis['items'])<int(pending_lib.get('before',0)),'failed')
             self._library_failures(analysis,verified)
@@ -409,6 +420,7 @@ class WorkflowCoordinator:
         # Input size of a fix call: the current bundle plus failure evidence (an estimate for context admission).
         bundle=store.read(store.run(verified)['data']['project_bundle']['approval_ref'])['files']
         need=[bundle,evidence[:20000]]
+        self.job.pop('referee_text',None)
         facts={'verified':verified,'draft':None,'halted':False,'noop':False,'noop_count':0,'diagnosed':False,'diagnosis':None,'analysis':analysis}
 
         def classify(ctx):
@@ -451,6 +463,10 @@ class WorkflowCoordinator:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
                 if diagnosis.get(key):parts.append('【Diagnoser 的诊断】'+diagnosis['rationale']+'\n【Diagnoser 的指导】'+diagnosis[key])
             if facts.get('conductor_brief'):parts.append('【指挥者的指示】'+facts['conductor_brief'])
+            if self.job.get('referee_text'):parts.append(self.job['referee_text'])
+            if self.job.get('revision_ineffective'):
+                parts.append('The previous test revision did NOT change these failing assertions (they still fail with the same message): '+' | '.join(self.job['revision_ineffective'])
+                             +'. Do not make a cosmetic edit again: recompute the expected value from the requirement and the test setup, or conclude that the implementation is wrong.')
             parts.append(self._library_hints(analysis,verified))
             skeptic=facts.get('skeptic')
             if owner=='test' and skeptic and skeptic.get('verdict')=='tests_wrong' and skeptic.get('instructions'):
@@ -722,6 +738,39 @@ class WorkflowCoordinator:
             return choice
         return None
 
+    def _referee(self, verified, analysis, bundle, samples=3):
+        """断言裁判（策略 assertion_referee，默认关闭）：对失败的断言，便宜的云端模型在打乱成 A/B 的两个值里独立选 3 次，多数作为独立证据交给 Diagnoser 和修复指令。
+        每次调用都经过持久角色层（计入预算、可恢复）；任何失败都返回 None，流程照旧。
+        Assertion referee (policy assertion_referee, off by default): for failing assertions a cheap cloud model makes three independent forced choices between the two values shuffled into A/B; the majority becomes
+        independent evidence for the Diagnoser and the fix instructions. Every call goes through the durable role layer; any failure returns None and the flow goes on as before."""
+        if not (self._ladder and self.router.policy.get('assertion_referee')):
+            return None
+        provider=self.router.cheapest('assertion_referee')
+        if provider is None:
+            return None
+        cases=[]
+        for item in analysis['items']:
+            if item['kind']==ownership.ASSERTION and len(cases)<6:
+                case=referee.case_for(len(cases),item,bundle)
+                if case:cases.append(case)
+        if not cases:
+            return None
+        run=self.store.run(verified)
+        approved=self.store.read(self.store.read(run['data']['project_bundle']['approval_ref'])['spec_approval_ref'])
+        context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'cases':[referee.public(c) for c in cases]}
+        drawn=[]
+        for k in range(samples):
+            try:
+                answer=RoleRuntime(self.store).call(verified,provider,'assertion_referee',context,invocation_id='initial' if k==0 else f's{k}',freeze_key='referee_snapshot_ref')
+                drawn.append({a['index']:a['choice'] for a in answer['answers']})
+            except CallCancelled:
+                raise
+            except Exception:
+                drawn.append(None)
+        result=referee.tally(cases,drawn)
+        self.store.event(verified,'assertion_referee',{'cases':len(cases),'verdicts':{str(i):r['verdict'] for i,r in result.items()},'samples':sum(1 for d in drawn if d is not None)})
+        return referee.evidence_text(cases,result) or None
+
     def _skeptic(self, verified, analysis, checks, bundle):
         """测试怀疑者：只读，逐条核对失败断言的期望值。结论由代码按逐条核对结果重新推导（任何一条不一致即 tests_wrong）。
         Test Skeptic: read-only, recomputes the expected value of each failing assertion; the verdict is re-derived by code from its own per-case checks."""
@@ -772,6 +821,10 @@ class WorkflowCoordinator:
         context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'all_files':sorted(bundle),'files':files,
                  'ownership':ownership.describe(analysis),'failure_evidence':evidence,
                  'history':list(self.job.get('fix_log',[])),'noop_streak':int(self.job.get('noop_streak',0))}
+        evidence_text=self._referee(verified,analysis,bundle)
+        if evidence_text:
+            context['independent_evidence']=evidence_text
+            self.job['referee_text']=evidence_text
         provider,decision=self._pick('project_diagnoser','diagnose',need=context,anchor=verified,stage='diagnose')
         self._extend_deadline(verified)
         try:
@@ -870,7 +923,8 @@ class WorkflowCoordinator:
                 plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id,
                                        retry_of=retry_of,retry_feedback=planner_feedback,
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
-                                       audit_provider=audit_provider)
+                                       audit_provider=audit_provider,
+                                       contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

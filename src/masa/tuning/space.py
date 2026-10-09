@@ -34,6 +34,8 @@ SCALARS = {
     'policy.best_of_n': (int, 1, 4),
     'policy.test_audit': (bool, None, None),
     'policy.context_budget': (bool, None, None),
+    'policy.package_contract': (bool, None, None),
+    'policy.assertion_referee': (bool, None, None),
     'policy.library': (int, 0, 2),
 }
 # 可以切换“直接用最高等级”的角色，以及可以调整起始等级的角色。 Roles that can be toggled to start at the top level / given a start level.

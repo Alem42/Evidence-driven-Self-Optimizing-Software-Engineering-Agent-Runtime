@@ -136,6 +136,36 @@
    ]
   },
   {
+   "experiment": "p2eval_large",
+   "title": "p2eval_large",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 1,
+     "passed": 0,
+     "cost": 0.285,
+     "tokens": 117344,
+     "seconds": 102
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_large2",
+   "title": "p2eval_large2",
+   "arms": [
+    {
+     "arm": "full",
+     "label": "full",
+     "runs": 1,
+     "passed": 0,
+     "cost": 0.251,
+     "tokens": 104284,
+     "seconds": 86
+    }
+   ]
+  },
+  {
    "experiment": "p2eval_libtest",
    "title": "p2eval_libtest",
    "arms": [

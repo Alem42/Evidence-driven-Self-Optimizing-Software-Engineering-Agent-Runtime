@@ -319,6 +319,19 @@ class ReadingMainDeveloper(LocalDeveloper):
         return super().respond(context)
 
 
+class GhostImportDeveloper(LocalDeveloper):
+    """第一次的 main.go 导入了规格里不存在的内部包（第一次 10 文件项目的真实问题）；之后写对。 The first main.go imports an internal package the spec lacks (the real problem of the first 10-file run); later answers are right."""
+    def respond(self, context):
+        path = context.get('target_path')
+        if path == 'cmd/app/main.go' and not [c for c in self.contexts if c.get('target_path') == path]:
+            self.contexts.append(copy.deepcopy(context))
+            nl = chr(10)
+            source = 'package main' + nl + nl + 'import (' + nl + chr(9) + '"os"' + nl + nl + chr(9) + '"example.com/task/internal/ghost"' + nl + ')' + nl + nl
+            source += 'func main() { os.Exit(ghost.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }' + nl
+            return validate_response(context, {'files': {path: source}}, '')
+        return super().respond(context)
+
+
 @unittest.skipUnless((GOFMT_HOME / 'gofmt.exe').is_file() or (GOFMT_HOME / 'gofmt').is_file(), 'Go toolchain not installed')
 class SyntaxGateTests(unittest.TestCase):
     approved_parent = LocalGenerationTests.approved_parent
@@ -397,6 +410,21 @@ class SyntaxGateTests(unittest.TestCase):
                 tries = [c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']
                 self.assertEqual(len(tries), 2)
                 self.assertIn('reads or parses input', tries[1]['previous_attempt_error'])
+                self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref'])['cmd/app/main.go'], FILES['cmd/app/main.go'])
+            finally:
+                store.close()
+
+    def test_an_import_of_a_package_the_spec_does_not_have_is_rewritten_in_stage(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                parent = self.approved_parent(store)
+                provider = GhostImportDeveloper()
+                rid = ProjectGeneration(store, SyntaxExecutor()).generate(parent, provider)
+                tries = [c for c in provider.contexts if c.get('target_path') == 'cmd/app/main.go']
+                self.assertEqual(len(tries), 2)
+                self.assertIn('example.com/task/internal/ghost', tries[1]['previous_attempt_error'])
+                self.assertIn('example.com/task/internal/app', tries[1]['previous_attempt_error'])  # 列出真正能导入的包 / lists what can really be imported
                 self.assertEqual(store.read(store.run(rid)['data']['project_plan']['files_ref'])['cmd/app/main.go'], FILES['cmd/app/main.go'])
             finally:
                 store.close()

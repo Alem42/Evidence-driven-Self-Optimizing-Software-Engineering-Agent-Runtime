@@ -27,6 +27,7 @@ PRICES = {'deepseek-v4-pro': (9.0, 27.0), 'deepseek-flash': (1.0, 4.0)}
 ARMS = {'off': {'policy': {}, 'drop_edges': []}, 'on': {'policy': {'conductor': True}, 'drop_edges': []},
         'bon2': {'policy': {'best_of_n': 2}, 'drop_edges': []}, 'bon3': {'policy': {'best_of_n': 3}, 'drop_edges': []},
         'audit': {'policy': {'test_audit': True}, 'drop_edges': []},
+        'full': {'policy': {'test_audit': True, 'package_contract': True, 'assertion_referee': True}, 'drop_edges': []},
         'lib1': {'policy': {'library': 1}, 'drop_edges': []}, 'lib2': {'policy': {'library': 2}, 'drop_edges': []}}
 
 

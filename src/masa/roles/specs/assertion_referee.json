@@ -1,0 +1,55 @@
+{
+  "id": "assertion_referee",
+  "label": "断言裁判",
+  "description": "失败断言的两个候选值（打乱成 A/B）里哪个符合需求；便宜模型多次独立选择取多数（默认关闭）",
+  "order": 131,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "cases"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "assertion_referee.prompt.md",
+  "max_output_tokens": 1500,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "choice"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "choice": {
+              "enum": [
+                "A",
+                "B",
+                "neither"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

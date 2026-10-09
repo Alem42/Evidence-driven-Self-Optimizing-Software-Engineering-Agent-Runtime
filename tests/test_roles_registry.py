@@ -51,7 +51,7 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
         self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'])
         self.assertEqual(current.optional_top_ids(), optional)
         self.assertEqual(current.config_roles(), {'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
-                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'workflow_tuner', 'expectation_deriver', 'expectation_auditor', 'case_deriver', 'case_judge', *optional})
+                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'workflow_tuner', 'expectation_deriver', 'expectation_auditor', 'case_deriver', 'case_judge', 'package_contract', 'assertion_referee', *optional})
         self.assertEqual(routing.DEFAULT_POLICY['prefer_highest_roles'], list(current.top_ids()))
 
     def test_every_registered_role_names_an_existing_validator_and_builder(self):

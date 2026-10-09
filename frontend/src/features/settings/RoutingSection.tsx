@@ -113,6 +113,16 @@ export function RoutingSection() {
           </Field>
         </div>
         {/* 经验库已停用（留出任务上命中 0 次），设置项暂时隐藏；代码保留在 intelligence/library.py。 The experience library is switched off; its setting is hidden for now. */}
+        <h4>多包项目的三个实验开关（默认关闭）</h4>
+        <Notice tone="warn">来自第一次 10 文件项目（bank）的失败分析：跨包契约不一致、测试期望收敛不了。这三项只做了单元测试和 1 次受预算限制的真实运行，还没有配对评测，不要指望它们已经被证明有效。“导入检查”（生成时就地重写导入了规格里不存在的内部包的文件）是确定性的、零 token，已默认开启。</Notice>
+        <div className="grid2">
+          <Field label="包间接口契约（规格里至少 3 个内部包时，写代码前先写结构化契约）">
+            <input type="checkbox" checked={!!draft.policy.package_contract} onChange={(e) => setPolicy({ package_contract: e.target.checked })} />
+          </Field>
+          <Field label="断言裁判（失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为 Diagnoser 的独立证据）">
+            <input type="checkbox" checked={!!draft.policy.assertion_referee} onChange={(e) => setPolicy({ assertion_referee: e.target.checked })} />
+          </Field>
+        </div>
         <h4>规模自适应的分层上下文（实验，默认关闭）</h4>
         <p className="hint">任务小（全部内容放得进窗口的 35%）时原样全给，什么都不改；只有放不下窗口的大项目，才把与当前文件无关的已生成文件降级为“只有声明的轮廓”，同目录文件、测试和 go.mod 永远完整，并把决定写进账本。云端大窗口模型几乎不会触发；对 16k 窗口的本地模型更有意义。</p>
         <div className="grid2">

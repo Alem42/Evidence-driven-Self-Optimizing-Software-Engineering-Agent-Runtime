@@ -12,7 +12,7 @@ src/masa/
   intelligence/      上下文与记忆：索引、修复上下文、记忆、library（经验库最小版）
   application/
     orchestration/   编排：coordinator、flow/workflows（声明式修复子图）、router/routing（预算与路由）、conductor、attempts、context_plan（上下文分层预算，影子模式）
-    checks/          确定性检查与分析（0 token）：ownership、check_policy、testlint、leaks、goimports、entrypoint、snippets、triage、consensus（盲推导表决）、case_audit（Tester 用例审计）
+    checks/          确定性检查与分析（0 token）：ownership、check_policy、testlint、leaks、goimports、entrypoint、snippets、triage、consensus（盲推导表决）、case_audit（Tester 用例审计）、imports（内部包导入检查）、contract（包间契约）、referee（断言裁判）
     review/          评审与变异：semantic/source/test_review、single_file、mutation
     (根)             console（对外的门面）、projects、planning、generation、applications、reports、usage
   bench/             评测：任务（含大项目 tasks_large）、独立判官、运行器、报告

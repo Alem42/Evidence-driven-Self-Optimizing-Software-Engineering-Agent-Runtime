@@ -15,7 +15,7 @@
 [工作台](guides/USER_WORKBENCH.md) · [本地模型](guides/USER_LOCAL_MODELS.md) · [Go 环境](guides/USER_GO_ENVIRONMENT_AND_TESTING.md) · [路由与预算](guides/USER_ROUTING_AND_BUDGET.md) · [评测](guides/USER_BENCHMARK.md) · [**测试可靠性（白话讲解 + 面试说法）**](guides/TEST_RELIABILITY_EXPLAINED.md) · [Docker 部署](guides/DEPLOY_DOCKER.md) · [**MCP 服务**](guides/MCP.md) · [Ollama 控制页](guides/USER_OLLAMA_CONTROLLER.md) · [Runtime 与恢复](guides/USER_LOCAL_RUNTIME_AND_RECOVERY.md)
 
 ## 设计（design/）
-[动态角色（RoleSpec / 指挥者 / 调优器 / MCP）](design/DYNAMIC_ROLES.md) · [上下文工程](design/CONTEXT_ENGINEERING.md) · [10 文件项目实测与优化方向](progress/PROGRESS_2026-10-10_001_large-project.md) · [经验库](design/IDEA_EXPERIENCE_LIBRARY.md) · [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md) · [硬件监控](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md)
+[动态角色（RoleSpec / 指挥者 / 调优器 / MCP）](design/DYNAMIC_ROLES.md) · [上下文工程](design/CONTEXT_ENGINEERING.md) · [10 文件项目实测与优化方向](progress/PROGRESS_2026-10-10_001_large-project.md) · [优化方向的实施](progress/PROGRESS_2026-10-10_002_optimization-directions.md) · [经验库](design/IDEA_EXPERIENCE_LIBRARY.md) · [最小骨架](design/DESIGN_SYSTEM_ARCHITECTURE.md) · [硬件监控](design/DESIGN_OPTIONAL_HARDWARE_MONITOR.md)
 
 ## 参考（reference/，仍有参考价值但不再更新）
 [低质量模型的 16 项主流做法](reference/LOW_MODEL_QUALITY.md) · [多模型 Runtime 原始设计](reference/MULTI_MODEL_RUNTIME_PLAN.md)（§8–§10 的优先级已被 ROADMAP 取代）· [面试技术问答](reference/INTERVIEW_TECHNICAL_QA.md) · [**测试可靠性与任务难度表**](reference/TEST_RELIABILITY.md) · [上下文画像](reference/CONTEXT_PROFILE.md) · [上下文影子重放](reference/CONTEXT_SHADOW.md)

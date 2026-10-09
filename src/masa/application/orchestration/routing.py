@@ -44,6 +44,10 @@ DEFAULT_POLICY = {
     'test_audit': False,
     # 规模自适应的分层上下文（默认关闭）：小任务原样全给；放不下窗口的大任务才把无关文件降级为轮廓。 Scale-adaptive tiered context (off by default): small tasks get everything; only a task that does not fit the window has unrelated files degraded to outlines.
     'context_budget': False,
+    # 多包项目的包间接口契约（默认关闭）：规格里至少 3 个内部包时，写代码之前先写结构化契约，Tester / Developer / Repair 都看到同一份。 Package interface contract (off by default) for projects with three or more internal packages.
+    'package_contract': False,
+    # 断言裁判（默认关闭）：失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为独立证据交给 Diagnoser；并在“测试修订没改动失败断言”时给出明确提示。 Assertion referee (off by default).
+    'assertion_referee': False,
     # 经验库（默认关闭）：0 关 / 1 只记录失败签名与被验证有效的做法 / 2 再把命中的做法注入修复指令。 Experience library (off by default): 0 off / 1 record only / 2 also inject hits into repair instructions.
     'library': 0,
     'transport_retries': 6,
@@ -296,7 +300,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget', 'package_contract', 'assertion_referee'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

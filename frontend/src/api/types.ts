@@ -303,6 +303,8 @@ export interface RoutingPolicy {
   test_audit?: boolean;
   library?: number;
   context_budget?: boolean;
+  package_contract?: boolean;
+  assertion_referee?: boolean;
 }
 
 export interface RouteDecision {

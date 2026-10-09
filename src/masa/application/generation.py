@@ -19,6 +19,8 @@ from masa.application.checks.goimports import fix_imports, fix_module_imports  #
 from masa.application.checks.leaks import leak_messages  # noqa: E402
 from masa.application.checks.testlint import test_problem_messages  # noqa: E402
 from masa.application.checks.entrypoint import entry_problem_messages  # noqa: E402
+from masa.application.checks.imports import unknown_import_messages  # noqa: E402
+from masa.application.checks.contract import contract_problem_messages  # noqa: E402
 
 
 def concise_failure_evidence(result, files=None):
@@ -132,11 +134,14 @@ class ProjectGeneration:
         if leaked:
             raise MasaError('generated Go files contain harness prompt text (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(leaked.items())[:3]))
 
-    def _syntax_errors(self, files, paths):
+    def _syntax_errors(self, files, paths, spec=None, contract=None):
         """用 gofmt -e 做确定性语法检查（不需要编译整个项目），返回 {路径: 带行列号的错误}。工具链缺失时视为无错误。
         Deterministic parse check with `gofmt -e` (no project build needed): {path: error text with line:column}. Missing toolchain = no errors."""
         found = dict(leak_messages(files, paths))  # 提示词泄漏不需要工具链 / prompt leaks need no toolchain
-        for path, message in {**test_problem_messages(files, paths), **entry_problem_messages(files, paths)}.items():  # 空转的测试、读输入的 main.go 同理 / so do vacuous tests and a main.go that reads input
+        # 导入了规格里不存在的内部包：一定编译失败，生成完就地重写。 An import of an internal package the spec does not have can never compile: rewritten right after the write.
+        unknown = unknown_import_messages(files, paths, spec['module'], [i['path'] for i in spec['files']]) if spec else {}
+        for path, message in {**test_problem_messages(files, paths), **entry_problem_messages(files, paths), **unknown,
+                     **(contract_problem_messages(files, paths, contract, [i['path'] for i in spec['files']]) if (spec and contract) else {})}.items():  # 空转的测试、读输入的 main.go 同理 / so do vacuous tests and a main.go that reads input
             found[path] = (found[path] + chr(10) if path in found else '') + message
         go = getattr(self.executor, 'go_executable', None)
         if not go:
@@ -205,7 +210,7 @@ class ProjectGeneration:
             files = self._gofmt(files, list(files), rid)
             # 语法错误的草稿不值得验证：直接让本阶段带精确诊断重试（云端单次生成走协调器的阶段重试/升级）。
             # A draft that does not even parse is not worth verifying: fail the stage with exact diagnostics so it is retried/escalated.
-            broken = self._syntax_errors(files, list(files))
+            broken = self._syntax_errors(files, list(files), approved['spec'], approved.get('contract'))
             if broken:
                 raise MasaError('generated Go files do not parse (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(broken.items())[:3]))
             validate_files(files, approved['spec'])
@@ -257,7 +262,7 @@ class ProjectGeneration:
             # Right after the write, with context still warm: rewrite on a parse error using line:column (free locally, deterministic).
             for retry in range(1, SYNTAX_RETRIES + 1):
                 candidate = self._gofmt({**files, **generated}, [path], rid)
-                broken = self._syntax_errors(candidate, [path])
+                broken = self._syntax_errors(candidate, [path], spec, approved.get('contract'))
                 if not broken:
                     break
                 again = dict(values, previous_attempt_error='The file you just wrote was rejected by deterministic checks (syntax, harness text, or tests that cannot fail). Fix exactly these problems and return the complete file again:' + chr(10) + broken[path])
@@ -486,7 +491,7 @@ class ProjectGeneration:
             raise MasaError('only an interrupted tool state can be re-verified automatically')
         verify_snapshot(Path(data['workspace']), data['snapshot_id'])
         from masa.domain.models import Graph
-        new_id = Runtime(self.store, self.executor).create(Path(data['workspace']), data['goal'], Budget(tool_calls=3, deadline_seconds=1800),
+        new_id = Runtime(self.store, self.executor).create(Path(data['workspace']), data['goal'], Budget(model_calls=12, tool_calls=3, deadline_seconds=1800),
                                                            graph=Graph.from_dict(data['graph']), parent_run_id=interrupted,
                                                            project_bundle=data['project_bundle'])
         if self.store.run(new_id)['data']['snapshot_id'] != data['snapshot_id']:
@@ -534,7 +539,7 @@ class ProjectGeneration:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding='utf-8', newline='\n')
             child = Runtime(self.store,self.executor).create(source,run['data']['goal'],
-                    Budget(tool_calls=3,deadline_seconds=1800),
+                    Budget(model_calls=12,tool_calls=3,deadline_seconds=1800),
                     graph=Runtime.compile_project_checks(spec['spec'],spec['checks']),parent_run_id=rid,
                     project_bundle={'approval_ref':approval_ref})
         return child
