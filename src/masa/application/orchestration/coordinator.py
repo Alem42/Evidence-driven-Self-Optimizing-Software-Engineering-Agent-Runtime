@@ -211,12 +211,17 @@ class WorkflowCoordinator:
     # ───────────── 主流程 / main flow ─────────────
     # ───────────── 经验库（策略 library：0 关 / 1 只记录 / 2 记录并注入）/ experience library (policy `library`: 0 off / 1 record / 2 record and inject) ─────────────
     def _library(self):
-        level=int(self.router.policy.get('library',0)) if self._ladder else 0
-        if level<=0:return None
-        if self._library_handle is None:
-            from masa.intelligence.library import Library, default_path
-            self._library_handle=Library(os.environ.get('MASA_LIBRARY') or default_path(self.store.root))
-        return self._library_handle
+        # 经验库已停用（2026-10-10，用户决定）：留出任务上命中 0 次，先做失败信息结构化再谈。代码保留在 intelligence/library.py，这里的接入点整体失效；
+        # 要重新启用，恢复下面注释掉的实现即可（策略键 library 仍被接受，但目前不起作用）。
+        # The experience library is switched off (2026-10-10, the user's call): 0 hits on held-out tasks; structure the failure information first. The code stays in intelligence/library.py and every hook here is inert;
+        # to re-enable, restore the commented implementation below (the policy key `library` is still accepted but currently does nothing).
+        return None
+        # level=int(self.router.policy.get('library',0)) if self._ladder else 0
+        # if level<=0:return None
+        # if self._library_handle is None:
+        #     from masa.intelligence.library import Library, default_path
+        #     self._library_handle=Library(os.environ.get('MASA_LIBRARY') or default_path(self.store.root))
+        # return self._library_handle
 
     def _library_settle(self, success, status):
         """上一次修复的结果：成功就把“做法”记进库（做法来自账本事实，不是模型的自述）。 Settle the previous fix: on success store the remedy, built from ledger facts, not a model's self-report."""
@@ -273,6 +278,7 @@ class WorkflowCoordinator:
             self._emit('task_budget',self.router.describe())
         planning=ProjectPlanning(store,runner)
         generation=ProjectGeneration(store,runner)
+        generation.context_budget=bool(self._ladder and self.router.policy.get('context_budget'))
         checkpoint=self.job
         # 从某个失败的验证处继续自动修复（用户在自动流程停下之后点“继续自动修复”）：跳过规划与生成，
         # 失败链历史从版本链重建，路由器因此知道之前哪些模型已经试过。

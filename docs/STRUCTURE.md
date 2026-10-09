@@ -15,7 +15,7 @@ src/masa/
     checks/          确定性检查与分析（0 token）：ownership、check_policy、testlint、leaks、goimports、entrypoint、snippets、triage、consensus（盲推导表决）、case_audit（Tester 用例审计）
     review/          评审与变异：semantic/source/test_review、single_file、mutation
     (根)             console（对外的门面）、projects、planning、generation、applications、reports、usage
-  bench/             评测：任务、独立判官、运行器、报告
+  bench/             评测：任务（含大项目 tasks_large）、独立判官、运行器、报告
   tuning/            工作流调优器（数据空间 + 搜索）
   interfaces/        命令行、HTTP 服务（含静态托管与演示模式）、MCP 服务（mcp_server.py，可选依赖）
 scripts/

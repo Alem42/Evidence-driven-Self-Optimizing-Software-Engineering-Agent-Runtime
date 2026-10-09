@@ -302,6 +302,7 @@ export interface RoutingPolicy {
   best_of_n?: number;
   test_audit?: boolean;
   library?: number;
+  context_budget?: boolean;
 }
 
 export interface RouteDecision {

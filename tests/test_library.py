@@ -92,38 +92,25 @@ class LibraryTests(unittest.TestCase):
 
 
 class FlowHookTests(FixFlowCase):
-    def run_with(self, library, path=None):
+    """经验库已停用：无论策略 library 设成多少，流程里都不记录、不注入、不创建文件。 The library is switched off: whatever policy `library` says, the flow records, injects and creates nothing."""
+
+    def run_with(self, library, path):
         world = World()
         local, cloud = Model('small', 'local', world), Model('big', 'cloud', world)
-        env = {'MASA_LIBRARY': str(path)} if path else {}
-        with patch.dict(os.environ, env):
-            store, job = self.run_task(local, cloud, world, policy={'library': library} if library is not None else None)
-        return world, store, job, local
+        with patch.dict(os.environ, {'MASA_LIBRARY': str(path)}):
+            store, job = self.run_task(local, cloud, world, policy={'library': library})
+        return store, job, local
 
-    def test_off_by_default_creates_nothing(self):
+    def test_the_hooks_are_inert_at_every_level(self):
         with tempfile.TemporaryDirectory() as temp:
-            world, store, job, local = self.run_with(None, Path(temp) / 'never.sqlite3')
-            self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded')
-            self.assertFalse((Path(temp) / 'never.sqlite3').exists())
-            self.assertEqual(self.events(store, 'library_hit'), [])
-
-    def test_level_one_records_and_level_two_injects_on_the_next_task(self):
-        with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / 'lib.sqlite3'
-            world, store, job, local = self.run_with(1, path)  # 第一个任务：只记录 / task one: record only
-            self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded')
-            lib = Library(path)
-            stats = lib.stats()
-            lib.close()
-            self.assertGreaterEqual(stats['entries'], 2)  # 实现语法错 + 测试 import cycle / the syntax error and the import cycle
-            self.assertGreaterEqual(stats['with_remedy'], 1)  # 修好之后做法被记下 / remedies stored after the fixes worked
-            self.assertEqual(self.events(store, 'library_hit'), [])  # 级别 1 不注入 / level 1 never injects
-            world, store, job, local = self.run_with(2, path)  # 第二个同类任务：注入 / task two of the same kind: inject
-            self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded', job.get('note'))
-            hits = self.events(store, 'library_hit')
-            self.assertTrue(hits)
-            repair = next(c for c in local.contexts if c['purpose'] == 'project_repair')
-            self.assertIn('经验库', repair['feedback'])
+            for level in (0, 1, 2):
+                path = Path(temp) / f'lib{level}.sqlite3'
+                store, job, local = self.run_with(level, path)
+                self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded')
+                self.assertFalse(path.exists())
+                self.assertEqual(self.events(store, 'library_hit'), [])
+                repair = next(c for c in local.contexts if c['purpose'] == 'project_repair')
+                self.assertNotIn('经验库', repair['feedback'])
 
 
 if __name__ == '__main__':

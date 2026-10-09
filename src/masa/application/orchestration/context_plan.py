@@ -14,13 +14,30 @@ Context budget and tiers (shadow mode first): simple tasks get everything as bef
 这是纯函数：不读账本、不调用模型，所以可以在影子模式里对真实账本重放，量化“如果开启会丢多少、省多少”，而不影响任何现有行为。
 Pure functions: they read no ledger and call no model, so they can be replayed in shadow mode over real ledgers to quantify what would be dropped and saved, without touching any behaviour.
 """
+import re
+
 from masa.domain.tokens import estimate_tokens
 
 TIER_ORDER = ('droppable', 'important', 'must')  # 丢弃的顺序 / the order in which things are given up
 
 
-def item(name, tier, text):
-    return {'name': name, 'tier': tier, 'text': text if isinstance(text, str) else str(text)}
+def item(name, tier, text, outline=None):
+    """outline：可丢项的“轮廓”（只有声明，没有函数体）。可丢项先降级为轮廓，仍放不下才整项丢。 outline: a droppable item's skeleton (declarations without bodies); it degrades to the outline first and is dropped only if that still does not fit."""
+    return {'name': name, 'tier': tier, 'text': text if isinstance(text, str) else str(text), 'outline': outline}
+
+
+_DECLARATION = re.compile(r'^(package|import|func|type|const|var)\b')
+
+
+def outline_go(source):
+    """Go 源码的确定性轮廓：包名、import、顶层声明的**第一行**（函数签名、类型头），去掉函数体。 A deterministic outline of Go source: package, imports and the first line of each top-level declaration; bodies removed."""
+    out, depth = [], 0
+    for line in source.splitlines():
+        if depth == 0 and _DECLARATION.match(line):
+            out.append(line.rstrip().rstrip('{').rstrip())
+        depth += line.count('{') - line.count('}')
+        depth = max(depth, 0)
+    return '\n'.join(out)
 
 
 def scale_of(total_tokens, window, small_share=0.35):
@@ -36,9 +53,9 @@ def plan(items, window, small_share=0.35, large_share=0.5, estimate=estimate_tok
     scale = scale_of(total, window, small_share)
     budget = int(window * large_share)
     keep = {i['name']: None for i in items}
-    dropped, trimmed = [], {}
+    dropped, trimmed, outlined = [], {}, []
     if scale == 'small' or total <= budget:
-        return {'scale': scale, 'budget': budget, 'total': total, 'kept_tokens': total, 'keep': keep, 'dropped': [], 'trimmed': {}, 'over_budget': False}
+        return {'scale': scale, 'budget': budget, 'total': total, 'kept_tokens': total, 'keep': keep, 'dropped': [], 'trimmed': {}, 'outlined': [], 'over_budget': False}
     current = total
     for tier in TIER_ORDER[:2]:
         group = sorted((i for i in items if i['tier'] == tier and i['name'] in keep), key=lambda i: -sizes[i['name']])
@@ -58,7 +75,22 @@ def plan(items, window, small_share=0.35, large_share=0.5, estimate=estimate_tok
                     trimmed[name] = target
                     current -= sizes[name] - target
             else:
+                small = estimate(entry['outline']) if entry.get('outline') else None
+                if small is not None and small < sizes[name]:
+                    current -= sizes[name] - small  # 先降级为轮廓 / degrade to the outline first
+                    keep[name] = 'outline'
+                    outlined.append(name)
+                    sizes[name] = small
+                    continue
                 current -= sizes[name]
                 dropped.append(name)
                 del keep[name]
-    return {'scale': scale, 'budget': budget, 'total': total, 'kept_tokens': current, 'keep': keep, 'dropped': dropped, 'trimmed': trimmed, 'over_budget': current > budget}
+    # 轮廓仍放不下时，再把轮廓也丢掉（大的先丢）。 If the outlines still do not fit, drop them too (largest first).
+    for name in sorted((n for n, v in keep.items() if v == 'outline'), key=lambda n: -sizes[n]):
+        if current <= budget:
+            break
+        current -= sizes[name]
+        dropped.append(name)
+        outlined.remove(name)
+        del keep[name]
+    return {'scale': scale, 'budget': budget, 'total': total, 'kept_tokens': current, 'keep': keep, 'dropped': dropped, 'trimmed': trimmed, 'outlined': outlined, 'over_budget': current > budget}

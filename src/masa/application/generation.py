@@ -60,6 +60,24 @@ class ProjectGeneration:
         """沿用运行账本与审批存储。 Reuse the run ledger and approval artifacts."""
         self.store, self.executor = store, executor
         self.planning = ProjectPlanning(store, executor)
+        self.context_budget = False  # 策略 context_budget 打开时由协调器置位 / set by the coordinator when policy context_budget is on
+
+    def _fit_files(self, provider, rid, files, must, label):
+        """规模自适应的分层上下文：返回 (要给的文件, 只读轮廓)。小任务（全部内容放得进窗口的 35%）原样返回，什么都不改；大任务才把“可丢”的文件降级为轮廓或丢掉，并把决定写进账本。
+        Scale-adaptive tiered context: returns (files to send, read-only outlines). A small task (everything fits in 35% of the window) is returned untouched; only a large one has its droppable files degraded to outlines or dropped, with the decision written to the ledger."""
+        window = int(((getattr(provider, 'config', None) or {}).get('context_limit')) or 0)
+        if not self.context_budget or window <= 0:
+            return files, {}
+        from masa.application.orchestration.context_plan import item, outline_go, plan
+        items = [item(path, 'must' if path in must else 'droppable', text, outline_go(text) if path.endswith('.go') and not path.endswith('_test.go') else None) for path, text in files.items()]  # 其它目录的测试没有轮廓：只有测试函数名，没用，直接丢 / tests elsewhere have no outline: just test names, useless, simply dropped
+        result = plan(items, window)
+        if result['scale'] == 'small':
+            return files, {}
+        kept = {p: t for p, t in files.items() if result['keep'].get(p, 0) is None}
+        outlines = {p: outline_go(files[p]) for p in result['outlined']}
+        self.store.event(rid, 'context_plan', {'where': label, 'window': window, 'total': result['total'], 'kept_tokens': result['kept_tokens'], 'outlined': result['outlined'][:12],
+                                               'dropped': result['dropped'][:12], 'over_budget': result['over_budget']})
+        return kept, outlines
 
     def _gofmt(self, files, paths, rid=None, imports=True):
         """用工具链 gofmt 规范指定的 Go 文件；失败（如语法错误）则保持原样，让真实编译检查暴露问题。
@@ -221,8 +239,14 @@ class ProjectGeneration:
             self.planning.update(rid, metadata, 'created', 'project_file_generation_started')
             if metadata.get('status') in {'cancelled', 'failed'}:
                 raise MasaError(metadata.get('error', 'project generation cancelled'))
+            # 逐文件生成时，已生成的文件会越积越多：规模自适应地把无关文件降级为轮廓（同目录的文件、测试、go.mod 永远完整）。 Already generated files pile up: unrelated ones degrade to outlines (same-directory files, tests and go.mod stay whole).
+            folder = path.rsplit('/', 1)[0] if '/' in path else ''
+            must = {p for p in files if p == 'go.mod' or (p.rsplit('/', 1)[0] if '/' in p else '') == folder}  # 同目录（含它的冻结测试）和 go.mod 完整；其它目录的实现降级为轮廓，其它目录的测试丢掉 / same directory (with its frozen test) and go.mod whole; other directories' implementations become outlines, their tests are dropped
+            shown, outlines = self._fit_files(provider, rid, dict(files), must, 'generation:' + path)
+            # 轮廓放进同一个 previous_files，用注释头标明“只有声明”：提示词不变（逐字节），模型照样只读它。 Outlines go into the same previous_files under a marker comment: the prompt stays byte-identical and the model still only reads them.
+            shown.update({p: '// OUTLINE ONLY: declarations of an already generated file, bodies omitted\n' + text for p, text in outlines.items()})
             values = {'goal': goal, **approved, 'generation_mode': 'files-v1',
-                      'target_path': path, 'previous_files': dict(files)}
+                      'target_path': path, 'previous_files': shown}
             if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
             invocation = 'initial' if ordinal == 0 else f'file:{ordinal + 1}'
             author = test_provider if (test_provider is not None and path.endswith('_test.go')) else provider
@@ -281,9 +305,13 @@ class ProjectGeneration:
             if use_intelligence:
                 from masa.intelligence.repair_context import build_repair_context
                 original_files,context_report=build_repair_context(self.store,self.executor,rid,base['files'],evidence,feedback)
+            failing_text=json.dumps(evidence,ensure_ascii=False)
+            must={p for p in original_files if p.rsplit('/',1)[-1] in failing_text}
+            original_files,outlines=self._fit_files(provider,rid,original_files,must,'repair')
+            extra={'other_files_outline_readonly':outlines} if outlines else {}
             changes=self.planning.call(rid,provider,'project_repair',{
                 'goal':data['goal'],**approved,'original_files':original_files,
-                'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report})
+                'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report,**extra})
             if any(path not in original_files for path in changes):
                 raise MasaError('repair changed a file outside supplied context; request a broader revision')
             self._refuse_leaks(changes,base['files'])

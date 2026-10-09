@@ -42,6 +42,8 @@ DEFAULT_POLICY = {
     'best_of_n': 1,
     # Tester 用例审计（默认关闭）：规划后让便宜的云端模型盲推导用例期望，丢弃多数认为可疑的用例。 Tester case audit (off by default): a cheap cloud model derives expectations blindly; suspect cases are dropped.
     'test_audit': False,
+    # 规模自适应的分层上下文（默认关闭）：小任务原样全给；放不下窗口的大任务才把无关文件降级为轮廓。 Scale-adaptive tiered context (off by default): small tasks get everything; only a task that does not fit the window has unrelated files degraded to outlines.
+    'context_budget': False,
     # 经验库（默认关闭）：0 关 / 1 只记录失败签名与被验证有效的做法 / 2 再把命中的做法注入修复指令。 Experience library (off by default): 0 off / 1 record only / 2 also inject hits into repair instructions.
     'library': 0,
     'transport_retries': 6,
@@ -294,7 +296,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

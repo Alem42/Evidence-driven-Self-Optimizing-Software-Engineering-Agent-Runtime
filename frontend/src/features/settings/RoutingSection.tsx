@@ -112,11 +112,12 @@ export function RoutingSection() {
             <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
           </Field>
         </div>
-        <h4>经验库（实验，默认 0 = 关）</h4>
-        <p className="hint">0 关；1 只记录失败签名和被验证有效的做法；2 再把命中的做法注入修复指令。最小版：真实测试里留出任务上没有产生任何命中，所以目前没有可测的效果；用来积累数据，不要指望它提高通过率。</p>
+        {/* 经验库已停用（留出任务上命中 0 次），设置项暂时隐藏；代码保留在 intelligence/library.py。 The experience library is switched off; its setting is hidden for now. */}
+        <h4>规模自适应的分层上下文（实验，默认关闭）</h4>
+        <p className="hint">任务小（全部内容放得进窗口的 35%）时原样全给，什么都不改；只有放不下窗口的大项目，才把与当前文件无关的已生成文件降级为“只有声明的轮廓”，同目录文件、测试和 go.mod 永远完整，并把决定写进账本。云端大窗口模型几乎不会触发；对 16k 窗口的本地模型更有意义。</p>
         <div className="grid2">
-          <Field label="级别（0–2）">
-            <input type="number" min={0} max={2} value={draft.policy.library ?? 0} onChange={(e) => setPolicy({ library: Number(e.target.value) })} />
+          <Field label="启用分层上下文">
+            <input type="checkbox" checked={!!draft.policy.context_budget} onChange={(e) => setPolicy({ context_budget: e.target.checked })} />
           </Field>
         </div>
         <h4>多次尝试（best-of-N，实验，默认 1 = 关）</h4>
