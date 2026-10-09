@@ -300,6 +300,8 @@ export interface RoutingPolicy {
   conductor_max_calls?: number;
   conductor_cascade?: boolean;
   best_of_n?: number;
+  test_audit?: boolean;
+  library?: number;
 }
 
 export interface RouteDecision {

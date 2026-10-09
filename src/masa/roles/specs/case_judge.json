@@ -1,0 +1,49 @@
+{
+  "id": "case_judge",
+  "label": "期望等价判断者",
+  "description": "判断声明的期望与推导的期望是否描述同一个可观察结果（测试用例审计的一部分，默认关闭）",
+  "order": 123,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "pairs"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "case_judge.prompt.md",
+  "max_output_tokens": 1000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "same"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "same": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

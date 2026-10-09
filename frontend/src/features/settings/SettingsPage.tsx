@@ -8,6 +8,7 @@ import { HarnessSection } from './HarnessSection';
 import { LocalSection } from './LocalSection';
 import { ModelsSection } from './ModelsSection';
 import { OrderSection } from './OrderSection';
+import { ExperimentsSection } from './ExperimentsSection';
 import { RolesSection } from './RolesSection';
 import { RoutingSection } from './RoutingSection';
 
@@ -18,6 +19,7 @@ const SECTIONS = [
   ['local', '本地运行时', 'Ollama 模型、加载与硬件'],
   ['routing', '路由与预算', '默认预算与策略（可编辑）'],
   ['roles', '动态角色', '角色清单、指挥者状态与触发条件'],
+  ['experiments', '实验结果', '不同设置的影响：测试可靠性、A/B、上下文（表与图）'],
   ['bench', '评测', '一键跑固定任务集，看通过率与成本'],
   ['harness', 'Harness', 'Go 工具链、runner、检查策略'],
   ['diagnostics', '诊断', '后台异常记录'],
@@ -64,6 +66,7 @@ export function SettingsPage() {
         {section === 'local' && <LocalSection />}
         {section === 'routing' && <RoutingSection />}
         {section === 'roles' && <RolesSection />}
+        {section === 'experiments' && <ExperimentsSection />}
         {section === 'bench' && <BenchSection />}
         {section === 'harness' && <HarnessSection />}
         {section === 'diagnostics' && <DiagnosticsSection />}

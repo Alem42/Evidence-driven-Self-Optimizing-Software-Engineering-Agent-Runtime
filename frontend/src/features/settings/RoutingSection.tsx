@@ -104,6 +104,21 @@ export function RoutingSection() {
             <input type="number" min={1} max={4} value={draft.policy.planner_retries} onChange={(e) => setPolicy({ planner_retries: Number(e.target.value) })} />
           </Field>
         </div>
+        <h4>Tester 用例审计（实验，默认关闭）</h4>
+        <Notice tone="warn">真实配对评测（3 轮，17 个有效配对）：开启后 5 个更好、0 个更差、12 个持平；通过 16/21 对 11/20，平均费用 −36%。但样本仍小、噪声大，且发现一个共同的假通过（wc）。想试用时再开，细节见“实验结果”页。</Notice>
+        <p className="hint">规划阶段，便宜的云端模型（Flash）只看用例的输入、不看期望，独立推导 3 次，再与 Tester 写的期望比较；多数认为不一致的用例被丢弃（最少保留 3 个）。每个任务约多 6 次廉价调用（≈ ¥0.01）。只在天梯模式且有云端模型时生效。</p>
+        <div className="grid2">
+          <Field label="启用 Tester 用例审计">
+            <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
+          </Field>
+        </div>
+        <h4>经验库（实验，默认 0 = 关）</h4>
+        <p className="hint">0 关；1 只记录失败签名和被验证有效的做法；2 再把命中的做法注入修复指令。最小版：真实测试里留出任务上没有产生任何命中，所以目前没有可测的效果；用来积累数据，不要指望它提高通过率。</p>
+        <div className="grid2">
+          <Field label="级别（0–2）">
+            <input type="number" min={0} max={2} value={draft.policy.library ?? 0} onChange={(e) => setPolicy({ library: Number(e.target.value) })} />
+          </Field>
+        </div>
         <h4>多次尝试（best-of-N，实验，默认 1 = 关）</h4>
         <p className="hint">修复实现失败时，让最便宜的合格模型再生成 N-1 个候选，逐个真实验证，选通过的（或未解决条目最少的）。第一个候选通过就不再多花钱；只对“修复实现”生效，不对修订测试生效。真实评测（6 个任务配对）里通过率没有变化（4/6 对 4/6）、费用约 +15%，额外采样只在 1 个任务里触发且没有改善；主要失败（测试期望算错）不是它能解决的。</p>
         <div className="grid2">

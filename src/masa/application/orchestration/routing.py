@@ -40,6 +40,10 @@ DEFAULT_POLICY = {
     'conductor_cascade': False,
     # 验证选择的多次尝试（默认关闭）：修复阶段每次生成 N 个候选，逐个真实验证，选最好的。1 = 关。 Verification-selected attempts (off by default): N candidates per repair, each really verified, the best wins. 1 = off.
     'best_of_n': 1,
+    # Tester 用例审计（默认关闭）：规划后让便宜的云端模型盲推导用例期望，丢弃多数认为可疑的用例。 Tester case audit (off by default): a cheap cloud model derives expectations blindly; suspect cases are dropped.
+    'test_audit': False,
+    # 经验库（默认关闭）：0 关 / 1 只记录失败签名与被验证有效的做法 / 2 再把命中的做法注入修复指令。 Experience library (off by default): 0 off / 1 record only / 2 also inject hits into repair instructions.
+    'library': 0,
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
@@ -260,7 +264,7 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'best_of_n': (1, 5), 'transport_wait_seconds': (10, 86400)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'best_of_n': (1, 5), 'library': (0, 2), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
 # 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
 # The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.
@@ -290,7 +294,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

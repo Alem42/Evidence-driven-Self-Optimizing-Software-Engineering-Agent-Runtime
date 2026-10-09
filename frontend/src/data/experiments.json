@@ -1,0 +1,853 @@
+{
+ "ab": [
+  {
+   "experiment": "p2eval",
+   "title": "指挥者（动态角色）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 11,
+     "passed": 10,
+     "cost": 0.235,
+     "tokens": 25276,
+     "seconds": 57
+    },
+    {
+     "arm": "on",
+     "label": "开",
+     "runs": 14,
+     "passed": 10,
+     "cost": 0.37,
+     "tokens": 38745,
+     "seconds": 75
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_audit",
+   "title": "Tester 用例审计（第 1 轮）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 7,
+     "passed": 3,
+     "cost": 0.381,
+     "tokens": 38715,
+     "seconds": 92
+    },
+    {
+     "arm": "audit",
+     "label": "开",
+     "runs": 7,
+     "passed": 5,
+     "cost": 0.227,
+     "tokens": 29782,
+     "seconds": 71
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_audit2",
+   "title": "Tester 用例审计（第 2 轮，复测）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 4,
+     "passed": 2,
+     "cost": 0.492,
+     "tokens": 48761,
+     "seconds": 95
+    },
+    {
+     "arm": "audit",
+     "label": "开",
+     "runs": 4,
+     "passed": 3,
+     "cost": 0.246,
+     "tokens": 32354,
+     "seconds": 62
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_audit3",
+   "title": "Tester 用例审计（第 3 轮，全部 L2–L6）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 9,
+     "passed": 6,
+     "cost": 0.414,
+     "tokens": 45986,
+     "seconds": 79
+    },
+    {
+     "arm": "audit",
+     "label": "开",
+     "runs": 10,
+     "passed": 8,
+     "cost": 0.303,
+     "tokens": 37112,
+     "seconds": 80
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_bon",
+   "title": "best-of-N",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 6,
+     "passed": 4,
+     "cost": 0.253,
+     "tokens": 32983,
+     "seconds": 58
+    },
+    {
+     "arm": "bon3",
+     "label": "N=3",
+     "runs": 6,
+     "passed": 4,
+     "cost": 0.29,
+     "tokens": 39058,
+     "seconds": 65
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_final",
+   "title": "默认流程（再验证）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 5,
+     "passed": 3,
+     "cost": 0.23,
+     "tokens": 26095,
+     "seconds": 59
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_libtest",
+   "title": "p2eval_libtest",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 6,
+     "passed": 4,
+     "cost": 0.328,
+     "tokens": 38263,
+     "seconds": 75
+    },
+    {
+     "arm": "lib2",
+     "label": "lib2",
+     "runs": 6,
+     "passed": 3,
+     "cost": 0.216,
+     "tokens": 29006,
+     "seconds": 61
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_libtrain",
+   "title": "p2eval_libtrain",
+   "arms": [
+    {
+     "arm": "lib1",
+     "label": "lib1",
+     "runs": 4,
+     "passed": 3,
+     "cost": 0.222,
+     "tokens": 20222,
+     "seconds": 57
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_switch",
+   "title": "设置开关通路",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 1,
+     "passed": 1,
+     "cost": 0.684,
+     "tokens": 68017,
+     "seconds": 124
+    }
+   ]
+  },
+  {
+   "experiment": "p2eval_audit_all",
+   "title": "Tester 用例审计（三轮合计）",
+   "arms": [
+    {
+     "arm": "off",
+     "label": "关（默认流程）",
+     "runs": 20,
+     "passed": 11,
+     "cost": 0.418,
+     "tokens": 43996,
+     "seconds": 87
+    },
+    {
+     "arm": "audit",
+     "label": "开",
+     "runs": 21,
+     "passed": 16,
+     "cost": 0.267,
+     "tokens": 33762,
+     "seconds": 73
+    }
+   ]
+  }
+ ],
+ "accuracy": [
+  {
+   "method": "Flash 单次",
+   "all": 0.779,
+   "low": 0.963,
+   "mid": 0.793,
+   "high": 0.626
+  },
+  {
+   "method": "Pro 单次",
+   "all": 0.765,
+   "low": 0.938,
+   "mid": 0.78,
+   "high": 0.619
+  },
+  {
+   "method": "Flash 表决 3",
+   "all": 0.916,
+   "low": 1.0,
+   "mid": 0.84,
+   "high": 0.908
+  },
+  {
+   "method": "Flash 表决 5",
+   "all": 0.898,
+   "low": 1.0,
+   "mid": 0.819,
+   "high": 0.877
+  },
+  {
+   "method": "Pro 表决 3",
+   "all": 0.894,
+   "low": 0.971,
+   "mid": 0.84,
+   "high": 0.869
+  }
+ ],
+ "audit": [
+  {
+   "method": "Flash x1",
+   "recall": 0.26,
+   "false_alarm": 0.22,
+   "fixed": 0.2
+  },
+  {
+   "method": "Flash x3 表决",
+   "recall": 0.28,
+   "false_alarm": 0.18,
+   "fixed": 0.22
+  },
+  {
+   "method": "Pro x1",
+   "recall": 0.33,
+   "false_alarm": 0.12,
+   "fixed": 0.25
+  },
+  {
+   "method": "Flash x1 推导对比",
+   "recall": 0.49,
+   "false_alarm": 0.06,
+   "fixed": 0.47
+  },
+  {
+   "method": "Flash x3 推导表决后对比",
+   "recall": 0.53,
+   "false_alarm": 0.01,
+   "fixed": 0.53
+  },
+  {
+   "method": "Pro x1 推导对比",
+   "recall": 0.51,
+   "false_alarm": 0.04,
+   "fixed": 0.43
+  },
+  {
+   "method": "盲推导 Flash x1",
+   "recall": 1.0,
+   "false_alarm": 0.18,
+   "fixed": 0.82
+  },
+  {
+   "method": "盲推导 Flash x3 表决",
+   "recall": 0.91,
+   "false_alarm": 0.08,
+   "fixed": 0.84
+  },
+  {
+   "method": "盲推导 Flash x5 表决",
+   "recall": 0.92,
+   "false_alarm": 0.1,
+   "fixed": 0.83
+  },
+  {
+   "method": "盲推导 Pro x1",
+   "recall": 1.0,
+   "false_alarm": 0.18,
+   "fixed": 0.82
+  },
+  {
+   "method": "盲推导 Pro x3 表决",
+   "recall": 0.88,
+   "false_alarm": 0.09,
+   "fixed": 0.8
+  }
+ ],
+ "case_audit": {
+  "cases": 79,
+  "suspect_original": 5,
+  "corrupted": 78,
+  "caught": 66,
+  "cost": 0.1218
+ },
+ "tasks": [
+  {
+   "task": "hello",
+   "level": 0,
+   "accuracy": 1.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "upper",
+   "level": 1,
+   "accuracy": 1.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "join",
+   "level": 1,
+   "accuracy": 1.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "sum",
+   "level": 2,
+   "accuracy": 1.0,
+   "runs": 2,
+   "passed": 2,
+   "cost": 0.118,
+   "rounds": 1.0
+  },
+  {
+   "task": "fizz",
+   "level": 2,
+   "accuracy": 1.0,
+   "runs": 3,
+   "passed": 3,
+   "cost": 0.075,
+   "rounds": 1.0
+  },
+  {
+   "task": "wc",
+   "level": 3,
+   "accuracy": 0.733,
+   "runs": 9,
+   "passed": 6,
+   "cost": 0.382,
+   "rounds": 2.7
+  },
+  {
+   "task": "wordfreq",
+   "level": 3,
+   "accuracy": 0.833,
+   "runs": 6,
+   "passed": 4,
+   "cost": 0.355,
+   "rounds": 2.3
+  },
+  {
+   "task": "csv_sum",
+   "level": 4,
+   "accuracy": 0.75,
+   "runs": 6,
+   "passed": 6,
+   "cost": 0.256,
+   "rounds": 2.3
+  },
+  {
+   "task": "roman",
+   "level": 4,
+   "accuracy": 1.0,
+   "runs": 5,
+   "passed": 5,
+   "cost": 0.137,
+   "rounds": 1.2
+  },
+  {
+   "task": "lcs",
+   "level": 5,
+   "accuracy": 0.867,
+   "runs": 6,
+   "passed": 1,
+   "cost": 0.57,
+   "rounds": 2.8
+  },
+  {
+   "task": "knap",
+   "level": 5,
+   "accuracy": 0.75,
+   "runs": 6,
+   "passed": 4,
+   "cost": 0.378,
+   "rounds": 2.2
+  },
+  {
+   "task": "lru",
+   "level": 6,
+   "accuracy": 0.444,
+   "runs": 3,
+   "passed": 1,
+   "cost": 0.57,
+   "rounds": 1.7
+  },
+  {
+   "task": "maze",
+   "level": 6,
+   "accuracy": 0.917,
+   "runs": 1,
+   "passed": 0,
+   "cost": 0.361,
+   "rounds": 3.0
+  },
+  {
+   "task": "coins",
+   "level": 6,
+   "accuracy": 0.733,
+   "runs": 2,
+   "passed": 1,
+   "cost": 0.126,
+   "rounds": 0.5
+  },
+  {
+   "task": "calc",
+   "level": 7,
+   "accuracy": 0.667,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "topo",
+   "level": 7,
+   "accuracy": 0.6,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "intervals",
+   "level": 7,
+   "accuracy": 1.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "flat",
+   "level": 7,
+   "accuracy": 1.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "kvtx",
+   "level": 8,
+   "accuracy": 0.0,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "bigint",
+   "level": 8,
+   "accuracy": 0.8,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "sched",
+   "level": 8,
+   "accuracy": 0.667,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "regex",
+   "level": 9,
+   "accuracy": 0.167,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  },
+  {
+   "task": "sudoku",
+   "level": 9,
+   "accuracy": 0.667,
+   "runs": 0,
+   "passed": 0,
+   "cost": null,
+   "rounds": null
+  }
+ ],
+ "context_profile": {
+  "runs": 49,
+  "roles": [
+   {
+    "role": "project_repair",
+    "calls": 61,
+    "mean_tokens": 7351,
+    "max_tokens": 9730,
+    "composition": [
+     {
+      "key": "failure_evidence",
+      "share": 0.432
+     },
+     {
+      "key": "original_files",
+      "share": 0.326
+     },
+     {
+      "key": "checks",
+      "share": 0.103
+     },
+     {
+      "key": "spec",
+      "share": 0.055
+     }
+    ]
+   },
+   {
+    "role": "project_test_revision",
+    "calls": 23,
+    "mean_tokens": 7459,
+    "max_tokens": 10586,
+    "composition": [
+     {
+      "key": "failure_evidence",
+      "share": 0.433
+     },
+     {
+      "key": "original_files",
+      "share": 0.342
+     },
+     {
+      "key": "checks",
+      "share": 0.102
+     },
+     {
+      "key": "spec",
+      "share": 0.051
+     }
+    ]
+   },
+   {
+    "role": "project_developer",
+    "calls": 109,
+    "mean_tokens": 1450,
+    "max_tokens": 2050,
+    "composition": [
+     {
+      "key": "checks",
+      "share": 0.496
+     },
+     {
+      "key": "spec",
+      "share": 0.283
+     },
+     {
+      "key": "graph",
+      "share": 0.12
+     },
+     {
+      "key": "goal",
+      "share": 0.042
+     }
+    ]
+   },
+   {
+    "role": "project_diagnoser",
+    "calls": 43,
+    "mean_tokens": 2805,
+    "max_tokens": 3747,
+    "composition": [
+     {
+      "key": "files",
+      "share": 0.492
+     },
+     {
+      "key": "failure_evidence",
+      "share": 0.365
+     },
+     {
+      "key": "acceptance",
+      "share": 0.061
+     },
+     {
+      "key": "goal",
+      "share": 0.021
+     }
+    ]
+   },
+   {
+    "role": "project_tester",
+    "calls": 56,
+    "mean_tokens": 512,
+    "max_tokens": 885,
+    "composition": [
+     {
+      "key": "spec",
+      "share": 0.792
+     },
+     {
+      "key": "goal",
+      "share": 0.121
+     },
+     {
+      "key": "previous_attempt_error",
+      "share": 0.054
+     },
+     {
+      "key": "purpose",
+      "share": 0.01
+     }
+    ]
+   },
+   {
+    "role": "project_planner",
+    "calls": 48,
+    "mean_tokens": 86,
+    "max_tokens": 115,
+    "composition": [
+     {
+      "key": "goal",
+      "share": 0.731
+     },
+     {
+      "key": "purpose",
+      "share": 0.058
+     },
+     {
+      "key": "clarification_allowed",
+      "share": 0.023
+     },
+     {
+      "key": "previous_attempt_error",
+      "share": 0.007
+     }
+    ]
+   },
+   {
+    "role": "code_reviewer",
+    "calls": 1,
+    "mean_tokens": 894,
+    "max_tokens": 894,
+    "composition": [
+     {
+      "key": "files",
+      "share": 0.777
+     },
+     {
+      "key": "acceptance",
+      "share": 0.13
+     },
+     {
+      "key": "goal",
+      "share": 0.07
+     },
+     {
+      "key": "purpose",
+      "share": 0.004
+     }
+    ]
+   },
+   {
+    "role": "project_conductor",
+    "calls": 1,
+    "mean_tokens": 545,
+    "max_tokens": 545,
+    "composition": [
+     {
+      "key": "briefing",
+      "share": 0.974
+     },
+     {
+      "key": "purpose",
+      "share": 0.011
+     }
+    ]
+   }
+  ],
+  "by_level": [
+   {
+    "level": 2,
+    "project_planner": 88,
+    "project_tester": 488,
+    "project_developer": 1342,
+    "project_repair": null,
+    "project_test_revision": null,
+    "project_diagnoser": null
+   },
+   {
+    "level": 3,
+    "project_planner": 86,
+    "project_tester": 460,
+    "project_developer": 1432,
+    "project_repair": 7294,
+    "project_test_revision": 7367,
+    "project_diagnoser": 2894
+   },
+   {
+    "level": 4,
+    "project_planner": 101,
+    "project_tester": 614,
+    "project_developer": 1569,
+    "project_repair": 7606,
+    "project_test_revision": 7278,
+    "project_diagnoser": 2881
+   },
+   {
+    "level": 5,
+    "project_planner": 67,
+    "project_tester": 466,
+    "project_developer": 1375,
+    "project_repair": 7097,
+    "project_test_revision": 7885,
+    "project_diagnoser": 2609
+   },
+   {
+    "level": 6,
+    "project_planner": 99,
+    "project_tester": 604,
+    "project_developer": 1588,
+    "project_repair": 8044,
+    "project_test_revision": 6816,
+    "project_diagnoser": 2945
+   }
+  ]
+ },
+ "context_shadow": {
+  "calls": 30,
+  "windows": [
+   {
+    "window": 4000,
+    "calls": 30,
+    "large_share": 1.0,
+    "mean_total": 6735,
+    "mean_saved": 2289,
+    "must_items_lost": 0,
+    "over_budget_calls": 30
+   },
+   {
+    "window": 8000,
+    "calls": 30,
+    "large_share": 1.0,
+    "mean_total": 6735,
+    "mean_saved": 2219,
+    "must_items_lost": 0,
+    "over_budget_calls": 27
+   },
+   {
+    "window": 12000,
+    "calls": 30,
+    "large_share": 1.0,
+    "mean_total": 6735,
+    "mean_saved": 852,
+    "must_items_lost": 0,
+    "over_budget_calls": 0
+   },
+   {
+    "window": 16000,
+    "calls": 30,
+    "large_share": 0.967,
+    "mean_total": 6735,
+    "mean_saved": 40,
+    "must_items_lost": 0,
+    "over_budget_calls": 0
+   },
+   {
+    "window": 32000,
+    "calls": 30,
+    "large_share": 0.0,
+    "mean_total": 6735,
+    "mean_saved": 0,
+    "must_items_lost": 0,
+    "over_budget_calls": 0
+   }
+  ],
+  "tokens_per_file": 533,
+  "evidence_tokens": 3122,
+  "projection": [
+   {
+    "files": 4,
+    "without_budget": 5954,
+    "with_budget_for_32k_window": 5954
+   },
+   {
+    "files": 10,
+    "without_budget": 9152,
+    "with_budget_for_32k_window": 9152
+   },
+   {
+    "files": 30,
+    "without_budget": 19812,
+    "with_budget_for_32k_window": 16000
+   },
+   {
+    "files": 100,
+    "without_budget": 57122,
+    "with_budget_for_32k_window": 16000
+   },
+   {
+    "files": 300,
+    "without_budget": 163722,
+    "with_budget_for_32k_window": 16000
+   }
+  ]
+ }
+}

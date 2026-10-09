@@ -1,5 +1,7 @@
 # 当前断点（接续用）
 
+**2026-10-09**：新增并真实评测了 Tester 用例审计（`test_audit`，默认关闭，唯一有正面信号）、经验库最小版（`library`，留出 0 命中）、上下文分层框架（影子模式）、实验结果页、MCP 协议层验证。累计花费约 ¥19.3（用户批准总额 ¥20）。下一步候选：用例审计复测（每组 30+）、失败信息结构化（路径 2）、降本调优（Planner 用 Flash）、大项目评测层级。详见进展 2026-10-09 与 guides/TEST_RELIABILITY_EXPLAINED.md。
+
 **2026-10-07**：分支 `feature/dynamic-roles`。刚完成：结构整理（见 STRUCTURE.md）、MCP 服务（guides/MCP.md）、文档整理（删除过期文档与 2026-10-04 之前的进展，旧内容在 git 历史里）、ROADMAP 增加“当前路线”。待用户决定：经验库是否做最小原型；工具方向（建议先做 best-of-N 与“测试更可靠”，见 ROADMAP 当前路线）；是否拆 `application/console.py`。
 
 **状态速览**

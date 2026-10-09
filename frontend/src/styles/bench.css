@@ -39,3 +39,16 @@
 
 .demo-banner { padding: 6px 14px; background: #fff4d6; color: #5c4400; border-bottom: 1px solid #e8d28c; font-size: 13px; }
 [data-theme="dark"] .demo-banner { background: #3a3012; color: #f0dca0; border-color: #6b5a22; }
+
+/* ───────── 实验结果页的条形图与数字块 / bars and stat tiles on the experiments page ───────── */
+.bars { display: flex; flex-direction: column; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 92px; gap: 10px; align-items: center; font-size: 12.5px; }
+.bar-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { height: 10px; background: var(--sunken); border-radius: 999px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.bar-fill.ok { background: var(--ok); } .bar-fill.bad { background: var(--bad); } .bar-fill.muted { background: var(--faint); }
+.bar-value { font-family: var(--mono); color: var(--muted); text-align: right; } .bar-value small { color: var(--faint); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 2px; }
+.tile strong { font-size: 22px; } .tile span { color: var(--muted); font-size: 12px; }
+.heat { padding: 2px 8px; border-radius: 6px; font-family: var(--mono); }

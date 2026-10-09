@@ -101,6 +101,13 @@ class Router:
         local.sort(key=lambda c: (c.level, c.priority, c.id))
         return self.provider(local[0].id) if local else None
 
+    def cheapest(self, role, model_type='cloud'):
+        """允许该角色的、指定类型里最低等级的候选的提供方；没有就返回 None。用于“便宜的多次调用”类的辅助角色（用例审计）。
+        The provider of the lowest-level candidate of the given type that may serve the role, else None. For cheap repeated helper calls (case audit)."""
+        found = [c for c in self.candidates if c.model_type == model_type and (not c.roles or role in c.roles) and c.id not in self.unavailable]
+        found.sort(key=lambda c: (c.level, c.priority, c.id))
+        return self.provider(found[0].id) if found else None
+
     def release(self, keep=None):
         """释放除 keep 之外所有可能驻留在显存里的本地模型。切换到云端或另一个模型、任务结束、等待人时都要调用：
         不能有空挂的模型。尽力而为，永不抛异常。Unload every local model that may be resident except `keep`: no idle models, ever."""

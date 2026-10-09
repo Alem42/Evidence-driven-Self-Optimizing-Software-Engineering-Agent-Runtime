@@ -9,10 +9,10 @@ src/masa/
   agents/            提示词/校验器/schema 的分发（读 roles），脚本化假模型
   runtime/           账本驱动的执行：engine（Gate）、roles（角色调用）、tools、patches、live
   infrastructure/    外部世界：store、llm/streaming、ollama、runner、settings、hardware、capability…
-  intelligence/      上下文与记忆：索引、修复上下文、记忆
+  intelligence/      上下文与记忆：索引、修复上下文、记忆、library（经验库最小版）
   application/
-    orchestration/   编排：coordinator、flow/workflows（声明式修复子图）、router/routing（预算与路由）、conductor、attempts
-    checks/          确定性检查与分析（0 token）：ownership、check_policy、testlint、leaks、goimports、entrypoint、snippets、triage
+    orchestration/   编排：coordinator、flow/workflows（声明式修复子图）、router/routing（预算与路由）、conductor、attempts、context_plan（上下文分层预算，影子模式）
+    checks/          确定性检查与分析（0 token）：ownership、check_policy、testlint、leaks、goimports、entrypoint、snippets、triage、consensus（盲推导表决）、case_audit（Tester 用例审计）
     review/          评审与变异：semantic/source/test_review、single_file、mutation
     (根)             console（对外的门面）、projects、planning、generation、applications、reports、usage
   bench/             评测：任务、独立判官、运行器、报告

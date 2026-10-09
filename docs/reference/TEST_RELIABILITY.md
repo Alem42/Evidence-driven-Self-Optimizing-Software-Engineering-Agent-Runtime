@@ -94,3 +94,52 @@
 | 盲推导 Flash x5 表决 | 92% (86/93) | 10% (9/93) | 83% |
 | 盲推导 Pro x1 | 100% (93/93) | 18% (17/93) | 82% |
 | 盲推导 Pro x3 表决 | 88% (82/93) | 9% (8/93) | 80% |
+
+## Tester 用例审计的真实可靠性（真实 Tester 用例）
+
+方法：账本里每个任务第一份真实 Tester 计划的 go_test 用例（自由文本期望）。审计 = Flash 盲推导×3（只看输入）+ 等价判断，多数认为不一致即“可疑”。“故意改错”= 把期望文本里的第一个数字加一（只对含数字的用例做）。原样用例里的“可疑”包含 Tester 自己写错的期望，所以是误报的上界。花费约 ¥0.122。
+
+| 任务 | 用例数 | 原样：判可疑 | 原样：弃权 | 改错的用例数 | 抓到 | 改错：弃权 |
+|---|---|---|---|---|---|---|
+| csv_sum | 11 | 1 | 0 | 11 | 7 | 4 |
+| fizz | 9 | 0 | 0 | 9 | 6 | 0 |
+| knap | 12 | 0 | 0 | 12 | 9 | 0 |
+| lcs | 6 | 0 | 0 | 6 | 5 | 0 |
+| roman | 12 | 0 | 0 | 12 | 12 | 0 |
+| sum | 10 | 1 | 0 | 9 | 9 | 0 |
+| wc | 7 | 0 | 0 | 7 | 6 | 0 |
+| wordfreq | 12 | 3 | 0 | 12 | 12 | 0 |
+
+**合计**：被故意改错的期望抓到 85%（66/78），弃权 5%；原样用例判可疑 6%（5/79，含 Tester 自己的真实错误，是误报上界），弃权 0%。
+
+## Tester 用例审计的配对评测（开关 test_audit，3 轮）
+
+同一任务、同一轮里“关”和“开”并排（原始数据 `.masa/p2eval_audit*/summary.json`，生成：`python scripts/eval/pair_table.py p2eval_audit audit`）。通俗讲解见 [TEST_RELIABILITY_EXPLAINED](../guides/TEST_RELIABILITY_EXPLAINED.md)。
+
+| 轮 | 任务 | 关：结果 / ¥ | 开：结果 / ¥ | 谁更好 |
+|---|---|---|---|---|
+| 1 | coins | stopped / 0.07 | stopped / 0.07 | （费用上限截断，不计） |
+| 1 | csv_sum | pass / 0.17 | pass / 0.16 | 平，开更便宜 |
+| 1 | knap | pass / 0.28 | stopped / 0.79 | （费用上限截断，不计） |
+| 1 | lcs | gate_fail / 0.67 | pass / 0.09 | 开更好 |
+| 1 | lru | gate_fail / 0.57 | pass / 0.09 | 开更好 |
+| 1 | wc | pass / 0.41 | pass / 0.06 | 平，开更便宜 |
+| 1 | wordfreq | gate_fail / 0.49 | pass / 0.33 | 开更好 |
+| 2 | csv_sum | pass / 0.52 | pass / 0.22 | 平，开更便宜 |
+| 2 | lcs | stopped / 1.15 | pass / 0.08 | （费用上限截断，不计） |
+| 2 | wc | false_pass / 0.22 | false_pass / 0.60 | 平，关更便宜 |
+| 2 | wordfreq | pass / 0.07 | pass / 0.09 | 平，关更便宜 |
+| 3 | csv_sum | pass / 0.23 | pass / 0.12 | 平，开更便宜 |
+| 3 | fizz | pass / 0.08 | pass / 0.45 | 平，关更便宜 |
+| 3 | knap | gate_fail / 0.44 | pass / 0.24 | 开更好 |
+| 3 | lcs | gate_fail / 0.55 | gate_fail / 0.39 | 平，开更便宜 |
+| 3 | lru | gate_fail / 0.80 | pass / 0.87 | 开更好 |
+| 3 | roman | pass / 0.08 | pass / 0.20 | 平，关更便宜 |
+| 3 | sum | pass / 0.17 | pass / 0.31 | 平，关更便宜 |
+| 3 | wc | pass / 0.73 | pass / 0.09 | 平，开更便宜 |
+| 3 | wordfreq | pass / 0.66 | pass / 0.10 | 平，开更便宜 |
+
+有效配对：audit 更好 5，关更好 0，平 12。
+- off：11/20 通过，平均 ¥0.418/次，平均 43996 云端 token
+- audit：16/21 通过，平均 ¥0.267/次，平均 33762 云端 token
+

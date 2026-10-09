@@ -17,6 +17,9 @@ from masa.application.review.test_review import review_test_plan
 
 
 
+AUDIT_SAMPLES = 3  # 用例审计的样本数；每个样本 2 次调用（推导 + 等价判断），规划 run 的模型调用预算相应增加 / audit samples; each takes 2 calls, and the planning run's call budget grows accordingly
+
+
 class ProjectPlanning:
     def __init__(self, store, executor):
         """复用运行记录和 artifact，不引入新调度器。 Reuse runs and artifacts without a new scheduler."""
@@ -38,7 +41,7 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None):
+                 triage=None, triage_provider=None, audit_provider=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         if resume_id:
@@ -58,7 +61,7 @@ class ProjectPlanning:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
                 for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0), deadline_seconds=86400),
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0), deadline_seconds=86400),
                                                            graph=harness_policy(), project_plan=plan, parent_run_id=reuse or retry_of)
         if on_created:
             on_created(rid)
@@ -109,6 +112,8 @@ class ProjectPlanning:
             if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
             checks = self.call(rid, provider, 'project_tester', tester_values)
             validate_checks(checks,spec,require_coverage=False)
+            if audit_provider is not None:
+                self._audit_cases(rid,audit_provider,goal,spec,checks,plan)
             # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
             plan['test_review']=review_test_plan(spec,checks)
@@ -145,6 +150,37 @@ class ProjectPlanning:
         self.store.event(rid,'triage_blocked',{'rules':[f['rule'] for f in triage['findings'] if f['level']=='infeasible']})
         self.update(rid,plan,'failed','project_triage_blocked')
         return rid
+
+    def _audit_cases(self, rid, provider, goal, spec, checks, plan, samples=None):
+        """Tester 用例审计（策略 test_audit，默认关闭）：便宜的模型只看输入盲推导，再与 Tester 的期望比较，多数认为不一致的用例被丢弃。
+        每次调用都经过持久角色层（计入预算、可恢复），结果写进计划和账本事件。任何失败都保持原用例不变。
+        Tester case audit (policy test_audit, off by default): a cheap model derives blindly from the inputs, the result is compared with the Tester's expectation and cases a majority finds suspect are dropped.
+        Every call goes through the durable role layer (budgeted, recoverable); the outcome is stored in the plan and as a ledger event. Any failure leaves the cases untouched."""
+        from masa.application.checks.case_audit import audit_cases, apply
+        test=next((c for c in checks if c['operation']=='go_test'),None)
+        if test is None or not test.get('cases'):return
+        counter={'case_deriver':0,'case_judge':0}
+        def ask(purpose,values):
+            n=counter[purpose];counter[purpose]+=1
+            return RoleRuntime(self.store).call(rid,provider,purpose,values,invocation_id='initial' if n==0 else f's{n}',freeze_key='audit_snapshot_ref')
+        def derive(views):
+            return {a['index']:a['result'] for a in ask('case_deriver',{'goal':goal,'acceptance':spec['acceptance'],'cases':views})['answers']}
+        def judge(pairs):
+            return {a['index']:a['same'] for a in ask('case_judge',{'pairs':pairs})['answers']}
+        try:
+            status=audit_cases(test['cases'],derive,judge,samples=samples or AUDIT_SAMPLES)
+            kept,dropped=apply(test['cases'],status)
+            if dropped:
+                trial=[dict(c,cases=kept) if c is test else c for c in checks]
+                validate_checks(trial,spec,require_coverage=False)  # 丢弃之后仍须是合法计划 / the plan must stay valid after dropping
+                test['cases']=kept
+        except Exception as exc:  # 审计只是增强：失败不能挡住规划 / the audit is an enhancement: a failure must not block planning
+            plan['case_audit']={'error':str(exc)[:200]}
+            self.store.event(rid,'case_audit_failed',{'error':str(exc)[:200]})
+            return
+        plan['case_audit']={'status':{str(i):s for i,s in status.items()},'dropped':dropped}
+        self.store.event(rid,'case_audit',{'cases':len(status),'dropped':dropped,'suspect':sum(1 for s in status.values() if s=='disagree'),
+                                           'agree':sum(1 for s in status.values() if s=='agree'),'abstain':sum(1 for s in status.values() if s=='abstain')})
 
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""

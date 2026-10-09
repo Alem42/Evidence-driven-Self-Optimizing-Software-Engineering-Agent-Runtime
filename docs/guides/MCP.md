@@ -32,4 +32,5 @@ Claude Desktop（`claude_desktop_config.json`）：
 ## 验证状态
 - 单元测试：输入校验（路径穿越、绝对路径、二进制、超大、非白名单检查）、Gate 裁决、输出截断、临时目录清理、路由预览、报告、花钱工具默认拒绝；用官方 SDK 在进程内列出并调用工具。
 - 真实 runner：用本机的 Go 工具链验证通过与失败两种情况（找到并修复了一个真实缺陷：Windows 上文本模式写文件会把 LF 变成 CRLF，gofmt 因此误判）。
-- **没有验证**：用真实的 MCP 客户端（Claude Desktop/Code）端到端接入；`run_benchmark` 的真实运行。
+- 协议层端到端：`python scripts/smoke/mcp_client_check.py` 用官方 MCP 客户端以子进程启动服务器、握手、列工具并真实调用（通过/失败的验证、路径穿越被拒、路由预览、花钱工具默认被拒），全部符合预期。
+- **没有验证**：用 Claude Desktop / Claude Code 接入；`run_benchmark` 的真实运行。

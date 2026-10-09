@@ -14,6 +14,7 @@ from masa.application.checks.triage import assess
 from masa.runtime.engine import Runtime
 from masa.runtime.roles import RoleRuntime
 from masa.domain.models import CallCancelled, ContextOverflow, MasaError, TransportFailure
+import os
 import time
 
 conductor.check_optional_roles()  # 可选角色的 when 引用的 guard 必须存在 / the guard named by an optional role's `when` must exist
@@ -48,6 +49,7 @@ class WorkflowCoordinator:
         self.resuming=resuming
         self.checkpoint=WorkflowCheckpoint(job)
         self._deferred=[]  # 还没有锚点 run 时先缓存的事件 / events waiting for an anchor run
+        self._library_handle=None
 
     # ───────────── 事件与路由 / events and routing ─────────────
     @property
@@ -207,12 +209,56 @@ class WorkflowCoordinator:
         self.job.update(status='completed',result={'id':run_id},note=str(stop))
 
     # ───────────── 主流程 / main flow ─────────────
+    # ───────────── 经验库（策略 library：0 关 / 1 只记录 / 2 记录并注入）/ experience library (policy `library`: 0 off / 1 record / 2 record and inject) ─────────────
+    def _library(self):
+        level=int(self.router.policy.get('library',0)) if self._ladder else 0
+        if level<=0:return None
+        if self._library_handle is None:
+            from masa.intelligence.library import Library, default_path
+            self._library_handle=Library(os.environ.get('MASA_LIBRARY') or default_path(self.store.root))
+        return self._library_handle
+
+    def _library_settle(self, success, status):
+        """上一次修复的结果：成功就把“做法”记进库（做法来自账本事实，不是模型的自述）。 Settle the previous fix: on success store the remedy, built from ledger facts, not a model's self-report."""
+        library=self._library()
+        pending=self.job.pop('lib_pending',None)
+        if library is None or not pending:return
+        log=(self.job.get('fix_log') or [{}])[-1]
+        remedy=f"{log.get('stage','fix')}: changed {', '.join(log.get('changed') or []) or 'nothing'}"
+        note=self.job.get('lib_note')
+        if note:remedy+=' | '+str(note)[:220]
+        for sig in pending['sigs']:
+            library.record_remedy(sig,remedy,pending.get('run',''),success)
+
+    def _library_failures(self, analysis, verified):
+        library=self._library()
+        if library is None:return
+        sigs=[library.record_failure(f"{i['owner']}:{i['kind']}",i['message']) for i in analysis['items'][:20]]
+        self.job['lib_pending']={'sigs':sigs,'before':len(analysis['items']),'run':verified}
+        self.job.pop('lib_note',None)
+
+    def _library_hints(self, analysis, verified):
+        """级别 2：把命中且有成功记录的做法（至多 2 条）作为一段指导；没有命中就是空串，不增加 token。 Level 2: up to two hits with a success record as guidance; no hit means an empty string and no tokens."""
+        library=self._library()
+        if library is None or int(self.router.policy.get('library',0))<2:return ''
+        lines,seen=[],set()
+        for item in analysis['items']:
+            entry=library.lookup(f"{item['owner']}:{item['kind']}",item['message'])
+            if entry and entry['signature'] not in seen and len(lines)<2:
+                seen.add(entry['signature'])
+                lines.append('- '+entry['remedy'])
+                self.store.event(verified,'library_hit',{'signature':entry['signature'],'hits':entry['hits'],'successes':entry['successes']})
+        return ('【经验库：之前遇到过同类失败，当时这样修好了（仅供参考）】\n'+'\n'.join(lines)) if lines else ''
+
     def run(self):
         """从持久检查点推进流程。无论怎样结束（完成、失败、等待人、被取消），都释放本地模型：不能有空挂的模型。
         Advance the workflow. However it ends, release local models: no idle model may stay in VRAM."""
         try:
             self._run()
         finally:
+            if self._library_handle is not None:
+                try:self._library_handle.close()
+                except Exception:pass
             released=self.router.release()
             if released and self._ladder:
                 try:self._emit('models_released',{'models':released},always=True)
@@ -272,6 +318,7 @@ class WorkflowCoordinator:
                                 note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
                 return
             if result['status']=='succeeded':
+                self._library_settle(True,'succeeded')
                 self._maybe_review(verified)  # 只读建议，永远不影响裁决；策略 conductor 关闭时什么都不做 / advisory only, never affects the verdict; a no-op unless policy `conductor` is on
                 self.job.update(status='completed',result={'id':verified})
                 return
@@ -282,6 +329,9 @@ class WorkflowCoordinator:
                     for t in store.tools(verified) if t['result_ref']]
             analysis=ownership.analyse(checks)
             self._close_attempt(analysis)
+            pending_lib=self.job.get('lib_pending')
+            self._library_settle(bool(pending_lib) and len(analysis['items'])<int(pending_lib.get('before',0)),'failed')
+            self._library_failures(analysis,verified)
             # 上一次由模型产出的修复：只有“它负责的那一类问题还在”才算失败。本地模型修好了实现、剩下的是测试的问题，
             # 这不是它的失败，也不该因此升级。A model-made fix fails only if ITS class of problem is still present:
             # a local model that fixed the implementation must not be escalated because a test defect remains.
@@ -385,6 +435,7 @@ class WorkflowCoordinator:
                 diagnosis=None
                 self._emit('diagnosis_failed',{'error':str(exc)[:200]},verified,always=True)
             self.job['diagnoses']=int(self.job.get('diagnoses',0))+1
+            if diagnosis:self.job['lib_note']=str(diagnosis.get('rationale',''))
             return {'diagnosed':True,'diagnosis':diagnosis,'can_diagnose':False}
 
         def instructions(owner):
@@ -394,6 +445,7 @@ class WorkflowCoordinator:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
                 if diagnosis.get(key):parts.append('【Diagnoser 的诊断】'+diagnosis['rationale']+'\n【Diagnoser 的指导】'+diagnosis[key])
             if facts.get('conductor_brief'):parts.append('【指挥者的指示】'+facts['conductor_brief'])
+            parts.append(self._library_hints(analysis,verified))
             skeptic=facts.get('skeptic')
             if owner=='test' and skeptic and skeptic.get('verdict')=='tests_wrong' and skeptic.get('instructions'):
                 parts.append('【测试怀疑者逐条核对的结论】'+skeptic['instructions'])
@@ -776,6 +828,8 @@ class WorkflowCoordinator:
         # Feasibility triage: deterministic rules are free; a requirement certain to fail is stopped unless the user forces it.
         triage=None
         triage_provider=None
+        # 用例审计（默认关闭）：只在天梯模式且有云端候选时才有审计者。 Case audit (off by default): only in ladder mode with a cloud candidate.
+        audit_provider=self.router.cheapest('case_deriver') if (self._ladder and self.router.policy.get('test_audit')) else None
         if not plan and not self.resuming:
             triage=assess(goal)
             if triage['verdict']=='infeasible' and not self.job['request'].get('force'):
@@ -809,7 +863,8 @@ class WorkflowCoordinator:
                                                  need=goal,stage='planning')
                 plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id,
                                        retry_of=retry_of,retry_feedback=planner_feedback,
-                                       triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None)
+                                       triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
+                                       audit_provider=audit_provider)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

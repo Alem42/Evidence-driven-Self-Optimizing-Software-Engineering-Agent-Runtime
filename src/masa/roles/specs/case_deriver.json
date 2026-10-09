@@ -1,0 +1,52 @@
+{
+  "id": "case_deriver",
+  "label": "用例期望推导者",
+  "description": "只看用例输入、不看期望，独立推导期望结果（测试用例审计的一部分，默认关闭）",
+  "order": 122,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "cases"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "case_deriver.prompt.md",
+  "max_output_tokens": 2000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "result"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "result": {
+              "type": "string",
+              "maxLength": 400
+            }
+          }
+        }
+      }
+    }
+  }
+}
