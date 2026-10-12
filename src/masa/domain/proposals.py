@@ -74,7 +74,8 @@ def validate_checks(checks, spec, require_coverage=True, language=None):
     covered = set()
     for check in checks:
         if not isinstance(check, dict) or not {'operation','purpose','acceptance_indices'} <= set(check) or set(check)-{'operation','purpose','acceptance_indices','cases'}:
-            raise MasaError('invalid check fields')
+            got = sorted(check) if isinstance(check, dict) else type(check).__name__
+            raise MasaError(f'invalid check fields: got {got}; each check needs exactly operation, purpose, acceptance_indices and optionally cases')
         if not isinstance(check['operation'], str) or check['operation'] not in allowed or check['operation'] in operations:
             raise MasaError('unauthorized or duplicate check')
         operations.add(check['operation'])

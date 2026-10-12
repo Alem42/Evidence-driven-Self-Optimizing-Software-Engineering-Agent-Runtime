@@ -107,7 +107,7 @@ export function PlanCard({ detail }: { detail: Detail }) {
           </label>
           <div className="grid2">
             <label className="field">
-              <span className="field-label">Go 模块名</span>
+              <span className="field-label">模块名</span>
               <input value={spec.module} onChange={(e) => update({ module: e.target.value })} />
             </label>
             <div className="field">

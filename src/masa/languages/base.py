@@ -318,6 +318,14 @@ class LanguagePack:
         """(不可行规则, 风险规则) 两个列表；规则引擎在核心。 (infeasible rules, risk rules); the engine lives in the core."""
         return [], []
 
+    def package_of(self, path, spec=None):
+        """这个文件属于哪个“包”（V2 按包分工）：默认是所在目录。 Which package a file belongs to (V2 splits the work by package): the directory by default."""
+        return path.rsplit('/', 1)[0] if '/' in path else ''
+
+    def worker_notes(self):
+        """给 V2 包工人的语言约定（布局、导入、测试写法）。 The language conventions for a V2 package worker (layout, imports, test style)."""
+        return ''
+
     def outline(self, source):
         """签名摘要。 A signature digest."""
         return source

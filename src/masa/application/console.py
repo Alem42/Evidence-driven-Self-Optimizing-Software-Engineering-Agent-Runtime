@@ -594,7 +594,7 @@ class Console:
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':'v2'} if body.get('runtime')=='v2' else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
             from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():

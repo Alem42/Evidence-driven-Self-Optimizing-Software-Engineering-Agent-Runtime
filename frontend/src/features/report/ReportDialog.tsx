@@ -72,7 +72,7 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
 }
 
 const NODE_TEXT: Record<string, string> = {
-  classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: 'gofmt 格式化',
+  classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: '格式化（无模型）',
   repair: '修复实现', conduct: '指挥者选择', skeptic: '测试怀疑者', revise: '修订测试', arbitrate: '测试↔规格仲裁', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
 };
 const OWNER_TEXT: Record<string, string> = { implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' };

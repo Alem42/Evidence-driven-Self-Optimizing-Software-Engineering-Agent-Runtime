@@ -7,6 +7,20 @@ from pathlib import Path
 from masa.domain.models import MasaError
 from masa.domain.proposals import validate_files
 from masa.infrastructure.locking import owner_lock
+from masa.languages.registry import registry
+
+
+def _review_in_process(store, rid, pack, spec, files, input_ref):
+    """没有语法索引能力的语言：语法与静态检查由语言包在进程内完成（不执行项目代码，也不需要运行器）。 A language without the syntax-index capability: its pack does the syntax and static checks in-process (project code is never executed, no runner needed)."""
+    with store.transaction():
+        store._event(rid,'source_review_requested',{'input_ref':input_ref,'request_ref':store.put({'in_process':pack.id})})
+    paths=list(files)
+    findings=[{'path':path,'code':'syntax_error','message':message,'severity':'error'} for path,message in pack.parse_errors(None,files,paths).items()]
+    findings+=[{'path':path,'code':'static_check','message':message,'severity':'warning'} for path,message in pack.static_messages(files,paths,spec).items()]
+    report={'input_ref':input_ref,'result_ref':input_ref,'status':'issues_found' if findings else 'parsed','findings':findings,
+            'scope':f'{pack.title} syntax and static checks; no type checking or execution'}
+    store.event(rid,'source_review_report',{'report_ref':store.put(report),'input_ref':input_ref})
+    return report
 
 
 def review_sources(store, runner, rid, body):
@@ -17,10 +31,13 @@ def review_sources(store, runner, rid, body):
             raise MasaError('source review requires an active unapproved code draft')
         if body.get('files_ref')!=plan.get('files_ref'):raise MasaError('stale code draft')
         spec=store.read(plan['spec_approval_ref'])['spec']
-        files=validate_files(body.get('files'),spec)
+        pack=registry.for_run(run['data'])
+        files=validate_files(body.get('files'),spec,pack.id)
         input_ref=store.put(files)
+        if not pack.supports('index'):
+            return _review_in_process(store,rid,pack,spec,files,input_ref)
         request={'protocol_version':1,'request_id':uuid.uuid4().hex,'snapshot_id':input_ref,
-                 'operation':'go_index','timeout_ms':30000,'max_output_bytes':1048576}
+                 'operation':pack.op_id('index'),'timeout_ms':30000,'max_output_bytes':1048576}
         # 请求意图与预算在解析前提交；此检查与发布后的 Gate 工具账本分开。
         # Commit intent and budget before parsing; published Gate checks remain separate.
         with store.transaction():

@@ -35,8 +35,7 @@
   "go_word": 3
  },
  "application/review/source_review.py": {
-  "go_word": 1,
-  "op_ids": 1
+  "go_word": 1
  },
  "bench/oracle.py": {
   "go_env": 1

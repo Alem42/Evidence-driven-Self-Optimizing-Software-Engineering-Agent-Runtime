@@ -109,6 +109,24 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+# 工人角色每步只执行一个动作：模型按它自己的“原生工具调用”习惯，常在第一个 JSON 之后再追加第二个动作或一段标记（真实运行里 Flash 就是这样）。只对这些角色接受“第一个完整 JSON 对象 + 其后的杂质”，其余角色仍然严格。
+# A worker role executes ONE action per step: following its native tool-calling habit the model often appends a second action or some markup after the first JSON (that is what Flash did in real runs). Only these roles accept
+# "the first complete JSON object followed by trailing junk"; every other role stays strict.
+LENIENT_TRAILING = frozenset({'package_worker'})
+
+
+def decode_action(content, purpose=None):
+    """把模型的回答解码成 JSON 动作；工人角色容忍第一个对象之后的多余内容。 Decode the model's answer into a JSON action; worker roles tolerate junk after the first object."""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        if purpose in LENIENT_TRAILING and exc.msg.startswith('Extra data'):
+            first, _end = json.JSONDecoder().raw_decode(content.lstrip())
+            if isinstance(first, dict):
+                return first
+        raise
+
+
 class ChatProvider:
     def __init__(self, config, key=''):
         """固定本次运行配置，密钥不进入 profile。 Freeze run configuration without exposing credentials."""
@@ -341,13 +359,14 @@ class ChatProvider:
             if not isinstance(content, str):
                 raise MasaError("model content must be text JSON")
             try:
-                action = json.loads(content.replace(self.key, "[REDACTED]") if self.key else content)
+                action = decode_action(content.replace(self.key, "[REDACTED]") if self.key else content, purpose)
             except json.JSONDecodeError as exc:
                 # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
                 # Distinguish a received invalid response from uncertain transport, without exposing content.
                 # 标记“已收到”，协调器才会带原因重试/升级，而不是把它当成网络失败直接中止（真实模拟中 DeepSeek 返回截断 JSON 即因此中止）。
                 # Mark it as RECEIVED so the coordinator retries/escalates instead of aborting as if it were a transport failure.
-                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[]}
+                # sample：出错位置附近的一小段原文（密钥已替换），只进本地账本，方便定位“模型到底写坏了什么”。 A short excerpt around the error (key redacted), stored only in the local ledger, to see what exactly the model broke.
+                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[],'sample':content.replace(self.key,'[REDACTED]')[max(0,exc.pos-160):exc.pos+60] if self.key else content[max(0,exc.pos-160):exc.pos+60]}
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
             # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
             # Record response shape only, never code, thinking or raw exception text.

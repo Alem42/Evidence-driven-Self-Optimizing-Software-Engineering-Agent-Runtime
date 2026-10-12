@@ -44,6 +44,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--name', required=True)
     ap.add_argument('--language', default='go')
+    ap.add_argument('--runtime', default='v1', choices=['v1', 'v2'], help='v2 = 按包推进的工人循环（实验）/ per-package worker loops (experimental)')
     ap.add_argument('--only', required=True, help='逗号分隔的任务 id / comma separated task ids')
     ap.add_argument('--yuan', type=float, default=0.6, help='总费用上限 / total cost cap')
     ap.add_argument('--per-run', type=float, default=0.3, help='单次运行费用上限 / per-run cost cap')
@@ -56,9 +57,9 @@ def main():
     path = folder / 'summary.json'
     summary = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'runs': []}
     spent = round(sum(r['cost'] for r in summary['runs']), 4)
-    done = {(r['task'], r['language'], r.get('round', 1)) for r in summary['runs']}
+    done = {(r['task'], r['language'], r.get('round', 1), r.get('runtime', 'v1')) for r in summary['runs']}
     for task in args.only.split(','):
-        if (task, args.language, args.round) in done:
+        if (task, args.language, args.round, args.runtime) in done:
             continue
         left = args.yuan - spent
         if left < 0.12:
@@ -66,14 +67,14 @@ def main():
             summary['stopped'] = f'budget {spent}/{args.yuan}'
             break
         config = resolve_config({'suite': 'custom', 'task_ids': [task], 'repeats': 1, 'model_ids': ids, 'total_cost': left, 'per_run_cost': min(args.per_run, left),
-                                 'total_minutes': 30, 'total_cloud_tokens': 2_000_000, 'language': args.language})
+                                 'total_minutes': 30, 'total_cloud_tokens': 2_000_000, 'language': args.language, 'runtime': args.runtime})
         config['keep_state'] = True
         runner = BenchRunner(folder, ROOT / '.tools/bin/masa-runner.exe', ROOT / '.tools/go/bin/go.exe', ROOT, config)
-        print(f'[{args.language} / {task}] 开始 …', flush=True)
+        print(f'[{args.language} / {args.runtime} / {task}] 开始 …', flush=True)
         runner.run()
         record = runner.snapshot()['records'][0]
         spent = round(spent + (record.get('cost') or 0), 4)
-        row = {'task': task, 'language': args.language, 'round': args.round, 'level': record['level'], 'status': record['status'], 'cost': record.get('cost') or 0,
+        row = {'task': task, 'language': args.language, 'runtime': args.runtime, 'round': args.round, 'level': record['level'], 'status': record['status'], 'cost': record.get('cost') or 0,
                'cloud_tokens': record['cloud_tokens'], 'seconds': record['seconds'], 'rounds': record['rounds'], 'calls': record['calls'],
                'escalations': record['escalations'], 'mechanisms': record['mechanisms'], 'oracle_reason': record.get('oracle_reason'), 'note': record.get('note'),
                'run_id': record.get('run_id'), 'bench_id': runner.id, 'stop_reason': record.get('stop_reason')}

@@ -1,0 +1,83 @@
+{
+  "id": "package_worker",
+  "label": "包工人",
+  "description": "Runtime V2：负责一个包的自主循环——写实现与测试、跑真实检查、读错误、修改，直到本包通过（实验功能，只在 runtime=v2 时使用）",
+  "order": 120,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": false,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "examples",
+      "own_files",
+      "interfaces",
+      "last_results"
+    ],
+    "writes": "implementation"
+  },
+  "validator": "json_schema",
+  "prompt": "package_worker.prompt.md",
+  "max_output_tokens": 6000,
+  "input": [
+    "goal",
+    "acceptance",
+    "examples",
+    "package",
+    "own_files",
+    "files",
+    "interfaces",
+    "last_results",
+    "notes",
+    "step",
+    "max_steps",
+    "language_notes"
+  ],
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "tool"
+    ],
+    "properties": {
+      "tool": {
+        "enum": [
+          "read_file",
+          "write_file",
+          "edit_file",
+          "run_check",
+          "note",
+          "finish"
+        ]
+      },
+      "path": {
+        "type": "string",
+        "maxLength": 300
+      },
+      "content": {
+        "type": "string",
+        "maxLength": 60000
+      },
+      "old": {
+        "type": "string",
+        "maxLength": 20000
+      },
+      "new": {
+        "type": "string",
+        "maxLength": 20000
+      },
+      "kind": {
+        "enum": [
+          "test",
+          "static"
+        ]
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    }
+  }
+}

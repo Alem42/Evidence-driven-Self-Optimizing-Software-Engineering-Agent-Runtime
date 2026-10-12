@@ -1,3 +1,4 @@
+import { isTestPath } from '../../../entities/languages';
 import { api } from '../../../api/client';
 import type { Detail } from '../../../api/types';
 import { useOpenRun } from '../../../app/nav';
@@ -68,7 +69,7 @@ export function CodeReviewCard({ detail }: { detail: Detail }) {
         <div className="file-chips">
           {names.map((p) => (
             <button key={p} className="chip" onClick={() => open(detail.run.id, { params: { tab: 'code', file: p } })}>
-              {p.endsWith('_test.go') ? '◇ ' : '◻ '}{p}
+              {isTestPath(p) ? '◇ ' : '◻ '}{p}
               {code.changed.has(p) && ' ·改动'}
             </button>
           ))}

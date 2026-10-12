@@ -116,6 +116,15 @@ class ProjectGeneration:
             found[path] = (found[path] + chr(10) if path in found else '') + message
         return found
 
+    workers = False  # Runtime V2 的子类置为 True / the Runtime V2 subclass sets this to True
+
+    def _call_budget(self, approved, local_files):
+        """这次生成 run 的模型调用预算。 The model-call budget of this generation run."""
+        return (len(approved['spec']['files']) - 1) * (1 + SYNTAX_RETRIES) if local_files else 2
+
+    def _generate_workers(self, rid, provider, goal, approved, metadata, retry_feedback=None):
+        raise NotImplementedError('worker generation belongs to Runtime V2 (masa.application.v2)')
+
     def generate(self, parent, provider, on_created=None, resume_id=None, retry_feedback=None, test_provider=None, per_file=False):
         """只根据已批准规格生成独立草稿，不写实现文件。 Generate an independent draft from approved specifications only."""
         self._use(parent)
@@ -145,16 +154,20 @@ class ProjectGeneration:
             # Cloud models generate everything in one call by default (fewer calls); once the output is cut off (a big project over the single-call limit)
             # switch to one file per call so the whole-bundle limit no longer applies (a benchmark L9 task died at generation for exactly this).
             local_files = local_files or bool(per_file)
-            if local_files:
+            if self.workers:  # Runtime V2：按包推进的工人循环（子类提供）/ Runtime V2: per-package worker loops (provided by the subclass)
+                metadata['generation_mode'] = 'workers-v1'
+            elif local_files:
                 metadata['generation_mode'] = 'files-v1'
-            calls = (len(approved['spec']['files']) - 1) * (1 + SYNTAX_RETRIES) if local_files else 2
+            calls = self._call_budget(approved, local_files)
             rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'],
                   Budget(model_calls=calls, tool_calls=3, deadline_seconds=86400), graph=graph,
                   parent_run_id=parent, project_plan=metadata)
         if on_created:
             on_created(rid)
         try:
-            if metadata.get('generation_mode') == 'files-v1':
+            if metadata.get('generation_mode') == 'workers-v1':
+                files = self._generate_workers(rid, provider, original['data']['goal'], approved, metadata, retry_feedback)
+            elif metadata.get('generation_mode') == 'files-v1':
                 files = self._generate_local_files(rid, provider, original['data']['goal'], approved, metadata, retry_feedback, test_provider)
             else:
                 values = {'goal':original['data']['goal'], **approved}

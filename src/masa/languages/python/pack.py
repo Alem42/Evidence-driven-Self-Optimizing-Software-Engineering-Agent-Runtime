@@ -192,6 +192,29 @@ class PythonPack(LanguagePack):
     def samples(self):
         return {'syntax_error': ('a.py', 'def f(:' + chr(10))}
 
+    def package_of(self, path, spec=None):
+        """源码按目录分包；测试文件 tests/test_<name>.py 跟着源码里叫 <name> 的文件（或目录）所在的包，找不到就归入入口所在的包。 Sources are grouped by directory; a test file follows the package of the source file or directory named <name>, else the entry's package."""
+        text = str(path)
+        if not checks.is_test_path(text):
+            return text.rsplit('/', 1)[0] if '/' in text else ''
+        stem = text.rsplit('/', 1)[-1]
+        stem = stem[5:-3] if stem.startswith('test_') and stem.endswith('.py') else stem
+        files = [f['path'] for f in (spec or {}).get('files', [])]
+        for candidate in files:
+            if candidate.endswith('.py') and not checks.is_test_path(candidate) and candidate.rsplit('/', 1)[-1][:-3] == stem and not candidate.endswith('__init__.py'):
+                return candidate.rsplit('/', 1)[0] if '/' in candidate else ''
+        for candidate in files:
+            if not checks.is_test_path(candidate) and candidate.endswith('.py') and stem in candidate.rsplit('/', 1)[0].split('/')[1:]:
+                return candidate.rsplit('/', 1)[0]
+        return (spec or {}).get('module', '')
+
+    def worker_notes(self):
+        return ('Python 3 project (standard library only); pyproject.toml and every __init__.py (empty) are fixed by the harness. <module>/__main__.py is a thin wrapper: import sys; '
+                'from <module>.<package>.<file> import run; sys.exit(run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr)) with the FULL dotted path of the FILE that defines run; never read stdin there. '
+                'Logic lives in <module>/<package>/<file>.py; tests are tests/test_<name>.py using unittest (assertEqual(actual, expected), ACTUAL first), never skipped, never assert True. '
+                'Import project modules with absolute imports (from <module>.<package>.<file> import name); call run(args, io.StringIO(...), out, err) directly in tests. '
+                'If a test starts the program as a process compare decoded text (text=True), never raw bytes (Windows writes CRLF).')
+
     def outline(self, source):
         return checks.outline(source)
 

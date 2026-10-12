@@ -285,7 +285,11 @@ class WorkflowCoordinator:
         if self._ladder and not self.job.get('budget_emitted'):
             self._emit('task_budget',self.router.describe())
         planning=ProjectPlanning(store,runner)
-        generation=ProjectGeneration(store,runner)
+        if self.job['request'].get('runtime')=='v2':  # 实验：按包推进的工人循环（与 V1 并存，默认关闭）/ experimental per-package worker loops (coexists with V1, off by default)
+            from masa.application.v2.workers import V2Generation
+            generation=V2Generation(store,runner)
+        else:
+            generation=ProjectGeneration(store,runner)
         generation.context_budget=bool(self._ladder and self.router.policy.get('context_budget'))
         checkpoint=self.job
         # 从某个失败的验证处继续自动修复（用户在自动流程停下之后点“继续自动修复”）：跳过规划与生成，

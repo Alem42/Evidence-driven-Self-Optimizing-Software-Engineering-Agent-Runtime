@@ -395,7 +395,7 @@ def name_import_problems(files, paths, module):
             if level or not names or name.split('.')[0] != module:
                 continue
             target = _module_file(files, name)
-            if target is None or '*' in names:
+            if target is None or '*' in names or parse(files[target]) is None:  # 目标有语法错误时不谈“没定义”：先修语法 / a target with a syntax error is not judged on missing names: fix the syntax first
                 continue
             declared = declared_names(files[target])
             for item in names:
@@ -407,6 +407,8 @@ def name_import_problems(files, paths, module):
     for path in paths:
         text = files.get(path)
         if not path.endswith('.py') or not isinstance(text, str) or path.endswith('__init__.py'):
+            continue
+        if parse(text) is None:
             continue
         check(path, text, path)  # 它自己的导入 / its own imports
         dotted = path[:-3].replace('/', '.')

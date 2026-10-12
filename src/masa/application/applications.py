@@ -4,6 +4,7 @@ from pathlib import Path
 from masa.domain.models import MasaError
 from masa.infrastructure.workspaces import verify_snapshot
 from masa.infrastructure.locking import owner_lock
+from masa.languages.registry import registry
 
 
 def run_application(store, runner, rid, argv, cancelled):
@@ -17,7 +18,7 @@ def run_application(store, runner, rid, argv, cancelled):
         workspace=Path(data['workspace'])
         verify_snapshot(workspace,data['snapshot_id'])
         request={'protocol_version':1,'request_id':uuid.uuid4().hex,'snapshot_id':data['snapshot_id'],
-                 'operation':'app_run','argv':argv,'timeout_ms':30000,'max_output_bytes':65536}
+                 'operation':registry.for_run(data).op_id('run'),'argv':argv,'timeout_ms':30000,'max_output_bytes':65536}
         store.event(rid,'app_requested',{'request_ref':store.put(request),'request_id':request['request_id']})
         result=runner.execute(request,workspace,cancelled)
         verify_snapshot(workspace,data['snapshot_id'])

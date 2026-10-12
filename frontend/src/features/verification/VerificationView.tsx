@@ -4,7 +4,7 @@ import type { Detail } from '../../api/types';
 import { failureSummary, parseDiagnostics, readableOutput } from '../../entities/text';
 import { Badge, Empty, Spinner } from '../../shared/ui';
 
-const NAMES: Record<string, string> = { go_test: '测试与编译', go_vet: '静态检查', go_fmt_check: '代码格式', go_index: '代码索引' };
+const NAMES: Record<string, string> = { go_test: '测试与编译', go_vet: '静态检查', go_fmt_check: '代码格式', go_index: '代码索引', py_test: '测试', py_static: '静态检查', py_run: '运行程序' };
 
 // 验证标签：真实工具结果；失败线索可点击跳转到代码对应行。
 // Verification tab: real tool results; failure hints jump to the exact source line.
@@ -12,7 +12,7 @@ export function VerificationView({ detail }: { detail: Detail }) {
   const results = useResults(detail.run.data.project_bundle ? detail : undefined);
   const open = useOpenRun();
   if (!detail.run.data.project_bundle)
-    return <Empty title="尚未执行工具检查">规划阶段 Tester 只设计测试用例。完整代码发布后，Executor 才运行 go test、vet 与格式检查。</Empty>;
+    return <Empty title="尚未执行工具检查">规划阶段 Tester 只设计测试用例。完整代码发布后，Executor 才运行该语言的测试、静态检查与格式检查。</Empty>;
   if (results.isLoading) return <div className="center pad"><Spinner /> 读取结果…</div>;
   const checks = results.data?.checks ?? [];
   const finished = checks.filter((c) => c.result);

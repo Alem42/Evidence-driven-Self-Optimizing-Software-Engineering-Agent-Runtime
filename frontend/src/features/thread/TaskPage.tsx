@@ -34,8 +34,9 @@ export function TaskPage() {
   const dd = detail.data;
   const nowLive = Boolean(dd?.active || dd?.role_active);
   useEffect(() => {
-    if (wasLive.current && !nowLive && dd?.run.data.project_bundle && ['succeeded', 'failed'].includes(dd.run.status) && !useUi.getState().reportFor)
-      useUi.getState().set({ reportFor: dd.run.id });
+    const ui = useUi.getState();
+    if (wasLive.current && !nowLive && dd?.run.data.project_bundle && ['succeeded', 'failed'].includes(dd.run.status) && !ui.reportFor && !ui.reportedRuns.includes(dd.run.id))
+      ui.set({ reportFor: dd.run.id, reportedRuns: [...ui.reportedRuns, dd.run.id] });
     wasLive.current = nowLive;
   }, [nowLive, dd?.run.id, dd?.run.status, dd?.run.data.project_bundle]);
 

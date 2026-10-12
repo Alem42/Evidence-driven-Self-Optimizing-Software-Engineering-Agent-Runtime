@@ -22,5 +22,9 @@ describe('languages', () => {
   });
   it('parses Python and Go diagnostics', () => {
     expect(parseDiagnostics('calc/app.py:3:5: SyntaxError: invalid syntax')).toEqual([{ path: 'calc/app.py', line: 3, message: 'SyntaxError: invalid syntax' }]);
+    // Windows 输出以 CRLF 结尾：行尾的  不能让诊断丢失 / CRLF line ends must not make the diagnostics disappear
+    expect(parseDiagnostics('x
+calc/app.py:3:5: SyntaxError: bad
+')).toEqual([{ path: 'calc/app.py', line: 3, message: 'SyntaxError: bad' }]);
   });
 });

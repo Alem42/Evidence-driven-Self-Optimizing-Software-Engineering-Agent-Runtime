@@ -79,7 +79,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       // 只在这个页面会话里发起的任务才自动弹报告：刷新页面后恢复出来的已完成任务不弹（否则一打开页面就被报告盖住）。 Only for tasks started in this page session: a finished task restored after a reload must not cover the page with its report.
       if (hooks && reportRun && job.status !== 'failed' && job.status !== 'interrupted')
         api<TaskReport>('/projects/' + reportRun + '/report')
-          .then((r) => { qc.setQueryData(qk.report(reportRun), r); if (isTerminal(r.outcome)) useUi.getState().set({ reportFor: reportRun }); })
+          .then((r) => { qc.setQueryData(qk.report(reportRun), r); if (isTerminal(r.outcome)) useUi.getState().set({ reportFor: reportRun, reportedRuns: [...useUi.getState().reportedRuns, reportRun] }); })
           .catch(() => undefined);
       const newRun: string | undefined = job.result?.id;
       if (job.status === 'failed') push({ tone: 'bad', text: `${label}失败：${job.error ?? '未知错误'}`, to: job.run_id ? '/task/' + job.run_id : undefined, action: '查看记录' });

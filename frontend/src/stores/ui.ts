@@ -15,6 +15,8 @@ interface UiState {
   follow: boolean;
   /** 正在展示任务报告的版本；不持久化。 Run whose report dialog is open (transient). */
   reportFor: string | null;
+  /** 这个页面会话里已经自动弹过报告的任务：同一个任务不会因为再次“执行中→空闲”（例如运行程序）而重复弹出。 Tasks whose report already popped up in this page session: the same task never pops it again (e.g. after running the program). */
+  reportedRuns: string[];
   /** 本任务参与路由的模型；null = 全部可用。 Models taking part in a ladder task; null = every ready model. */
   selectedModels: string[] | null;
   set: (patch: Partial<Omit<UiState, 'set'>>) => void;
@@ -30,10 +32,11 @@ export const useUi = create<UiState>()(
       graphExpanded: false,
       follow: true,
       reportFor: null,
+      reportedRuns: [],
       selectedModels: null,
       set: (patch) => set(patch),
     }),
-    { name: 'masa.ui.v1', partialize: ({ reportFor: _r, ...rest }) => rest },
+    { name: 'masa.ui.v1', partialize: ({ reportFor: _r, reportedRuns: _d, ...rest }) => rest },
   ),
 );
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { qk } from '../../api/queries';
@@ -19,8 +19,13 @@ export function LanguagesSection() {
   const qc = useQueryClient();
   const data = useQuery({ queryKey: ['languages'] as const, queryFn: () => api<Languages>('/languages'), refetchInterval: 15000 });
   const [draft, setDraft] = useState<Draft | null>(null);
+  // 服务端数据变化（15 秒轮询）时：没有未保存的编辑才整体替换，否则保留用户正在改的内容。 When server data changes (15 s polling): replace the draft only if there are no unsaved edits.
+  const baseline = useRef<string>('');
   useEffect(() => {
-    if (data.data) setDraft(fromServer(data.data));
+    if (!data.data) return;
+    const fresh = fromServer(data.data);
+    setDraft((current) => (current === null || JSON.stringify(current) === baseline.current ? fresh : current));
+    baseline.current = JSON.stringify(fresh);
   }, [data.data]);
   const save = useMutation({
     mutationFn: () => api<Languages>('/languages', { default: draft!.default, packs: draft!.packs, extra_dirs: draft!.extra_dirs.split(String.fromCharCode(10)).map((s) => s.trim()).filter(Boolean) }),
@@ -76,7 +81,11 @@ export function LanguagesSection() {
       <div className="row">
         <Button variant="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : '保存'}</Button>
         {save.isError && <span className="error">{(save.error as Error).message}</span>}
-        {save.isSuccess && !dirty && <span className="muted">已保存；新任务按新配置运行。</span>}
+        {save.isSuccess && !dirty && (
+          <span className="muted">
+            已保存；新任务按新配置运行。{data.data.languages.filter((l) => !l.error && !l.readiness.ok).map((l) => `注意：${l.title} 当前未就绪（${l.readiness.details.join('；')}）。`).join(' ')}
+          </span>
+        )}
       </div>
     </div>
   );

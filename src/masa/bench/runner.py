@@ -65,6 +65,7 @@ def resolve_config(body):
     return {
         **costs,
         **({'language': language} if language else {}),
+        **({'runtime': body['runtime']} if body.get('runtime') in ('v1', 'v2') else {}),
         'suite': suite, 'task_ids': list(dict.fromkeys(task_ids)),
         'repeats': bounded('repeats', preset['repeats'], 1, 10),
         'total_cloud_tokens': bounded('total_cloud_tokens', preset['total_cloud_tokens'], 1_000, 50_000_000),
@@ -285,6 +286,7 @@ class BenchRunner:
         started = self.clock()
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
                 **({'language': self.config['language']} if self.config.get('language') else {}),
+                **({'runtime': self.config['runtime']} if self.config.get('runtime') == 'v2' else {}),
                 'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40,
                            **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
         if self.overrides and self.overrides['policy']:

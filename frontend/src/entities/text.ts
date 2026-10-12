@@ -28,7 +28,7 @@ export function failureSummary(result?: { stdout?: string; stderr?: string } | n
 export function parseDiagnostics(text: string): SourceFinding[] {
   const found: SourceFinding[] = [];
   const re = /^\s*(?:\.\/)?([\w./\\-]+\.(?:go|py)):(\d+)(?::\d+)?:?\s*(.*)$/;
-  for (const line of text.split('\n')) {
+  for (const line of text.split(/\r?\n/)) {  // Windows 的输出以 CRLF 结尾 / Windows output ends lines with CRLF
     const m = re.exec(line);
     if (m) found.push({ path: m[1].replace(/\\/g, '/'), line: Number(m[2]), message: m[3] || '问题' });
   }

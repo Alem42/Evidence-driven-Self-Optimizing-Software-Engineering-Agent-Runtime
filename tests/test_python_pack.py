@@ -299,5 +299,44 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(result['status'], 'failed')
 
 
+@unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
+class ProductSurfaceTests(unittest.TestCase):
+    """用户模拟测试发现的产品面问题：运行程序、源码语法检查要跟着任务的语言走。 Product-surface bugs found by the simulated-user test: running the program and the source review must follow the task's language."""
+
+    def test_running_the_program_and_reviewing_sources_work_for_python(self):
+        from masa.application.applications import run_application
+        from masa.application.review.source_review import review_sources
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            runner = Runner(RUNNER)
+            try:
+                planning = ProjectPlanning(store, runner)
+                parent = planning.generate(FakeModel(), 'sum integers', language='python')
+                meta = store.run(parent)['data']['project_plan']
+                planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': SPEC, 'checks': CHECKS})
+                service = ProjectGeneration(store, runner)
+                draft = service.generate(parent, LocalFake())
+                meta = store.run(draft)['data']['project_plan']
+                files = store.read(meta['files_ref'])
+                report = review_sources(store, runner, draft, {'files_ref': meta['files_ref'], 'files': files})
+                self.assertEqual((report['status'], report['findings']), ('parsed', []))
+                self.assertIn('Python', report['scope'])
+                broken = dict(files, **{'calc/app.py': 'def total(:' + NL})
+                found = review_sources(store, runner, draft, {'files_ref': meta['files_ref'], 'files': broken})
+                self.assertEqual(found['status'], 'issues_found')
+                self.assertEqual((found['findings'][0]['path'], found['findings'][0]['code']), ('calc/app.py', 'syntax_error'))
+                verified = service.approve(draft, {'files_ref': meta['files_ref'], 'files': files})
+                self.assertEqual(Runtime(store, runner).execute(verified)['status'], 'succeeded')
+                ran = run_application(store, runner, verified, [], lambda: False)
+                self.assertEqual((ran['status'], ran['exit_code'], ran['phase']), ('completed', 0, 'run'), ran)
+                self.assertEqual(ran['stdout'].strip(), '0')  # 没有输入，和为 0 / no input, the sum is 0
+            finally:
+                store.close()
+
+    def test_a_malformed_check_plan_is_named_precisely(self):
+        with self.assertRaisesRegex(MasaError, r"invalid check fields: got \['operation', 'purpose'\]"):
+            validate_checks([{'operation': 'py_test', 'purpose': 'x'}], SPEC, language='python')
+
+
 if __name__ == '__main__':
     unittest.main()

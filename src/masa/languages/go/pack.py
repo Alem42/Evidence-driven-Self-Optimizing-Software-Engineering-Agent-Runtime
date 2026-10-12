@@ -142,6 +142,11 @@ class GoPack(LanguagePack):
     def samples(self):
         return {'syntax_error': ('a.go', 'package a' + chr(10) + 'func (' + chr(10))}
 
+    def worker_notes(self):
+        return ('Go project; go.mod is fixed by the harness. cmd/app/main.go is the only package main and a thin wrapper: func main() { os.Exit(<pkg>.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }; '
+                'never read stdin or parse input in main.go. Logic lives in internal/<name>/<name>.go with its tests next to it in <name>_test.go (same package). Use only the standard library; '
+                'import the project own packages with the module path from go.mod. Tests: table-driven, t.Fatalf on a mismatch, never skip; call Run with strings.NewReader and bytes.Buffer. gofmt and imports are fixed automatically.')
+
     def outline(self, source):
         return outline_go(source)
 
