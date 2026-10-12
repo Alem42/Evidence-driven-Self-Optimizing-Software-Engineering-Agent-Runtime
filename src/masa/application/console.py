@@ -11,7 +11,8 @@ import re
 
 from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
-from masa.domain.models import Budget, Graph, MasaError, OPERATIONS
+from masa.domain.models import Budget, Graph, MasaError
+from masa.languages.registry import registry
 from masa.application.reports import render
 from masa.runtime.engine import Runtime
 from masa.infrastructure.settings import Settings
@@ -258,14 +259,15 @@ class Console:
             try:
                 source = body.get("repo", "")
                 goal = body.get("goal", "")
-                operation = body.get("operation", "go_test")
+                language = body.get("language") or registry.default_id()
+                operation = body.get("operation") or registry.get(language).op_id("test")
                 if (
                     not isinstance(source, str)
                     or not source.strip()
                     or not isinstance(goal, str)
                 ):
                     raise MasaError("repository and goal are required")
-                if operation not in OPERATIONS:
+                if operation not in registry.get(language).operation_ids():
                     raise MasaError("unsupported operation")
                 budget = self._budget(body)
                 provider = (
@@ -276,15 +278,16 @@ class Console:
                 runtime = Runtime(
                     store, Runner(self.runner_path, self.go_path), provider
                 )
-                graph = full_verification_policy() if body.get("full_checks") else None
+                graph = full_verification_policy(language) if body.get("full_checks") else None
                 if body.get('role_demo'):
-                    graph = collaboration_policy(operation)
+                    graph = collaboration_policy(operation, language)
                 rid = runtime.create(
                     Path(source),
                     goal,
                     budget,
                     operation,
                     parent_run_id=parent,
+                    language=language,
                     intelligence=body.get("intelligence") is True,
                     graph=graph,
                 )

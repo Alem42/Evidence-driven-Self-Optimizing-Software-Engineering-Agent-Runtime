@@ -9,7 +9,8 @@ import sys
 from masa import __version__
 from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
-from masa.domain.models import Budget, MasaError, OPERATIONS
+from masa.domain.models import Budget, MasaError
+from masa.languages.registry import registry
 from masa.application.reports import render
 from masa.runtime.engine import Runtime
 
@@ -39,7 +40,8 @@ def parser():
     run = sub.add_parser("run")
     run.add_argument("--repo", required=True, type=Path)
     run.add_argument("--goal", default="Verify the selected Go check; do not modify source.")
-    run.add_argument("--operation", choices=sorted(OPERATIONS), default="go_test")
+    run.add_argument("--operation", choices=sorted(registry.all_operation_ids()), default=None)
+    run.add_argument("--language", choices=registry.ids(), default=None, help="language pack (default: the configured default language)")
     run.add_argument("--model-calls", type=int, default=4)
     run.add_argument("--tool-calls", type=int, default=3)
     run.add_argument("--deadline-seconds", type=int, default=300)
@@ -96,7 +98,7 @@ def main(argv=None) -> int:
                 if args.collaboration and args.patch:
                     raise MasaError('read-only role demo cannot apply a patch')
                 run_id = runtime.create(args.repo, args.goal, budget, args.operation, intelligence=args.intelligence,
-                                        graph=collaboration_policy(args.operation) if args.collaboration else None)
+                                        graph=collaboration_policy(args.operation, args.language) if args.collaboration else None, language=args.language)
                 print(f"run_id={run_id}", file=sys.stderr, flush=True)
                 if args.patch:
                     # 补丁先发布新快照，再让验证图执行；用户源仓库不参与写入。

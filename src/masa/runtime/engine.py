@@ -10,6 +10,7 @@ from masa.agents.scripted import ScriptedProvider
 from masa.agents.execution import execute_agent
 from masa.domain.models import Budget, Graph, MasaError, TERMINAL
 from masa.infrastructure.locking import owner_lock
+from masa.languages.registry import DEFAULT_LANGUAGE, registry
 from masa.runtime.patches import Patches
 from masa.runtime.tools import Tools
 from masa.runtime.graph import default_policy, ready_nodes, validate
@@ -26,30 +27,31 @@ class Runtime:
         self.provider = provider or ScriptedProvider()
         self.tools = Tools(store, executor)
 
-    def _profile(self) -> dict:
+    def _profile(self, pack=None) -> dict:
         """绑定工具链与策略身份。 Bind evidence to toolchain and policy identity."""
         # Bind evidence to the exact tool binaries and our fixed execution policy.
         import os
+        pack = pack or registry.get(DEFAULT_LANGUAGE)
         profile = {"platform": os.name, "runner_protocol": 1,
                    "execution_policy": "offline-readonly-mod-v1"}
-        for name in ("executable", "go_executable"):
-            path = getattr(self.executor, name, None)
-            if path:
-                profile[name] = {"path": str(path), "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
-        go_path = getattr(self.executor, "go_executable", None)
-        if go_path:
-            fmt_path = Path(go_path).with_name("gofmt" + Path(go_path).suffix)
-            if not fmt_path.is_file():
-                raise MasaError("gofmt executable missing")
-            profile["gofmt"] = hashlib.sha256(fmt_path.read_bytes()).hexdigest()
+        path = getattr(self.executor, "executable", None)
+        if path:
+            profile["executable"] = {"path": str(path), "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+        # 语言的工具链身份由语言包给出（例如 go 与 gofmt 的路径和哈希，键名与以前相同）。 The language's toolchain identity comes from its pack (e.g. go and gofmt, same keys as before).
+        profile.update(pack.fingerprint(self.executor))
+        if pack.id != DEFAULT_LANGUAGE:
+            profile["language"] = {"id": pack.id, "version": pack.version, "digest": registry.digest(pack.id)}
         return profile
 
-    def create(self, source: Path, goal: str, budget: Budget, operation="go_test", graph=None, parent_run_id=None, intelligence=False, codegen=None, project_plan=None, project_bundle=None, semantic_review=None) -> str:
-        """隔离源仓库并持久化初始图。 Isolate source and persist the initial graph."""
+    def create(self, source: Path, goal: str, budget: Budget, operation=None, graph=None, parent_run_id=None, intelligence=False, codegen=None, project_plan=None, project_bundle=None, semantic_review=None, language=None) -> str:
+        """隔离源仓库并持久化初始图；language 缺省时沿用父运行的语言（再缺省为 go）。 Isolate source and persist the initial graph; language defaults to the parent run's (then to the default)."""
         budget.validate()
+        if language is None and parent_run_id:
+            language = self.store.run(parent_run_id)["data"].get("language")
+        pack = registry.for_run({"language": language})
         if not goal.strip() or len(goal) > 16000:
             raise MasaError("goal must be nonempty and at most 16000 characters")
-        graph = graph or default_policy(operation)
+        graph = graph or default_policy(operation, pack.id)
         validate(graph)
         if any(n.role != 'verifier' for n in graph.nodes) and hasattr(self.provider, 'profile'):
             raise MasaError('role protocol currently supports scripted validation only')
@@ -60,12 +62,14 @@ class Runtime:
                     raise MasaError("pause the original run before revising its request")
             run_id = uuid.uuid4().hex
             workspace = self.store.root / "workspaces" / run_id
-            snapshot_id, files = copy_snapshot(source, workspace)
+            snapshot_id, files = copy_snapshot(source, workspace, pack.root_marker)
             now = time.time()
             data = {"goal": goal, "source": str(source.resolve()), "workspace": str(workspace),
                     "snapshot_id": snapshot_id, "manifest_ref": self.store.put(files),
                     "graph": graph.to_dict(), "budget": asdict(budget), "created_at": now,
-                    "deadline_at": now + budget.deadline_seconds, "profile": self._profile()}
+                    "deadline_at": now + budget.deadline_seconds, "profile": self._profile(pack)}
+            if pack.id != DEFAULT_LANGUAGE:
+                data["language"] = pack.id  # 缺省（旧数据）就是默认语言：默认语言的运行不写这个字段，账本与以前逐字节相同 / absent means the default language, so such runs stay byte-identical
             if intelligence:
                 data['intelligence'] = True
             if codegen is not None:
@@ -89,7 +93,7 @@ class Runtime:
         return run_id
 
     @staticmethod
-    def compile_project_checks(spec, checks):
+    def compile_project_checks(spec, checks, language=None):
         """校验角色计划并生成受限动作图；提案不能提供任意执行图。 Validate role plans and compile an allowlisted action graph."""
         from masa.domain.proposals import validate_spec, validate_checks
         from masa.runtime.graph import validate
@@ -98,7 +102,9 @@ class Runtime:
         validate_checks(checks, spec)
         # 采用已批准的 Agent 检查选择，最终 Gate 始终由 Runtime 添加。
         # Compile approved agent choices; Runtime always adds the independent Gate.
-        names={'go_test':'test','go_vet':'vet','go_fmt_check':'format'}
+        from masa.runtime.graph import CHECK_NODES
+        pack=registry.get(language)
+        names={pack.operations[kind].id:name for name,kind in CHECK_NODES if kind in pack.operations}
         nodes=tuple(Node(names[c['operation']],'tool',operation=c['operation']) for c in checks)
         graph=Graph(nodes+(Node('gate','gate',tuple(n.id for n in nodes),'all_terminal'),),policy_version='agent-check-plan-v1')
         validate(graph)

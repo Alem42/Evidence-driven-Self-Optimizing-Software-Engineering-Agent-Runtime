@@ -1,36 +1,44 @@
 """The scheduler consumes graph data, not a hard-coded role sequence."""
 
-from masa.domain.models import Graph, MasaError, Node, OPERATIONS, TERMINAL
+from masa.domain.models import Graph, MasaError, Node, TERMINAL
+from masa.languages.registry import registry
+
+# 节点名（账本与界面都用它）：测试、静态检查、格式检查。 Node names (used by the ledger and the UI): test, static check, format check.
+CHECK_NODES = (('test', 'test'), ('vet', 'static'), ('format', 'format'))
 
 
-def default_policy(operation: str = "go_test") -> Graph:
+def check_nodes(language=None):
+    """[(节点名, 操作 id)]：语言包里存在的检查，按 测试→静态→格式 的固定顺序。 [(node name, operation id)] for the checks the language has, in a fixed order."""
+    ops = registry.get(language).operations
+    return [(name, ops[kind].id) for name, kind in CHECK_NODES if kind in ops]
+
+
+def default_policy(operation: str | None = None, language=None) -> Graph:
     """构建并校验单检查图。 Build and validate a single-check graph."""
+    operation = operation or registry.get(language).op_id('test')
     graph = Graph((Node("verify", "agent", operation=operation),
                    Node("gate", "gate", ("verify",), "all_terminal")))
     validate(graph)
     return graph
 
 
-def full_verification_policy() -> Graph:
+def _checks_graph(node_type, policy_version, language):
+    nodes = check_nodes(language)
+    graph = Graph(tuple(Node(name, node_type, operation=operation) for name, operation in nodes)
+                  + (Node('gate', 'gate', tuple(name for name, _ in nodes), 'all_terminal'),),
+                  policy_version=policy_version)
+    validate(graph)
+    return graph
+
+
+def full_verification_policy(language=None) -> Graph:
     """集中定义完整验证模板，供任意入口复用。 Centralize the full-check template for all entry points."""
-    graph = Graph((Node('test', 'agent', operation='go_test'),
-                   Node('vet', 'agent', operation='go_vet'),
-                   Node('format', 'agent', operation='go_fmt_check'),
-                   Node('gate', 'gate', ('test', 'vet', 'format'), 'all_terminal')),
-                  policy_version='full-verification-v1')
-    validate(graph)
-    return graph
+    return _checks_graph('agent', 'full-verification-v1', language)
 
 
-def harness_policy() -> Graph:
+def harness_policy(language=None) -> Graph:
     """检查是工具动作，不伪装成决策角色。 Checks are tool actions, not decision-making roles."""
-    graph = Graph((Node('test', 'tool', operation='go_test'),
-                   Node('vet', 'tool', operation='go_vet'),
-                   Node('format', 'tool', operation='go_fmt_check'),
-                   Node('gate', 'gate', ('test', 'vet', 'format'), 'all_terminal')),
-                  policy_version='harness-checks-v1')
-    validate(graph)
-    return graph
+    return _checks_graph('tool', 'harness-checks-v1', language)
 
 
 def validate(graph: Graph) -> None:
@@ -47,7 +55,7 @@ def validate(graph: Graph) -> None:
             raise MasaError('unknown agent role')
         if n.role != 'verifier' and n.type != 'agent':
             raise MasaError('roles require agent nodes')
-        if n.type not in {"agent", "tool", "gate"} or n.operation not in OPERATIONS:
+        if n.type not in {"agent", "tool", "gate"} or n.operation not in registry.all_operation_ids():
             raise MasaError("unknown node type or operation")
         if n.trigger not in {"all_succeeded", "all_terminal"}:
             raise MasaError("unknown dependency trigger")
@@ -80,8 +88,9 @@ def validate(graph: Graph) -> None:
         raise MasaError('a graph must include real tool verification')
 
 
-def collaboration_policy(operation='go_test') -> Graph:
+def collaboration_policy(operation=None, language=None) -> Graph:
     """只读四角色协议演示，Tester 执行真实工具。 Read-only role protocol demo with actual Tester tools."""
+    operation = operation or registry.get(language).op_id('test')
     graph = Graph((Node('planner', 'agent', role='planner'),
                    Node('developer', 'agent', ('planner',), role='developer'),
                    Node('tester', 'agent', ('developer',), operation=operation, role='tester'),

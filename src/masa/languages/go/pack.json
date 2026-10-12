@@ -12,7 +12,9 @@
     "entrypoint": "cmd/app/main.go",
     "min_files": 3,
     "max_files": 20,
-    "template": "go-cli"
+    "template": "go-cli",
+    "module_regex": "[a-z][a-z0-9.-]*(/[a-z][a-z0-9_-]*)+",
+    "subdir_hint": "internal/<name>"
   },
   "operations": {
     "test":   {"id": "go_test",       "label": "go test",     "exe": "toolchain", "args": ["test", "-json", "-count=1", "-timeout={timeout_ms}ms", "./..."]},

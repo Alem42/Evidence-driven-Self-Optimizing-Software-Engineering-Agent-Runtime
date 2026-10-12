@@ -56,7 +56,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_preflight_rejects_third_party_imports_and_mixed_packages(self):
         from masa.domain.models import MasaError
-        from masa.domain.proposals import preflight_go, validate_spec
+        from masa.domain.proposals import validate_spec
+        from masa.languages.go.validation import preflight_go
         ok = {'a/a.go': 'package a\n\nimport (\n\t"fmt"\n\t"example.com/m/b"\n)\n', 'a/a_test.go': 'package a_test\n'}
         preflight_go(ok, 'example.com/m')
         with self.assertRaisesRegex(MasaError, 'third-party'):

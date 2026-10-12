@@ -38,7 +38,7 @@ def manifest(root: Path) -> dict[str, str]:
     return entries
 
 
-def copy_snapshot(source: Path, destination: Path) -> tuple[str, dict[str, str]]:
+def copy_snapshot(source: Path, destination: Path, root_marker: str = "go.mod") -> tuple[str, dict[str, str]]:
     """复制并核对源及副本一致性。 Copy sources and verify both source and copy identities."""
     source = source.absolute()
     if source.is_symlink() or source.is_junction():
@@ -47,8 +47,8 @@ def copy_snapshot(source: Path, destination: Path) -> tuple[str, dict[str, str]]
     if destination.resolve().is_relative_to(source):
         raise MasaError("state directory must be outside the source repository")
     before = manifest(source)
-    if "go.mod" not in before:
-        raise MasaError("P0 requires a Go module root (go.mod)")
+    if root_marker not in before:
+        raise MasaError(f"P0 requires a project root file ({root_marker})")
     destination.mkdir(parents=True, exist_ok=False)
     for relative in before:
         target = destination / relative

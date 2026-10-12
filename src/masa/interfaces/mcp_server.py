@@ -17,7 +17,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from masa.domain.models import Budget, Graph, MasaError, Node, OPERATIONS
+from masa.domain.models import Budget, Graph, MasaError, Node
+from masa.languages.registry import registry
 
 ROOT = Path(__file__).resolve().parents[3]
 MAX_FILES = 64
@@ -25,7 +26,6 @@ MAX_FILE_BYTES = 128 * 1024
 MAX_TOTAL_BYTES = 512 * 1024
 MAX_OUTPUT_CHARS = 4000
 MAX_TIMEOUT_SECONDS = 120
-ALLOWED_NAMES = ('go.mod', 'go.sum')
 RUN_ID = re.compile(r'^[0-9a-f]{32}$')
 
 
@@ -47,9 +47,10 @@ def _clip(text):
     return text if len(text) <= MAX_OUTPUT_CHARS else text[:MAX_OUTPUT_CHARS] + f'\n… [{len(text) - MAX_OUTPUT_CHARS} more characters truncated]'
 
 
-def check_files(files) -> dict:
-    """校验并规范化输入文件：相对路径、只允许 .go 与 go.mod/go.sum、数量与大小有上限。不合法抛 MasaError。
-    Validate input files: relative paths, only .go and go.mod/go.sum, bounded count and size."""
+def check_files(files, language=None) -> dict:
+    """校验并规范化输入文件：相对路径、只允许该语言的源文件与清单文件、数量与大小有上限。不合法抛 MasaError。
+    Validate input files: relative paths, only the language's source and manifest files, bounded count and size."""
+    pack = registry.get(language)
     if not isinstance(files, dict) or not files:
         raise MasaError('files must be a non-empty object {path: content}')
     if len(files) > MAX_FILES:
@@ -61,8 +62,8 @@ def check_files(files) -> dict:
             raise MasaError('paths and contents must be strings')
         parts = path.replace('\\', '/').split('/')
         if (path.startswith(('/', '\\')) or re.match(r'^[A-Za-z]:', path) or '..' in parts or '' in parts or '.' in parts or '\x00' in path
-                or not (path.endswith('.go') or path in ALLOWED_NAMES)):
-            raise MasaError(f'illegal path {path!r}: relative .go files, go.mod or go.sum only')
+                or not (pack.is_code(path) or path in pack.manifest_files)):
+            raise MasaError(f"illegal path {path!r}: relative {' / '.join(pack.source_exts)} files and {', '.join(pack.manifest_files)} only")
         size = len(content.encode('utf-8'))
         if size > MAX_FILE_BYTES or '\x00' in content:
             raise MasaError(f'file {path!r} is too large or binary (max {MAX_FILE_BYTES} bytes)')
@@ -70,30 +71,33 @@ def check_files(files) -> dict:
         out['/'.join(parts)] = content
     if total > MAX_TOTAL_BYTES:
         raise MasaError(f'input too large (max {MAX_TOTAL_BYTES} bytes in total)')
-    if 'go.mod' not in out:
-        raise MasaError('go.mod is required')
+    if pack.root_marker not in out:
+        raise MasaError(f'{pack.root_marker} is required')
     return out
 
 
-def check_operations(checks) -> list:
+def check_operations(checks, language=None) -> list:
+    pack = registry.get(language)
+    allowed = [op.id for kind in ('test', 'static', 'format') if kind in pack.operations for op in [pack.operations[kind]]]
     if checks is None:
-        return ['go_test', 'go_vet', 'go_fmt_check']
-    if not isinstance(checks, list) or not checks or any(c not in OPERATIONS for c in checks):
-        raise MasaError(f'checks must be a non-empty list drawn from {sorted(OPERATIONS)}')
+        return allowed
+    if not isinstance(checks, list) or not checks or any(c not in allowed for c in checks):
+        raise MasaError(f'checks must be a non-empty list drawn from {sorted(allowed)}')
     return list(dict.fromkeys(checks))
 
 
-def verify_project(files: dict, checks: list | None = None, timeout_seconds: int = 60) -> dict:
+def verify_project(files: dict, checks: list | None = None, timeout_seconds: int = 60, language: str | None = None) -> dict:
     """在隔离工作区里运行白名单检查并返回 Gate 的裁决与证据。 Run whitelisted checks in an isolated workspace and return the Gate verdict with evidence."""
-    return _verify(files, checks, timeout_seconds)
+    return _verify(files, checks, timeout_seconds, language=language)
 
 
-def _verify(files, checks, timeout_seconds, executor=None) -> dict:
+def _verify(files, checks, timeout_seconds, executor=None, language=None) -> dict:
     """executor 仅供测试注入，不会暴露为工具参数。 `executor` is injected by tests only and is never a tool parameter."""
     from masa.infrastructure.runner import Runner
     from masa.infrastructure.store import Store
     from masa.runtime.engine import Runtime
-    files, operations = check_files(files), check_operations(checks)
+    language = language or registry.default_id()
+    files, operations = check_files(files, language), check_operations(checks, language)
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise MasaError(f'timeout_seconds must be an integer in 1..{MAX_TIMEOUT_SECONDS}')
     if executor is None:
@@ -113,7 +117,7 @@ def _verify(files, checks, timeout_seconds, executor=None) -> dict:
         try:
             runtime = Runtime(store, executor)
             budget = Budget(model_calls=1, tool_calls=len(operations), deadline_seconds=timeout_seconds + 30, tool_timeout_ms=timeout_seconds * 1000)
-            run_id = runtime.create(source, 'MCP verify_project', budget, graph=graph)
+            run_id = runtime.create(source, 'MCP verify_project', budget, graph=graph, language=language)
             run = runtime.execute(run_id)
             results = []
             for tool in store.tools(run_id):

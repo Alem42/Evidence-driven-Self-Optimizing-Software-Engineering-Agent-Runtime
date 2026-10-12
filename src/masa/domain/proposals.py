@@ -9,18 +9,27 @@ def text(value, limit=2000):
     return value
 
 
-def validate_spec(spec):
-    """校验可移植目录与标准库 CLI 规格，不相信模型输出。 Validate portable standard-library CLI specifications."""
+def _pack(language=None):
+    """当前语言的包；延迟导入，因为语言包反过来依赖本模块的 MasaError。 The current language's pack; imported lazily because packs depend on this layer too."""
+    from masa.languages.registry import registry
+    return registry.for_run({'language': language})
+
+
+def validate_spec(spec, language=None):
+    """校验可移植目录与标准库 CLI 规格，不相信模型输出；语言相关的规则来自语言包。 Validate portable standard-library CLI specifications; language rules come from the pack."""
+    pack = _pack(language)
+    layout = pack.layout
+    entry = pack.entrypoint(spec)
     if not isinstance(spec, dict) or set(spec) != {'summary','module','entrypoint','files','acceptance'}:
         raise MasaError('invalid ProjectSpec fields')
     text(spec['summary'])
-    if not re.fullmatch(r'[a-z][a-z0-9.-]*(/[a-z][a-z0-9_-]*)+', text(spec['module'], 160)):
-        raise MasaError('invalid Go module name')
-    if spec['entrypoint'] != 'cmd/app/main.go':
-        raise MasaError('entrypoint must be cmd/app/main.go')
+    if not re.fullmatch(layout['module_regex'], text(spec['module'], 160)):
+        raise MasaError(f'invalid {pack.title} module name')
+    if spec['entrypoint'] != entry:
+        raise MasaError(f'entrypoint must be {entry}')
     files = spec['files']
-    if not isinstance(files, list) or not 3 <= len(files) <= 20:
-        raise MasaError('project requires 3..20 files')
+    if not isinstance(files, list) or not layout['min_files'] <= len(files) <= layout['max_files']:
+        raise MasaError(f"project requires {layout['min_files']}..{layout['max_files']} files")
     names = set()
     for item in files:
         if not isinstance(item, dict) or set(item) != {'path','purpose'}:
@@ -31,16 +40,16 @@ def validate_spec(spec):
         if (not re.fullmatch(r'[A-Za-z0-9_./-]+', name) or any(
             p in {'', '.', '..'} or p.startswith('.') or p.endswith('.') or
             re.fullmatch(r'(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])', p.split('.')[0]) for p in parts)
-            or name.lower() in names or not (name == 'go.mod' or name.endswith('.go'))):
+            or name.lower() in names or not (name == pack.root_marker or pack.is_code(name))):
             raise MasaError('invalid or duplicate project path')
         names.add(name.lower())
-    # 根目录的 .go 文件会与 cmd/app 的 package main 冲突（"is a program, not an importable package"）。
-    # Root-level .go files collide with the cmd/app package main; code must live in subdirectories.
-    if any('/' not in n and n.endswith('.go') for n in names):
-        raise MasaError('Go files must live in subdirectories such as internal/<name>; only go.mod may be at the module root')
+    # 根目录的源文件会与入口包冲突（Go：“is a program, not an importable package”）；代码必须放在子目录。
+    # Root-level source files collide with the entry package (Go: "is a program, not an importable package"); code must live in subdirectories.
+    if any('/' not in n and pack.is_code(n) for n in names):
+        raise MasaError(f"{pack.title} files must live in subdirectories such as {layout['subdir_hint']}; only {pack.root_marker} may be at the module root")
     exact_names = {f['path'] for f in files}
-    if 'go.mod' not in exact_names or spec['entrypoint'] not in exact_names or not any(n.endswith('_test.go') for n in exact_names):
-        raise MasaError('plan requires go.mod, entrypoint and acceptance tests')
+    if pack.root_marker not in exact_names or spec['entrypoint'] not in exact_names or not any(pack.is_test(n) for n in exact_names):
+        raise MasaError(f'plan requires {pack.root_marker}, entrypoint and acceptance tests')
     if any(any(other.startswith(n + '/') for other in names) for n in names):
         raise MasaError('file/directory path conflict')
     acceptance = spec['acceptance']
@@ -53,16 +62,19 @@ def validate_spec(spec):
     return spec
 
 
-def validate_checks(checks, spec, require_coverage=True):
+def validate_checks(checks, spec, require_coverage=True, language=None):
     """验证 Tester 覆盖验收项；只允许固定工具，不接受命令字符串。 Validate coverage and allowlisted checks, never shell commands."""
     if not isinstance(checks, list) or not 1 <= len(checks) <= 3:
         raise MasaError('Tester must propose 1..3 distinct allowed checks')
+    pack = _pack(language)
+    allowed = pack.operation_ids() & {op.id for kind, op in pack.operations.items() if kind in ('test', 'static', 'format')}
+    test_op = pack.op_id('test')
     operations = set()
     covered = set()
     for check in checks:
         if not isinstance(check, dict) or not {'operation','purpose','acceptance_indices'} <= set(check) or set(check)-{'operation','purpose','acceptance_indices','cases'}:
             raise MasaError('invalid check fields')
-        if not isinstance(check['operation'], str) or check['operation'] not in {'go_test','go_vet','go_fmt_check'} or check['operation'] in operations:
+        if not isinstance(check['operation'], str) or check['operation'] not in allowed or check['operation'] in operations:
             raise MasaError('unauthorized or duplicate check')
         operations.add(check['operation'])
         text(check['purpose'])
@@ -88,8 +100,8 @@ def validate_checks(checks, spec, require_coverage=True):
                     raise MasaError('invalid test case input')
                 if case['level'] not in ('unit','integration','cli'):
                     raise MasaError('invalid test level')
-    if 'go_test' not in operations:
-        raise MasaError('at least one real go_test check is required')
+    if test_op not in operations:
+        raise MasaError(f'at least one real {test_op} check is required')
     missing = sorted(set(range(len(spec['acceptance']))) - covered)
     if missing and require_coverage:
         raise MasaError('check plan is missing acceptance criteria: ' + ', '.join(str(i+1) for i in missing))
@@ -98,58 +110,40 @@ def validate_checks(checks, spec, require_coverage=True):
     return checks
 
 
-def validate_repair(changes, original):
+def validate_repair(changes, original, language=None):
     """修复只改实现，原测试和模块不变。 Repair implementation only; freeze original tests and module."""
+    pack = _pack(language)
     if not isinstance(changes,dict) or not changes:
         raise MasaError('repair must propose at least one implementation file')
     for path,content in changes.items():
-        if path not in original or not path.endswith('.go') or path.endswith('_test.go'):
+        if path not in original or not pack.is_source(path):
             raise MasaError('repair cannot change tests, module or file structure')
         if not isinstance(content,str) or not content.strip() or len(content.encode())>60000 or '\x00' in content:
             raise MasaError('invalid repair file content')
     return {**original,**changes}
 
 
-def validate_test_revision(changes, original):
+def validate_test_revision(changes, original, language=None):
     """只允许在显式测试修订中修改既有测试文件。 Allow only existing test files in an explicit test revision."""
+    pack = _pack(language)
     if not isinstance(changes, dict) or not changes:
         raise MasaError('test revision must change at least one existing test file')
     for path, content in changes.items():
-        if path not in original or not path.endswith('_test.go'):
-            raise MasaError('test revision may only change existing _test.go files')
+        if path not in original or not pack.is_test(path):
+            raise MasaError(f"test revision may only change existing {pack.layout['test_suffixes'][0]} files")
         if not isinstance(content, str) or not content.strip() or len(content.encode()) > 60000 or '\x00' in content:
             raise MasaError('invalid revised test content')
     return {**original, **changes}
 
 
-def _entry_package(source):
-    """跳过 Go 文件头注释，读取包声明；语法仍由 Go 工具验证。 Read the package after header comments; Go tools still validate syntax."""
-    remaining=source.lstrip('\ufeff')
-    def token():
-        nonlocal remaining
-        while True:
-            remaining=remaining.lstrip()
-            if remaining.startswith('//'):
-                _,_,remaining=remaining.partition('\n')
-            elif remaining.startswith('/*'):
-                _,end,remaining=remaining.partition('*/')
-                if not end:return ''
-            else:break
-        match=re.match(r'[A-Za-z_][A-Za-z0-9_]*',remaining)
-        if not match:return ''
-        remaining=remaining[match.end():]
-        return match.group()
-    keyword=token()
-    return token() if keyword=='package' else ''
-
-
-def validate_file_proposal(files, spec, target_path):
-    """逐文件调用只能返回批准的目标 Go 文件。 A file call may return only its approved target Go source."""
-    validate_spec(spec)
+def validate_file_proposal(files, spec, target_path, language=None):
+    """逐文件调用只能返回批准的目标源文件。 A file call may return only its approved target source."""
+    pack = _pack(language)
+    validate_spec(spec, pack.id)
     approved = {item['path'] for item in spec['files']}
     if (not isinstance(target_path, str) or target_path not in approved
-            or not target_path.endswith('.go')):
-        raise MasaError('file generation target must be an approved Go file')
+            or not pack.is_code(target_path)):
+        raise MasaError(f'file generation target must be an approved {pack.title} file')
     if not isinstance(files, dict) or set(files) != {target_path}:
         raise MasaError('file proposal must contain exactly the requested target file')
     content = files[target_path]
@@ -157,45 +151,14 @@ def validate_file_proposal(files, spec, target_path):
         raise MasaError('invalid generated file content')
     if len(content.encode('utf-8')) > 60000:
         raise MasaError('file exceeds 60 KB')
-    if target_path==spec['entrypoint'] and _entry_package(content)!='main':
-        raise MasaError('Go CLI entrypoint must declare package main')
+    pack.validate_file_proposal(files, spec, target_path)
     return files
 
 
-def _imports(source):
-    """提取 import 路径（只用于预检，语法仍由 Go 工具验证）。 Extract import paths for preflight; Go tools still own syntax."""
-    paths = []
-    for block in re.findall(r'(?m)^\s*import\s*\((.*?)\)', source, re.S):
-        paths += re.findall(r'"([^"\n]+)"', block)
-    paths += re.findall(r'(?m)^\s*import\s+(?:[A-Za-z_.][A-Za-z0-9_]*\s+)?"([^"\n]+)"', source)
-    return paths
-
-
-def preflight_go(files, module):
-    """部署前拦截确定性错误：第三方依赖、同目录包名冲突。让模型带着明确原因重试，而不是等编译失败后反复修。
-    Catch deterministic mistakes before verification: third-party imports and mixed packages in one directory."""
-    packages = {}
-    for path, source in files.items():
-        if not path.endswith('.go'):
-            continue
-        for imported in _imports(source):
-            first = imported.split('/')[0]
-            if '.' in first and imported != module and not imported.startswith(module + '/'):
-                raise MasaError(f'{path} imports third-party package "{imported}"; only the Go standard library and this module are allowed')
-        package = _entry_package(source)
-        if package:
-            directory = path.rpartition('/')[0]
-            # 同目录允许 foo 与 foo_test（外部测试包），其余不得混用。 foo and foo_test may share a directory.
-            packages.setdefault(directory, {}).setdefault(package[:-5] if package.endswith('_test') and path.endswith('_test.go') else package, path)
-    for directory, found in packages.items():
-        if len(found) > 1:
-            names = sorted(found)
-            raise MasaError(f'directory "{directory or "."}" mixes packages {names[0]} ({found[names[0]]}) and {names[1]} ({found[names[1]]}); every Go file in a directory must use the same package')
-
-
-def validate_files(files, spec):
+def validate_files(files, spec, language=None):
     """文件集合必须严格匹配批准目录，限制内容与模块声明。 Bind bounded contents to the exact approved file set."""
-    validate_spec(spec)
+    pack = _pack(language)
+    validate_spec(spec, pack.id)
     if not isinstance(files, dict) or set(files) != {f['path'] for f in spec['files']}:
         raise MasaError('files must exactly match the approved project structure')
     total = 0
@@ -208,13 +171,8 @@ def validate_files(files, spec):
         total += size
     if total > 300000:
         raise MasaError('project exceeds 300 KB')
-    if _entry_package(files[spec['entrypoint']])!='main':
-        raise MasaError('Go CLI entrypoint must declare package main')
-    if files['go.mod'].strip() != f"module {spec['module']}\n\ngo 1.27.0":
-        raise MasaError('go.mod must use the approved module and Go 1.27.0 without dependencies')
-    preflight_go(files, spec['module'])
+    pack.validate_bundle(files, spec)
     return files
-
 
 
 def validate_triage(action):
