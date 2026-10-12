@@ -62,7 +62,7 @@ GO = 'package app\n\nimport "strings"\n\n// Doc.\nfunc Add(a, b int) int {\n\tif
 
 class OutlineTests(unittest.TestCase):
     def test_outline_keeps_declarations_and_drops_bodies(self):
-        from masa.application.orchestration.context_plan import outline_go
+        from masa.languages.go.outline import outline_go
         outline = outline_go(GO)
         for line in ('package app', 'import "strings"', 'func Add(a, b int) int', 'type Store struct', 'func (s *Store) Put(k string)', 'var _ = strings.ToUpper'):
             self.assertIn(line, outline)
@@ -71,7 +71,7 @@ class OutlineTests(unittest.TestCase):
         self.assertLess(len(outline), len(GO))
 
     def test_droppable_degrades_to_an_outline_before_being_dropped(self):
-        from masa.application.orchestration.context_plan import outline_go
+        from masa.languages.go.outline import outline_go
         body = GO + ('// filler\n' * 400)
         items = [item('must.go', 'must', words(3000)), item('big.go', 'droppable', words(3000) + body, outline_go(body)), item('other.go', 'droppable', words(2500))]
         result = plan(items, WINDOW)

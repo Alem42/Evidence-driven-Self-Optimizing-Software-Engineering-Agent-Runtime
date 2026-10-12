@@ -41,6 +41,11 @@ class RoleRuntime:
         if 'purpose' in values:
             raise MasaError('role values cannot override purpose')
         context = {'purpose': purpose, **values}
+        # 非默认语言的运行把语言写进每次角色调用的上下文：提示词与校验据此选语言包；默认语言的上下文保持原样（逐字节相同）。
+        # A run in a non-default language puts it into every role context so prompts and validators pick the pack; default-language contexts stay byte-identical.
+        language = self.store.run(rid)['data'].get('language')
+        if language and 'language' not in values:
+            context['language'] = language
         context_ref = self.store.put(context)
         route_ref = self.store.put(provider.profile)
         with owner_lock(self.store.root/'role-locks'/f'{rid}.lock'):

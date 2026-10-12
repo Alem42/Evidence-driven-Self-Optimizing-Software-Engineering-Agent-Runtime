@@ -14,7 +14,8 @@
     "max_files": 20,
     "template": "go-cli",
     "module_regex": "[a-z][a-z0-9.-]*(/[a-z][a-z0-9_-]*)+",
-    "subdir_hint": "internal/<name>"
+    "subdir_hint": "internal/<name>",
+    "export_regex": "^[A-Z][A-Za-z0-9_]*$"
   },
   "operations": {
     "test":   {"id": "go_test",       "label": "go test",     "exe": "toolchain", "args": ["test", "-json", "-count=1", "-timeout={timeout_ms}ms", "./..."]},

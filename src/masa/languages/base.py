@@ -188,20 +188,37 @@ class LanguagePack:
         """整包的语言规则。 Language rules for the whole bundle."""
 
     # ---------- 确定性检查 / deterministic checks ----------
-    def normalize(self, files, paths, executor=None, rid=None, store=None):
-        """无模型的规范化（格式、导入）。返回新的 files。 Model-free normalisation; returns the new files."""
-        return files
+    def normalize(self, executor, files, paths, imports=True):
+        """无模型的规范化（格式、导入）。返回 (新的 files, {路径: 导入改动})。 Model-free normalisation; returns (files, {path: import changes})."""
+        return files, {}
 
-    def quick_checks(self, files, paths, spec=None, contract=None, executor=None):
-        """{路径: 给模型的重写说明}：语法、泄漏、未知内部导入、入口规则、空转测试、契约。 {path: rewrite instruction}."""
+    def static_messages(self, files, paths, spec=None):
+        """不需要工具链的就地检查（空转测试、入口规则、未知内部导入…）：{路径: 给模型的重写说明}。 Toolchain-free in-stage checks: {path: rewrite instruction}."""
+        return {}
+
+    def parse_errors(self, executor, files, paths):
+        """语法检查：{路径: 带行列号的错误}。工具链缺失视为无错误。 Parse check: {path: error with line:column}; a missing toolchain means no errors."""
         return {}
 
     def entry_problems(self, files, paths=None):
+        """入口规则：{路径: 说明}。 The entrypoint rule: {path: explanation}."""
         return {}
 
-    def contract_exports(self, source):
-        """源码里声明了哪些导出名（契约检查用）。 Exported names the source declares (for the contract check)."""
-        return set()
+    def declares(self, source, name):
+        """包的源码里是否声明了这个导出名（契约检查用）。 Does the package source declare this exported name (contract check)?"""
+        return True
+
+    def format_text(self, executor, text):
+        """格式化一段源码；做不到返回 None。 Format one source text, or None."""
+        return None
+
+    def failure_markers(self):
+        """失败证据里值得保留的诊断行的正则（字符串）。 Regex (string) of diagnostic lines worth keeping in failure evidence."""
+        return r'(?i)(?:FAIL|error|exit code)'
+
+    def output_lines(self, text):
+        """把一次检查的 stdout 拆成逻辑行（有的工具输出是 JSON 帧）。 Split a check's stdout into logical lines (some tools emit JSON frames)."""
+        yield from str(text or '').splitlines()
 
     # ---------- 失败解析 / failure parsing ----------
     def analyse_failures(self, checks):
@@ -231,6 +248,11 @@ class LanguagePack:
     def outline(self, source):
         """签名摘要。 A signature digest."""
         return source
+
+    def internal_dirs(self, spec):
+        """契约要覆盖的“内部包”目录。 Directories the package contract covers."""
+        entry_dir = self.entrypoint(spec).rsplit('/', 1)[0] if '/' in self.entrypoint(spec) else ''
+        return sorted({i['path'].rsplit('/', 1)[0] for i in spec['files'] if self.is_source(i['path']) and '/' in i['path'] and i['path'].rsplit('/', 1)[0] != entry_dir})
 
     def judge(self, files, task, executor=None):
         """评测的独立判官。 The benchmark's independent oracle."""

@@ -4,8 +4,10 @@ import hashlib
 from masa.domain.models import canonical
 
 
-def review_test_plan(spec, checks):
+def review_test_plan(spec, checks, language=None):
     """检测可确定的测试缺陷，不推断未知业务或冒充执行证据。 Detect bounded issues without inventing requirements or execution results."""
+    from masa.languages.registry import registry
+    test_operation=registry.for_run({'language':language}).op_id('test')
     findings=[]
     def add(code,severity,message,check_index=None,case_index=None):
         findings.append({'code':code,'severity':severity,'message':message,
@@ -14,7 +16,7 @@ def review_test_plan(spec, checks):
     if missing:
         add('coverage_gap','warning','验收项缺少检查引用：'+', '.join(str(i+1) for i in missing))
     for ci,check in enumerate(checks):
-        if check['operation']!='go_test':continue
+        if check['operation']!=test_operation:continue
         cases=check.get('cases',[])
         if not cases:
             add('no_concrete_cases','warning','缺少具体输入和预期，覆盖引用无法说明如何验证。',ci)

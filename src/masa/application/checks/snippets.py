@@ -5,18 +5,19 @@ Weak models cannot digest long logs but can edit a small numbered excerpt (SWE-a
 """
 import re
 
-# Go 在 Windows 上输出反斜杠路径：internal\wc\wc.go:35:2 / Go prints backslash paths on Windows.
-_LOCATION = re.compile(r'([\w./\\-]+\.go):(\d+)(?::\d+)?')
 
-
-def source_snippets(diagnostics, files, radius=4, limit=8):
+def source_snippets(diagnostics, files, radius=4, limit=8, pack=None):
     """为每条 `文件:行[:列]` 诊断附上出错行前后几行源码（带行号，出错行标 >>）。路径只在能唯一匹配到某个文件时才使用。
     For each `file:line[:col]` diagnostic attach numbered source lines around it (failing line marked >>); a path is used only when it matches exactly one file."""
     if not files:
         return []
+    if pack is None:
+        from masa.languages.registry import DEFAULT_LANGUAGE, registry
+        pack = registry.get(DEFAULT_LANGUAGE)
+    location = re.compile(pack.location_regex())  # 由语言包给出：`文件:行[:列]` 的写法因语言而异 / the file:line:col form is the language's business
     out, seen = [], set()
     for text in diagnostics:
-        for match in _LOCATION.finditer(text):
+        for match in location.finditer(text):
             name = match.group(1).replace('\\', '/')
             while name.startswith('./'):
                 name = name[2:]

@@ -22,12 +22,7 @@
   "op_ids": 4
  },
  "application/checks/contract.py": {
-  "go_file": 3,
   "go_word": 2
- },
- "application/checks/leaks.py": {
-  "go_file": 1,
-  "go_word": 1
  },
  "application/checks/ownership.py": {
   "go_file": 4,
@@ -36,10 +31,6 @@
   "op_ids": 1
  },
  "application/checks/referee.py": {
-  "go_word": 1
- },
- "application/checks/snippets.py": {
-  "go_file": 2,
   "go_word": 1
  },
  "application/checks/triage.py": {
@@ -54,16 +45,10 @@
   "pack_import": 1
  },
  "application/generation.py": {
-  "go_env": 3,
-  "go_file": 23,
-  "go_mod": 12,
-  "go_word": 8,
-  "gofmt": 25,
-  "op_ids": 1,
-  "pack_import": 4
- },
- "application/orchestration/context_plan.py": {
-  "go_word": 1
+  "go_file": 4,
+  "go_mod": 3,
+  "go_word": 4,
+  "gofmt": 2
  },
  "application/orchestration/coordinator.py": {
   "go_file": 3,
@@ -77,19 +62,11 @@
  "application/orchestration/workflows.py": {
   "gofmt": 2
  },
- "application/planning.py": {
-  "go_mod": 2,
-  "go_template": 2,
-  "op_ids": 2
- },
  "application/reports.py": {
   "go_word": 3
  },
  "application/review/source_review.py": {
   "go_word": 1,
-  "op_ids": 1
- },
- "application/review/test_review.py": {
   "op_ids": 1
  },
  "bench/oracle.py": {

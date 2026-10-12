@@ -8,7 +8,8 @@ from pathlib import Path
 
 from masa.languages.base import ConfigField, LanguagePack, Readiness
 
-from masa.languages.go import validation
+from masa.languages.go import tooling, validation
+from masa.languages.go.outline import outline_go
 from masa.languages.go.validation import GO_VERSION
 
 
@@ -57,6 +58,42 @@ class GoPack(LanguagePack):
 
     def validate_bundle(self, files, spec):
         validation.check_bundle(files, spec)
+
+    # ---------- 确定性检查 / deterministic checks ----------
+    def normalize(self, executor, files, paths, imports=True):
+        return tooling.normalize(executor, files, paths, imports)
+
+    def static_messages(self, files, paths, spec=None):
+        return tooling.static_messages(files, paths, spec)
+
+    def parse_errors(self, executor, files, paths):
+        return tooling.parse_errors(executor, files, paths)
+
+    def entry_problems(self, files, paths=None):
+        from masa.languages.go.entrypoint import entry_problem_messages
+        return entry_problem_messages(files, paths)
+
+    def declares(self, source, name):
+        return tooling.declares(source, name)
+
+    def format_text(self, executor, text):
+        return tooling.format_text(executor, text)
+
+    def failure_markers(self):
+        return tooling.FAILURE_MARKERS
+
+    def output_lines(self, text):
+        yield from tooling.output_lines(text)
+
+    def location_regex(self):
+        return tooling._LOCATION
+
+    def outline(self, source):
+        return outline_go(source)
+
+    def internal_dirs(self, spec):
+        """契约要覆盖的“内部包”目录：internal/ 下含 .go 文件的目录。 Directories the package contract covers: those under internal/ that hold .go files."""
+        return sorted({i['path'].rsplit('/', 1)[0] for i in spec['files'] if i['path'].endswith('.go') and i['path'].startswith('internal/') and '/' in i['path']})
 
     def planning_seed(self):
         """规划阶段用的占位工作区文件。 The placeholder workspace file used while planning."""

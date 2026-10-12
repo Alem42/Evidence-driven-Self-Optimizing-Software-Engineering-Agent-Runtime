@@ -23,14 +23,17 @@ def prompt_leaks(source):
     return [token for token in FORBIDDEN if token in source]
 
 
-def leak_messages(files, paths=None):
+def leak_messages(files, paths=None, pack=None):
     """{路径: 说明}，供“就地重写”的反馈使用。 {path: explanation} for in-stage rewrite feedback."""
     out = {}
+    if pack is None:
+        from masa.languages.registry import DEFAULT_LANGUAGE, registry
+        pack = registry.get(DEFAULT_LANGUAGE)
     for path in (paths if paths is not None else files):
-        if not path.endswith('.go'):
+        if not pack.is_code(path):
             continue
         found = prompt_leaks(files.get(path))
         if found:
             out[path] = ('contains harness prompt text (' + ', '.join(found[:3]) + '). That text is instructions to you, not part of the program: '
-                         'remove it and write only valid Go code for the task.')
+                         'remove it and write only valid ' + pack.title + ' code for the task.')
     return out

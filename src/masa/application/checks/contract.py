@@ -13,22 +13,30 @@ import re
 from masa.domain.models import MasaError
 
 MIN_PACKAGES = 3
-_EXPORTED = re.compile(r'^[A-Z][A-Za-z0-9_]*$')
 
 
-def internal_dirs(spec):
-    return sorted({i['path'].rsplit('/', 1)[0] for i in spec['files'] if i['path'].endswith('.go') and i['path'].startswith('internal/') and '/' in i['path']})
+def _pack(pack=None):
+    if pack is None:
+        from masa.languages.registry import DEFAULT_LANGUAGE, registry
+        pack = registry.get(DEFAULT_LANGUAGE)
+    return pack
 
 
-def wanted(spec):
+def internal_dirs(spec, pack=None):
+    """规格里的内部包目录（由语言包决定什么算“内部包”）。 The internal package directories of the spec (the language pack decides what counts)."""
+    return _pack(pack).internal_dirs(spec)
+
+
+def wanted(spec, pack=None):
     """规格里有足够多的内部包时才需要契约。 A contract is wanted only when the spec has enough internal packages."""
-    return len(internal_dirs(spec)) >= MIN_PACKAGES
+    return len(internal_dirs(spec, pack)) >= MIN_PACKAGES
 
 
-def validate_contract(raw, spec):
+def validate_contract(raw, spec, pack=None):
     """校验角色给出的契约：目录必须是规格里的内部包，导出名必须是导出标识符，数量有上限；不合法抛 MasaError（调用方忽略契约，规划照常）。
     Validate the contract the role gave: directories must be internal packages of the spec, names exported identifiers, bounded counts; illegal raises MasaError (the caller ignores the contract and planning goes on)."""
-    dirs = set(internal_dirs(spec))
+    pack = _pack(pack)
+    dirs = set(internal_dirs(spec, pack))
     if not isinstance(raw, dict) or not isinstance(raw.get('packages'), list) or not 1 <= len(raw['packages']) <= 16:
         raise MasaError('invalid package contract')
     seen, packages = set(), []
@@ -42,7 +50,7 @@ def validate_contract(raw, spec):
             raise MasaError(f'contract for {directory} needs 1..12 exports')
         clean = []
         for item in exports:
-            if not isinstance(item, dict) or not _EXPORTED.match(str(item.get('name', ''))) or not isinstance(item.get('signature'), str) or not 1 <= len(item['signature']) <= 240:
+            if not isinstance(item, dict) or not re.match(pack.layout['export_regex'], str(item.get('name', ''))) or not isinstance(item.get('signature'), str) or not 1 <= len(item['signature']) <= 240:
                 raise MasaError(f'contract for {directory} has an invalid export')
             clean.append({'name': item['name'], 'signature': item['signature'].strip()})
         packages.append({'dir': directory, 'exports': clean})
@@ -52,24 +60,25 @@ def validate_contract(raw, spec):
     return {'packages': packages, 'rules': rules}
 
 
-def contract_problem_messages(files, paths, contract, planned_paths):
+def contract_problem_messages(files, paths, contract, planned_paths, pack=None):
     """{路径: 说明}。某个包的**最后一个**计划内的非测试 Go 文件刚生成完时，核对契约承诺的导出是否都已声明；缺的就地重写时点名。
     {path: explanation}. When the LAST planned non-test Go file of a package has just been written, check that every export the contract promises is declared; missing ones are named in the rewrite."""
     if not contract:
         return {}
+    pack = _pack(pack)
     out = {}
     promised = {p['dir']: p['exports'] for p in contract['packages']}
     for path in paths:
-        if not path.endswith('.go') or path.endswith('_test.go') or '/' not in path:
+        if not pack.is_source(path) or '/' not in path:
             continue
         directory = path.rsplit('/', 1)[0]
         if directory not in promised:
             continue
-        siblings = [p for p in planned_paths if p.endswith('.go') and not p.endswith('_test.go') and p.rsplit('/', 1)[0] == directory]
+        siblings = [p for p in planned_paths if pack.is_source(p) and p.rsplit('/', 1)[0] == directory]
         if not siblings or siblings[-1] != path:
             continue
         source = '\n'.join(str(files.get(p, '')) for p in siblings)
-        missing = [e for e in promised[directory] if not re.search(r'(?m)^(?:func(?:\s*\([^)]*\))?\s+%s\b|type\s+%s\b|var\s+%s\b|const\s+%s\b|\t%s\b)' % ((re.escape(e['name']),) * 5), source)]
+        missing = [e for e in promised[directory] if not pack.declares(source, e['name'])]
         if missing:
             out[path] = (f'package {directory} must declare what the package contract promises, still missing: ' + '; '.join(f"{e['name']} — {e['signature']}" for e in missing[:6])
                          + '. Other packages and tests rely on exactly these names and signatures.')
