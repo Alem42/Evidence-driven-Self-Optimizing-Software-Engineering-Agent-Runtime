@@ -135,6 +135,10 @@ class GoPack(LanguagePack):
     def transport_hint(self, context):
         return prompts.transport_hint(context)
 
+    def judge(self, files, task, executor=None):
+        from masa.languages.go import oracle
+        return oracle.judge(files, task, self._go(executor))
+
     def outline(self, source):
         return outline_go(source)
 

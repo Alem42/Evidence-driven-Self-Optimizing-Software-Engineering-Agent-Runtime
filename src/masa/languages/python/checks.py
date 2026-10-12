@@ -114,7 +114,7 @@ def unknown_import_messages(files, paths, module, planned_paths, extra_allowed=(
 
 
 # ───────────────────────── 入口规则 / entrypoint rule ─────────────────────────
-TEMPLATE = ('from <module>.<app> import run; import sys; sys.exit(run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr)) '
+TEMPLATE = ('from <module>.<package>.<file> import run (the full dotted path of the FILE that defines run); import sys; sys.exit(run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr)) '
             'and put everything else (reading stdin, parsing arguments, output formatting, error handling) in <module>.<app>.run, which the tests call with io.StringIO as stdin')
 
 
@@ -365,3 +365,57 @@ def test_function_source(files, path, line, limit=1500):
                 return ''
             return '\n'.join(text.splitlines()[best.lineno - 1:best.end_lineno])[:limit]
     return ''
+
+
+# ───────────────────────── 导入的名字是否存在 / do imported names exist ─────────────────────────
+def _module_file(files, dotted):
+    """点号模块名对应的文件（a.b -> a/b.py 或 a/b/__init__.py），没有返回 None。 The file a dotted module name resolves to, or None."""
+    base = dotted.replace('.', '/')
+    for candidate in (base + '.py', base + '/__init__.py'):
+        if isinstance(files.get(candidate), str):
+            return candidate
+    return None
+
+
+def _defining_files(files, name, top):
+    return sorted(p for p, t in files.items() if p.endswith('.py') and p.startswith(top + '/') and isinstance(t, str) and not p.endswith('__init__.py')
+                  and name in declared_names(t))
+
+
+def name_import_problems(files, paths, module):
+    """`from M import n`：M 是本项目已有的文件，却没有定义 n（也不是它的子模块）——一定 ImportError。生成一个文件时双向检查：它自己的导入，以及已有文件对它的导入。
+    `from M import n` where M is an existing file of this project that does not define n (nor has a submodule n) always raises ImportError. Checked both ways when a file is written: its own imports, and the existing files' imports of it."""
+    out = {}
+
+    def add(path, message):
+        out[path] = (out[path] + ' ' if path in out else '') + message
+
+    def check(owner, text, rewrite_path):
+        for name, level, names in imports_of(text):
+            if level or not names or name.split('.')[0] != module:
+                continue
+            target = _module_file(files, name)
+            if target is None or '*' in names:
+                continue
+            declared = declared_names(files[target])
+            for item in names:
+                if item in declared or _module_file(files, name + '.' + item) is not None:
+                    continue
+                hint = _defining_files(files, item, module)
+                where = (' It is defined in ' + ', '.join(h[:-3].replace('/', '.') for h in hint[:3]) + ': import it from there.') if hint else ' Define it in that module or import something that exists.'
+                add(rewrite_path, f"{owner} imports '{item}' from '{name}', but {target} does not define it.{where}")
+    for path in paths:
+        text = files.get(path)
+        if not path.endswith('.py') or not isinstance(text, str) or path.endswith('__init__.py'):
+            continue
+        check(path, text, path)  # 它自己的导入 / its own imports
+        dotted = path[:-3].replace('/', '.')
+        for other, other_text in files.items():  # 别的文件对它的导入：要求它定义那些名字 / other files' imports of it: it must define those names
+            if other != path and other.endswith('.py') and isinstance(other_text, str) and not other.endswith('__init__.py'):
+                for name, level, names in imports_of(other_text):
+                    if not level and name == dotted and '*' not in names:
+                        declared = declared_names(text)
+                        missing = [n for n in names if n not in declared and _module_file(files, name + '.' + n) is None]
+                        if missing:
+                            add(path, f"{other} imports {', '.join(repr(n) for n in missing)} from '{dotted}', so this file must define " + ('it' if len(missing) == 1 else 'them') + '.')
+    return out

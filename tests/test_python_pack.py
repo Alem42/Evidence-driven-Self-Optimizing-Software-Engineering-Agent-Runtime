@@ -88,6 +88,19 @@ class ChecksTests(unittest.TestCase):
         self.assertIn('third-party package requests', found['calc/app.py'])
         self.assertEqual(checks.unknown_import_messages({'calc/app.py': 'from . import app' + NL, 'calc/__init__.py': ''}, ['calc/app.py'], 'calc', planned), {})
 
+    def test_importing_a_name_the_module_does_not_define_is_caught_in_both_directions(self):
+        # 真实运行里的“假通过”：__main__ 从包的 __init__ 导入 run，但 run 定义在 app/app.py。 The real false pass: __main__ imports run from a package __init__, but run lives in app/app.py.
+        files = {'calc/__main__.py': 'from calc.app import run' + NL, 'calc/app/__init__.py': '', 'calc/app/app.py': 'def run(args, stdin, stdout, stderr):' + NL + '    return 0' + NL}
+        found = checks.name_import_problems(files, ['calc/__main__.py'], 'calc')
+        self.assertIn("imports 'run' from 'calc.app'", found['calc/__main__.py'])
+        self.assertIn('calc.app.app', found['calc/__main__.py'])  # 指出它真正定义在哪 / says where it really is
+        fixed = {**files, 'calc/__main__.py': 'from calc.app.app import run' + NL}
+        self.assertEqual(checks.name_import_problems(fixed, ['calc/__main__.py', 'calc/app/app.py'], 'calc'), {})
+        # 反方向：刚写完的 app/app.py 没有定义别人导入的名字 / the other way: the file just written lacks a name others import
+        lacking = {**fixed, 'calc/app/app.py': 'def other():' + NL + '    return 1' + NL}
+        again = checks.name_import_problems(lacking, ['calc/app/app.py'], 'calc')
+        self.assertIn('calc/__main__.py imports', again['calc/app/app.py'])
+
     def test_an_entry_that_reads_input_itself_is_refused(self):
         bad = 'import sys' + NL + 'for line in sys.stdin:' + NL + '    print(line)' + NL
         self.assertIn('for ... in sys.stdin', checks.entry_problem_messages({'calc/__main__.py': bad}, ['calc/__main__.py'], 'calc/__main__.py')['calc/__main__.py'])
@@ -220,6 +233,27 @@ class FailureParsingTests(unittest.TestCase):
         self.assertEqual(a, b)
         self.assertTrue(a)
         self.assertTrue(pack.failure_signature([('py_test', {'stdout': '', 'stderr': UNITTEST_OUTPUT, 'exit_code': 1})]))
+
+
+class OracleTests(unittest.TestCase):
+    """评测的独立判官对 Python 项目同样有效：好的通过，错的被拒绝。 The independent oracle works for Python projects: a good one passes, a wrong one is rejected."""
+    SUM = NL.join(['import sys', '', '', 'def run(args, stdin, stdout, stderr):', '    words = stdin.read().split()', '    try:', '        total = sum(int(w) for w in words)',
+                   '    except ValueError:', '        print("error", file=stderr)', '        return 1', '    print(total, file=stdout)', '    return 0', ''])
+
+    def files(self, app):
+        return {'pyproject.toml': pack.seed_files({'module': 'sumcli', 'files': []})['pyproject.toml'], 'sumcli/__init__.py': '',
+                'sumcli/__main__.py': MAIN.replace('calc', 'sumcli'), 'sumcli/app.py': app}
+
+    def test_sum_task(self):
+        from masa.bench.runner import BY_ID
+        from masa.bench import oracle
+        good = oracle.judge(self.files(self.SUM), BY_ID['sum'], None, 'python')
+        self.assertTrue(good['passed'], good)
+        wrong = oracle.judge(self.files(self.SUM.replace('return 1', 'return 0')), BY_ID['sum'], None, 'python')
+        self.assertFalse(wrong['passed'])
+        self.assertIn('exit code', wrong['cases'][2]['reason'])
+        broken = oracle.judge(self.files('def run(:' + NL), BY_ID['sum'], None, 'python')
+        self.assertFalse(broken['built'])
 
 
 @unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')

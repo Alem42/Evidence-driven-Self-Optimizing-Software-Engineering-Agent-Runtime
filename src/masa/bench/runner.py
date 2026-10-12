@@ -58,8 +58,13 @@ def resolve_config(body):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 100000:
                 raise MasaError(f'{name} must be a positive number')
             costs[name] = float(value)
+    from masa.languages.registry import registry
+    language = body.get('language')
+    if language is not None and language not in registry.ids():
+        raise MasaError('unknown language')
     return {
         **costs,
+        **({'language': language} if language else {}),
         'suite': suite, 'task_ids': list(dict.fromkeys(task_ids)),
         'repeats': bounded('repeats', preset['repeats'], 1, 10),
         'total_cloud_tokens': bounded('total_cloud_tokens', preset['total_cloud_tokens'], 1_000, 50_000_000),
@@ -279,6 +284,7 @@ class BenchRunner:
         record = self._blank(task, repeat, GATE_FAIL)
         started = self.clock()
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
+                **({'language': self.config['language']} if self.config.get('language') else {}),
                 'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40,
                            **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
         if self.overrides and self.overrides['policy']:
@@ -326,7 +332,7 @@ class BenchRunner:
             if report['outcome'] == 'succeeded':
                 record['gate_passed'] = True
                 files = store.read(store.run(report['latest_run_id'])['data']['project_bundle']['approval_ref'])['files']
-                verdict = oracle.judge(files, task, console.go_path)
+                verdict = oracle.judge(files, task, console._probe_executor(), self.config.get('language'))
                 bad = [c for c in verdict['cases'] if not c['ok']]
                 record.update(oracle_passed=verdict['passed'], oracle_reason=(verdict.get('error') or (bad[0]['reason'] if bad else ''))[:200])
                 record['status'] = PASS if verdict['passed'] else FALSE_PASS

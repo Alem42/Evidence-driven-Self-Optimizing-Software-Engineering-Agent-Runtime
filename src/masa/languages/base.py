@@ -211,6 +211,9 @@ class LanguagePack:
         return []
 
     # ---------- 规格与文件校验 / specs and files ----------
+    # 整包生成时，是否用 seed_files 覆盖模型返回的同名文件（模型很难逐字写对清单文件）。 In whole-bundle generation, overwrite same-named files with seed_files (models rarely reproduce a manifest byte for byte).
+    override_seeds = False
+
     def seed_files(self, spec):
         """由规格确定、不由模型生成的文件。 Files determined by the spec, never written by the model."""
         return {}

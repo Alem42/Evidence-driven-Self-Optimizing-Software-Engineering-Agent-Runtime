@@ -23,6 +23,8 @@ NO_WINDOW = {'creationflags': 0x08000000} if sys.platform == 'win32' else {}
 
 
 class PythonPack(LanguagePack):
+    override_seeds = True
+
     # ---------- 配置 / configuration ----------
     def interpreter(self):
         """设置里配置的解释器；留空用运行 masa 的这一个。 The interpreter from Settings; empty means the one running masa."""
@@ -144,6 +146,7 @@ class PythonPack(LanguagePack):
             raise MasaError('pyproject.toml must be exactly the approved project metadata')
         planned = [f['path'] for f in spec['files']]
         problems = checks.unknown_import_messages(files, planned, spec['module'], planned, self._extra_imports())
+        problems.update(checks.name_import_problems(files, planned, spec['module']))
         if problems:
             path, message = next(iter(problems.items()))
             raise MasaError(f'{path} {message}')
@@ -167,7 +170,11 @@ class PythonPack(LanguagePack):
 
     def static_messages(self, files, paths, spec=None):
         unknown = checks.unknown_import_messages(files, paths, spec['module'], [i['path'] for i in spec['files']], self._extra_imports()) if spec else {}
-        return {**checks.test_problem_messages(files, paths), **self.entry_problems(files, paths), **unknown}
+        merged = {**checks.test_problem_messages(files, paths), **self.entry_problems(files, paths), **unknown}
+        if spec:
+            for path, message in checks.name_import_problems(files, paths, spec['module']).items():
+                merged[path] = (merged[path] + ' ' if path in merged else '') + message
+        return merged
 
     def parse_errors(self, executor, files, paths):
         return checks.parse_errors(files, paths)

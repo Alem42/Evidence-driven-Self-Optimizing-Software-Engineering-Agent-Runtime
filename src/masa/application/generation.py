@@ -160,6 +160,8 @@ class ProjectGeneration:
                 values = {'goal':original['data']['goal'], **approved}
                 if retry_feedback:values['previous_attempt_error'] = str(retry_feedback)[:1000]
                 files = self.planning.call(rid, provider, 'project_developer', values)
+                if self.pack.override_seeds:  # 由规格确定的文件（清单、空的 __init__.py）以规格为准，模型写了什么都不算 / spec-determined files (manifest, empty __init__.py) are the spec's, whatever the model wrote
+                    files = {**files, **self.pack.seed_files(approved['spec'])}
             # 模型常写出不符合 gofmt 的代码；格式属于确定性工作，不应消耗修复调用。
             # Models often emit non-gofmt code; formatting is deterministic and must not cost a repair call.
             files = self._normalize(files, list(files), rid)
@@ -270,7 +272,7 @@ class ProjectGeneration:
         try:
             original_files=base['files']
             context_report=None
-            if use_intelligence:
+            if use_intelligence and self.pack.supports('index'):  # 语法索引是可选能力，没有它的语言直接用完整上下文 / the syntax index is an optional capability; languages without it use the full context
                 from masa.intelligence.repair_context import build_repair_context
                 original_files,context_report=build_repair_context(self.store,self.executor,rid,base['files'],evidence,feedback)
             failing_text=json.dumps(evidence,ensure_ascii=False)

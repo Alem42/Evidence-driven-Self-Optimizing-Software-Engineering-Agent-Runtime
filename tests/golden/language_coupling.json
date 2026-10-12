@@ -39,7 +39,7 @@
   "op_ids": 1
  },
  "bench/oracle.py": {
-  "go_env": 6
+  "go_env": 1
  },
  "bench/tasks.py": {
   "go_word": 3

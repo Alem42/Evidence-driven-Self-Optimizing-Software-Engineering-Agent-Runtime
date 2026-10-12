@@ -120,7 +120,12 @@ def _validate_project_roles(context, action, key):
             raise MasaError('invalid Developer proposal')
         if context.get('generation_mode') == 'files-v1':
             return validate_file_proposal(action['files'], context['spec'], context.get('target_path'), context.get('language'))
-        return validate_files(action['files'], context['spec'], context.get('language'))
+        from masa.languages.registry import registry as languages
+        pack = languages.for_run(context)
+        files = action['files']
+        if pack.override_seeds and isinstance(files, dict):
+            files = {**files, **pack.seed_files(context['spec'])}  # 清单与空的 __init__.py 以规格为准 / the spec decides the manifest and empty __init__.py files
+        return validate_files(files, context['spec'], context.get('language'))
     if set(action) != {'checks'}:
         raise MasaError('invalid Tester proposal')
     return validate_checks(action['checks'], context['spec'], require_coverage=False, language=context.get('language'))
