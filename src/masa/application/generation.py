@@ -15,11 +15,11 @@ from masa.infrastructure.workspaces import verify_snapshot
 
 
 from masa.application.checks.snippets import source_snippets  # noqa: E402
-from masa.application.checks.goimports import fix_imports, fix_module_imports  # noqa: E402
+from masa.languages.go.goimports import fix_imports, fix_module_imports  # noqa: E402
 from masa.application.checks.leaks import leak_messages  # noqa: E402
-from masa.application.checks.testlint import test_problem_messages  # noqa: E402
-from masa.application.checks.entrypoint import entry_problem_messages  # noqa: E402
-from masa.application.checks.imports import unknown_import_messages  # noqa: E402
+from masa.languages.go.testlint import test_problem_messages  # noqa: E402
+from masa.languages.go.entrypoint import entry_problem_messages  # noqa: E402
+from masa.languages.go.imports import unknown_import_messages  # noqa: E402
 from masa.application.checks.contract import contract_problem_messages  # noqa: E402
 
 

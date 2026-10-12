@@ -1,6 +1,6 @@
 """按失败位置选择修复材料。 Select repair context from failures and syntax evidence."""
 import re
-from masa.intelligence.index import Intelligence
+from masa.languages.go.index import Intelligence
 from masa.intelligence.context import ContextBuilder
 from masa.domain.models import canonical
 

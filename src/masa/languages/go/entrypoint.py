@@ -11,7 +11,7 @@ The rule is deterministic: main.go may not read stdin or parse input; that lives
 """
 import re
 
-from masa.application.checks.goimports import _mask
+from masa.languages.go.goimports import _mask
 
 # 在 main.go 里读输入/解析输入的调用。 Calls that read or parse input inside main.go.
 _READING = re.compile(r'\b(?:bufio\.New(?:Scanner|Reader)|io\.(?:ReadAll|ReadFull|Copy)|ioutil\.ReadAll|os\.ReadFile|fmt\.(?:Fscan\w*|Scan\w*)|strings\.NewReader|csv\.NewReader|json\.NewDecoder)\b'

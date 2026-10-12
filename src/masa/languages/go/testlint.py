@@ -9,7 +9,7 @@ implementation or mutation (break the code, see whether the tests turn red) and 
 """
 import re
 
-from masa.application.checks.goimports import _mask
+from masa.languages.go.goimports import _mask
 
 _TEST_FUNC = re.compile(r'^func\s+(?:Test|Example)\w*\s*\(', re.M)
 # 任意接收者上的失败调用：t.Fatalf、tt.Errorf、tb.Fail ……；表驱动测试和辅助函数都能覆盖。

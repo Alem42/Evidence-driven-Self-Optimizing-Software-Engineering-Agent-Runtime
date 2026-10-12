@@ -25,18 +25,6 @@
   "go_file": 3,
   "go_word": 2
  },
- "application/checks/entrypoint.py": {
-  "go_file": 10,
-  "gofmt": 1
- },
- "application/checks/goimports.py": {
-  "go_word": 2,
-  "gofmt": 2
- },
- "application/checks/imports.py": {
-  "go_file": 4,
-  "go_word": 4
- },
  "application/checks/leaks.py": {
   "go_file": 1,
   "go_word": 1
@@ -54,10 +42,6 @@
   "go_file": 2,
   "go_word": 1
  },
- "application/checks/testlint.py": {
-  "go_file": 2,
-  "gofmt": 1
- },
  "application/checks/triage.py": {
   "go_file": 2,
   "go_mod": 1,
@@ -65,16 +49,18 @@
   "go_word": 4
  },
  "application/console.py": {
-  "go_file": 1,
-  "op_ids": 2
+  "go_file": 2,
+  "op_ids": 2,
+  "pack_import": 1
  },
  "application/generation.py": {
   "go_env": 3,
-  "go_file": 19,
+  "go_file": 23,
   "go_mod": 12,
   "go_word": 8,
   "gofmt": 25,
-  "op_ids": 1
+  "op_ids": 1,
+  "pack_import": 4
  },
  "application/orchestration/context_plan.py": {
   "go_word": 1
@@ -98,17 +84,6 @@
  },
  "application/reports.py": {
   "go_word": 3
- },
- "application/review/mutation.py": {
-  "go_file": 1,
-  "op_ids": 1
- },
- "application/review/single_file.py": {
-  "go_env": 1,
-  "go_file": 8,
-  "go_mod": 2,
-  "go_word": 2,
-  "gofmt": 2
  },
  "application/review/source_review.py": {
   "go_word": 1,
@@ -151,22 +126,19 @@
  "intelligence/context.py": {
   "op_ids": 1
  },
- "intelligence/index.py": {
-  "go_file": 2,
-  "go_word": 1,
-  "op_ids": 1
- },
  "intelligence/library.py": {
   "go_file": 1
  },
  "intelligence/repair_context.py": {
-  "go_file": 1,
-  "go_mod": 1
+  "go_file": 2,
+  "go_mod": 1,
+  "pack_import": 1
  },
  "interfaces/cli.py": {
-  "go_file": 3,
+  "go_file": 4,
   "go_word": 4,
-  "op_ids": 1
+  "op_ids": 1,
+  "pack_import": 1
  },
  "interfaces/mcp_server.py": {
   "go_file": 4,
@@ -210,8 +182,10 @@
  },
  "runtime/engine.py": {
   "go_env": 2,
+  "go_file": 1,
   "gofmt": 3,
-  "op_ids": 2
+  "op_ids": 2,
+  "pack_import": 1
  },
  "runtime/graph.py": {
   "op_ids": 8

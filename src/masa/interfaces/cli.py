@@ -76,7 +76,7 @@ def main(argv=None) -> int:
         store = Store(args.state_dir)
         if args.command == 'inspect':
             from masa.intelligence.context import ContextBuilder
-            from masa.intelligence.index import Intelligence
+            from masa.languages.go.index import Intelligence
             from masa.infrastructure.locking import owner_lock
             engine = Intelligence(store, Runner(args.runner, args.go))
             with owner_lock(store.root / 'runtime.lock'):

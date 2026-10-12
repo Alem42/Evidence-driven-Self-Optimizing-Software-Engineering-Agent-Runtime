@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from masa.infrastructure.store import Store
 from masa.infrastructure.runner import Runner
-from masa.application.review.mutation import evaluate_mutations
+from masa.languages.go.mutation import evaluate_mutations
 
 
 def main():

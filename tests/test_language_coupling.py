@@ -25,6 +25,8 @@ PATTERNS = {
     'go_template': r'go-cli|cmd/app/main\.go',
     'go_env': r'GOROOT|GOCACHE|GOFLAGS|GOPATH|GOMODCACHE|GOTOOLCHAIN|go_executable',
     'go_word': r'\bGo\b',
+    # 核心直接 import 具体语言包（终点是 0：核心只通过 registry 询问）/ core importing a concrete pack directly (the goal is 0: only the registry)
+    'pack_import': r'masa\.languages\.(go|python)',
 }
 COMPILED = {name: re.compile(pattern) for name, pattern in PATTERNS.items()}
 

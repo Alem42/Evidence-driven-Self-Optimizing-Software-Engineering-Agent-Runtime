@@ -16,7 +16,7 @@ from masa.application.reports import render
 from masa.runtime.engine import Runtime
 from masa.infrastructure.settings import Settings
 from masa.runtime.graph import full_verification_policy, collaboration_policy, harness_policy
-from masa.application.review.single_file import CodeGeneration
+from masa.languages.go.single_file import CodeGeneration
 from masa.infrastructure.workspaces import verify_snapshot
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration

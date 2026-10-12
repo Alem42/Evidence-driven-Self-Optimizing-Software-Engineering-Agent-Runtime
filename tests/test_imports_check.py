@@ -1,7 +1,7 @@
 """内部包导入检查：导入了规格里不存在的内部包要被抓到，合法导入、标准库、第三方不能误报。 Internal import check: catch imports of internal packages the spec lacks; no false alarms on valid, standard-library or third-party imports."""
 import unittest
 
-from masa.application.checks.imports import imports_of, package_dirs, unknown_import_messages
+from masa.languages.go.imports import imports_of, package_dirs, unknown_import_messages
 
 MODULE = 'example.com/bank'
 PLANNED = ['go.mod', 'cmd/app/main.go', 'internal/parser/parser.go', 'internal/parser/parser_test.go', 'internal/store/store.go', 'internal/rules/rules.go']

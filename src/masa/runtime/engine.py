@@ -150,7 +150,7 @@ class Runtime:
                     return self.store.run(run_id)
                 builder, index = None, None
                 if data.get('intelligence'):
-                    from masa.intelligence.index import Intelligence
+                    from masa.languages.go.index import Intelligence
                     from masa.intelligence.context import ContextBuilder
                     engine = Intelligence(self.store, self.executor)
                     index = engine.ensure(run_id)
