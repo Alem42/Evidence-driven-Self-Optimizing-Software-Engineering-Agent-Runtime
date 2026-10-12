@@ -1,0 +1,29 @@
+{
+  "id": "go",
+  "title": "Go",
+  "version": 1,
+  "api_version": 1,
+  "capabilities": ["index", "single_file_review", "mutation_review", "formatter"],
+  "layout": {
+    "source_exts": [".go"],
+    "manifest_files": ["go.mod", "go.sum"],
+    "test_suffixes": ["_test.go"],
+    "root_marker": "go.mod",
+    "entrypoint": "cmd/app/main.go",
+    "min_files": 3,
+    "max_files": 20,
+    "template": "go-cli"
+  },
+  "operations": {
+    "test":   {"id": "go_test",       "label": "go test",     "exe": "toolchain", "args": ["test", "-json", "-count=1", "-timeout={timeout_ms}ms", "./..."]},
+    "static": {"id": "go_vet",        "label": "go vet",      "exe": "toolchain", "args": ["vet", "./..."]},
+    "format": {"id": "go_fmt_check",  "label": "gofmt 检查",  "exe": "format",    "args": ["-l", "."], "fail_if_stdout": true},
+    "run":    {"id": "app_run",       "label": "运行程序",    "exe": "{out}", "args": [], "build": {"exe": "toolchain", "args": ["build", "-o", "{out}", "./cmd/app"]}},
+    "index":  {"id": "go_index",      "label": "语法索引",    "exe": "builtin"}
+  },
+  "ui": {
+    "highlight": "go",
+    "diagnostic_exts": [".go"],
+    "verify_label": "Go 验证"
+  }
+}
