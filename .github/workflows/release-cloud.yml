@@ -1,0 +1,83 @@
+name: Build verified cloud Release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable Release tag to rebuild
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: masa-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Test deployment policy
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tests/test_capability.py tests/test_cloud_guard.py tests/test_deploy.py tests/test_model_profiles.py tests/test_release_sync.py
+          docker compose config --quiet
+      - name: Build release image
+        run: |
+          REVISION=$(git rev-parse HEAD)
+          echo "REVISION=$REVISION" >> "$GITHUB_ENV"
+          docker build --build-arg MASA_WEB_BASE=/apps/verdict/ --build-arg MASA_VERSION="$RELEASE_TAG" --build-arg MASA_REVISION="$REVISION" -t "masa-release:$REVISION" .
+      - name: Verify Linux runner under server resource limits
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --memory 768m --cpus 1 --pids-limit 256 --tmpfs /tmp:size=128m,mode=1777,exec \
+            --tmpfs /home/masa/.cache:size=256m,uid=10001,gid=10001 \
+            -e GOTOOLCHAIN=local \
+            -v "$PWD/scripts/smoke/docker_smoke.py:/app/docker_smoke.py:ro" \
+            "masa-release:$REVISION" python /app/docker_smoke.py
+      - name: Verify full API mode still forbids local models
+        run: |
+          docker run -d --name masa-release-check --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --memory 768m --tmpfs /tmp --tmpfs /home/masa/.cache \
+            -e MASA_DEMO=0 -e MASA_LOCAL_MODELS=0 \
+            -v "$PWD/scripts/ops/check_cloud.py:/app/check_cloud.py:ro" "masa-release:$REVISION"
+          trap 'docker rm -f masa-release-check' EXIT
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' masa-release-check)" = healthy ] && break
+            sleep 2
+          done
+          docker exec masa-release-check python /app/check_cloud.py
+      - name: Package tested image and deployment configuration
+        run: |
+          mkdir release-assets
+          docker save "masa-release:$REVISION" | gzip -1 > release-assets/masa-image.tar.gz
+          cp deploy/compose.cloud.yml scripts/ops/check_cloud.py release-assets/
+          python - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          root = pathlib.Path('release-assets')
+          hashes = {}
+          for path in root.iterdir():
+              with path.open('rb') as handle:
+                  hashes[path.name] = hashlib.file_digest(handle, 'sha256').hexdigest()
+          image = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', 'masa-release:' + os.environ['REVISION']], text=True).strip()
+          manifest = {'schema': 1, 'tag': os.environ['RELEASE_TAG'], 'revision': os.environ['REVISION'], 'image_id': image,
+                      'image_tag': 'masa-release:' + os.environ['REVISION'], 'image_revision': os.environ['REVISION'], 'sha256': hashes}
+          (root / 'masa-release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Upload assets only after all verification passed
+        run: |
+          gh release upload "$RELEASE_TAG" release-assets/masa-image.tar.gz release-assets/compose.cloud.yml release-assets/check_cloud.py --clobber
+          gh release upload "$RELEASE_TAG" release-assets/masa-release.json --clobber

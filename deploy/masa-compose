@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Run Compose against the currently deployed immutable MASA release."""
+import json
+import os
+from pathlib import Path
+import sys
+
+root = Path('/opt/masa')
+record = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+env = {**os.environ, 'MASA_IMAGE': record['image_id']}
+os.execve('/usr/bin/docker', ['docker', 'compose', '--env-file', str(root / '.env'),
+                            '-p', 'masa-cloud', '-f', str(Path(record['directory']) / 'compose.cloud.yml'),
+                            *sys.argv[1:]], env)

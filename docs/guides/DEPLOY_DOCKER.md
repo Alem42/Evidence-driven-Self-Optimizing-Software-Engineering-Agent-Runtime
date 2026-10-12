@@ -28,6 +28,8 @@ MASA_STATE=./demo-state docker compose up -d # 目录要对容器用户 uid 1000
 
 不设 `MASA_STATE` 时用命名卷 `masa-data`，历史为空。
 
+已有网站和 Caddy 的云服务器请使用 [云服务器部署与 Release 教程](DEPLOY_CLOUD.md)，新项目复用现有 80/443。
+
 ## 3. 环境变量 / Environment variables
 
 | 变量 | 默认 | 含义 |
@@ -46,10 +48,10 @@ MASA_STATE=./demo-state docker compose up -d # 目录要对容器用户 uid 1000
 ```bash
 docker run --rm caddy:2 caddy hash-password --plaintext 'your-password'   # 得到哈希 / get the hash
 export MASA_DOMAIN=demo.example.com MASA_BASIC_USER=demo MASA_BASIC_HASH='<hash>'
-docker compose --profile proxy up --build -d
+docker compose -f docker-compose.yml -f deploy/compose.proxy.yml up --build -d
 ```
 
-注意：哈希里有 `$`，写进 `.env` 文件时要写成 `$$`。DNS 要先指到这台机器，80/443 要放行。
+哈希写进 `.env` 时用单引号包住，保留其中的 `$`；直接写在 Compose YAML 中才需要 `$$`。DNS 要先指到这台机器，80/443 要放行。
 
 ## 5. 完整模式（会调用云端模型，花 token）/ Full mode
 
@@ -60,7 +62,7 @@ docker run --rm -p 127.0.0.1:8765:8765 -e MASA_DEMO=0 -e MASA_ALLOWED_HOSTS=loca
 **完整模式没有登录**，只靠 Host/Origin/令牌防本机的恶意网页。所以：
 - 不要把 8765 直接暴露到公网；必须放在带认证的代理（§4）后面。
 - API 密钥只通过页面的“账号”写入 `/data`（卷里），**永远不要** COPY 进镜像；`.dockerignore` 已排除 `provider-keys.local.json` 与 `.masa`。
-- 镜像里没有 Ollama；本地模型不可用，路由请只选云端。
+- 镜像默认 `MASA_LOCAL_MODELS=0`，Compose 固定为 `0`；运行时拒绝本地 provider 和伪装成云端的回环地址 provider。
 
 ## 6. 镜像里有什么 / What is in the image
 
@@ -72,9 +74,9 @@ docker run --rm -p 127.0.0.1:8765:8765 -e MASA_DEMO=0 -e MASA_ALLOWED_HOSTS=loca
 ## 本地模型保护 / Local-model guard
 
 服务启动时做一次轻量检测（`src/masa/infrastructure/capability.py`，Windows 与 Linux 通用）：NVIDIA 显存 >= 6 GB 且内存 >= 16 GB 才允许本地模型。
-检测不通过（云端小服务器、没有显卡的容器、演示部署）时：本地模型配置不会进入路由，`/api/ollama` 的加载/测试被拒绝，`ChatProvider` 拒绝构造本地 provider，云端模型不受影响。
+检测不通过（云端小服务器、没有显卡的容器、演示部署）时：本地模型配置不会进入路由（即使旧配置带密钥），不能保存启用的本地模型，所有 `/api/ollama` 接口拒绝访问，`ChatProvider` 和快照恢复拒绝本地 provider，远程 API 不受影响。
 结果写在启动日志里（`local models: enabled/DISABLED (...)`），也在 `/api/bootstrap` 的 `local_models` 字段。
-环境变量 `MASA_LOCAL_MODELS`：`0` 强制禁用，`1` 强制放行（检测不到但你确定能跑，如 AMD/Apple），默认 `auto`。
+环境变量 `MASA_LOCAL_MODELS`：原生运行默认 `auto`，`0` 强制禁用，`1` 强制放行（检测不到但你确定能跑，如 AMD/Apple）；镜像默认、Compose 固定为 `0`。演示模式始终禁用。
 实测：本机（5070 Ti 16 GB + 64 GB）放行；Docker 容器无显卡，被禁用。
 
 ## 7. 验证 / Verifying

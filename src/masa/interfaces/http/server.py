@@ -152,6 +152,9 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
             if demo and not (path.startswith(DEMO_GET) if not write else path in DEMO_POST):
                 self.send(403, {"error": DEMO_MESSAGE})
                 return
+            if (path == '/api/ollama' or path.startswith('/api/ollama/')) and not capability.local_allowed():
+                self.send(403, {"error": 'local models are disabled on this host: ' + capability.STATE['reason']})
+                return
             try:
                 if path == "/api/session" and not write:
                     # 令牌只发给白名单来源的前端页面，其他来源即使 Host 正确也拿不到。

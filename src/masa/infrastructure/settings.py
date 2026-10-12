@@ -58,7 +58,7 @@ class Settings:
                     **p,
                     "id": i,
                     "key_configured": bool(self.keys.get(i)),
-                    "ready": p['enabled'] and ((p['model_type']=='local' and capability.local_allowed()) or bool(self.keys.get(i))),
+                    "ready": p['enabled'] and (capability.local_allowed() if p['model_type']=='local' else bool(self.keys.get(i))),
                     "last_test": self.tests.get(i),
                 }
                 for i, p in sorted(self.profiles.items(),key=lambda item:(item[1]['level'],item[1]['priority'],item[0]))
@@ -107,6 +107,8 @@ class Settings:
                 if ident not in profiles and len(profiles) >= 20:
                     raise MasaError("at most 20 profiles")
                 config = validate_config({**profiles.get(ident, {}), **body})
+                if config['model_type'] == 'local' and config['enabled'] and not capability.local_allowed():
+                    raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
                 key = body.get("api_key", "")
                 if isinstance(key, str):
                     key = key.strip()
@@ -312,7 +314,7 @@ class Settings:
         """已启用且凭据就绪（本地无需密钥）的配置，按等级与优先级排序。 Enabled, credentialed profiles in routing order."""
         with self.lock:
             return [(i, dict(p)) for i, p in sorted(self.profiles.items(), key=lambda item: (item[1]['level'], item[1]['priority'], item[0]))
-                    if p['enabled'] and ((p['model_type'] == 'local' and capability.local_allowed()) or self.keys.get(i))]
+                    if p['enabled'] and (capability.local_allowed() if p['model_type'] == 'local' else bool(self.keys.get(i)))]
 
     def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""

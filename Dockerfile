@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # MASA / Verdict 的容器镜像：同一个进程托管前端和 API，默认是**只读演示模式**（不能发起任务、不接触 API 密钥）。
 # Container image: one process serves the frontend and the API; **read-only demo mode by default** (cannot start tasks, never touches API keys).
 #
@@ -12,7 +11,9 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
-ENV VITE_API_BASE=
+ARG MASA_WEB_BASE=/
+ENV VITE_API_BASE=${MASA_WEB_BASE}
+ENV VITE_BASE_PATH=${MASA_WEB_BASE}
 RUN npm run build
 
 # ───────── 2) Go 工具链 + runner / Go toolchain + the runner ─────────
@@ -24,6 +25,11 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/masa-runner ./cmd/masa-runner
 
 # ───────── 3) 运行镜像 / runtime image ─────────
 FROM python:3.12-slim-bookworm
+ARG MASA_VERSION=dev
+ARG MASA_REVISION=unknown
+LABEL org.opencontainers.image.title="MASA / Verdict" \
+    org.opencontainers.image.version=$MASA_VERSION \
+    org.opencontainers.image.revision=$MASA_REVISION
 # Go 工具链：验证阶段要真的运行 go build/test/vet。 The Go toolchain: verification really runs go build/test/vet.
 COPY --from=gotool /usr/local/go /usr/local/go
 RUN useradd --system --create-home --uid 10001 masa \
@@ -43,6 +49,7 @@ ENV PYTHONPATH=/app/src \
     PATH=/usr/local/go/bin:$PATH \
     MASA_BIND=0.0.0.0 \
     MASA_STATIC_DIR=/app/web \
+    MASA_LOCAL_MODELS=0 \
     MASA_DEMO=1
 
 USER masa

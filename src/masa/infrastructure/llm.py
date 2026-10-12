@@ -112,7 +112,8 @@ class ChatProvider:
     def __init__(self, config, key=''):
         """固定本次运行配置，密钥不进入 profile。 Freeze run configuration without exposing credentials."""
         self.config = validate_config(config)
-        if self.config['model_type'] == 'local' and not capability.local_allowed():
+        if not capability.local_allowed() and (self.config['model_type'] == 'local'
+                or urlsplit(self.config['base_url']).hostname in {'localhost', '127.0.0.1', '::1'}):
             raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
         if not self.config["base_url"] or not self.config["model"] or (self.config['model_type']=='cloud' and not key):
             raise MasaError("provider requires Base URL, model and API key")

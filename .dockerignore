@@ -6,6 +6,11 @@
 .masa
 .cache
 .env
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+.resume-work
 provider-keys.local.json
 provider-keys.local.tmp
 **/__pycache__
