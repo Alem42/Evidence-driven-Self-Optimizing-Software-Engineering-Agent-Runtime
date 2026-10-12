@@ -1,5 +1,7 @@
 # 当前断点（接续用）
 
+**2026-10-13（晚）**：Runtime V2 第一个切片已实现并推送：`request.runtime=v2` 时用“包工人循环”生成草稿（角色 package_worker、写范围由工具强制、自动封包、小任务合成一个包、账本事件 worker_step/package_sealed），验证/Gate/修复仍是 V1 的；真实 Flash 的 Python 4/4 通过判官（¥0.027–0.063/个，样本很小）。第二轮模拟用户测试的 7 类问题已修（见 progress/PROGRESS_2026-10-13_001）。后端 599 测试通过、等价检查 IDENTICAL。**下一步**：V2 的失败重开出错的包、依赖顺序、卡住检测/升级、与 V1 的同预算配对（小样本）、运行视图；本地模型（glm-4.7-flash）冒烟。
+
 **2026-10-13**：语言包 P0–P7 与 P8 部分完成并推送：Go 从核心解耦（耦合字面量 355→78，Go 行为逐字节不变、等价检查 IDENTICAL），运行器改为按语言包生成的操作清单执行，**Python 包**跑通（脚本化端到端 + 真实 Flash 约 ¥0.77，判官下 9/12 通过、2 次假通过已用“导入名检查”堵上），前端有语言选择与 设置→语言（解释器、unittest/pytest、额外包目录），`masa lang list/info/check`。详见 progress/PROGRESS_2026-10-13_001。**下一步**：V2 工人循环（design/RUNTIME_V2.md，M0 运行视图可先做）；第二轮模拟用户测试（Python 与新设置页）的报告若已返回见该进展文档。工具：`scripts/eval/lang_eval.py`（Flash only）、docs/guides/ADD_A_LANGUAGE.md。
 
 **2026-10-12**：冻结键 bug 已修（`dab8707`：本地复核用自己的 `triage_snapshot_ref`）。用户决定：新建与 V1 **并存**的 Runtime V2（按包推进的自主工人循环，Pro 只做规划、其余用本地模型 + Flash），并把 Go 专属内容抽成**语言包**以支持 Python/C# 等。两份设计稿已写完，**代码未动，等用户审核**：design/RUNTIME_V2.md、design/LANGUAGE_PACKS.md（含 Go 耦合盘点、接口、迁移阶段 P0–P8、纵切片方案、第 15 节待拍板问题）。注意：工作区里另一会话有未提交的云端部署改动（Dockerfile、compose、settings.py、llm.py、server.py 等），迁移时只用显式路径 git add。
