@@ -65,7 +65,7 @@
   "pack_import": 1
  },
  "interfaces/cli.py": {
-  "go_file": 4,
+  "go_file": 5,
   "go_word": 4,
   "pack_import": 1
  },

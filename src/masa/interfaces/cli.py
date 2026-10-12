@@ -72,7 +72,10 @@ def _lang_command(args) -> int:
     """masa lang list | info <id> | check <id>：语言包的清单、说明与一致性检查。 Language packs: listing, description and the conformance check."""
     import types
     from masa.languages import conformance
-    probe = types.SimpleNamespace(go_executable=args.go if args.go.is_file() else None)
+    try:
+        probe = Runner(args.runner, args.go if args.go.is_file() else None)  # 语言包用它探测自己的工具链 / language packs probe their toolchains with it
+    except MasaError:
+        probe = types.SimpleNamespace()
     if args.lang_command == "list":
         for info in registry.describe(probe):
             ready = (info.get("readiness") or {}).get("ok")
