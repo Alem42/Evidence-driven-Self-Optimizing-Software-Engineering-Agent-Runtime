@@ -109,6 +109,7 @@ class RoleRuntime:
                     # 流式：每个数据块之间检查取消标志，并上报实时进度。 Streaming: check the cancel flag between chunks and report live progress.
                     provider.should_cancel=lambda:bool(self.store.run(rid)['cancel_requested'])
                     provider.on_progress=lambda info:live.update(rid,purpose,(provider.profile or {}).get('model'),info)
+                    provider.on_text=lambda text:live.append(rid,text)
                     remaining=run['data']['deadline_at']-time.time()
                     if remaining<=0:
                         raise MasaError('role run cancelled or deadline expired')

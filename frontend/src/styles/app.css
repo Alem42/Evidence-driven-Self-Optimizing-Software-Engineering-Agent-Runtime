@@ -365,3 +365,8 @@ td.best { font-weight: 700; color: var(--ok); }
 .process .p-bad { color: var(--bad, #c0392b); } .process .p-ok { color: var(--ok, #2e7d32); }
 .settings-close { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0; background: var(--bg, transparent); }
 .settings-nav .nav-actions { display: flex; gap: 6px; margin-bottom: 10px; }
+
+/* 实时输出：模型正在写的内容（最近一段），等宽、可滚动。 Live output: the latest stretch of what the model is writing, monospaced and scrollable. */
+.live-chip { cursor: pointer; }
+.live-chip.on { border-color: var(--accent); }
+.live-tail { flex: 0 0 100%; margin: 6px 0 0; padding: 8px 10px; max-height: 180px; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--muted); }

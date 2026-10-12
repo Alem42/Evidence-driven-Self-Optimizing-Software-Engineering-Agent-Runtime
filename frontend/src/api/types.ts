@@ -126,7 +126,7 @@ export interface Job {
   current_model?: string | null;
   current_kind?: 'local' | 'cloud' | null;
   /** 流式传输的实时进度：此刻这次模型调用已生成的字符数与用时。 Live streaming progress of the in-flight model call. */
-  live?: { step: string; model: string | null; chars: number; seconds: number } | null;
+  live?: { step: string; model: string | null; chars: number; seconds: number; tail?: string } | null;
   error?: string;
   result?: any;
   run_status?: string;

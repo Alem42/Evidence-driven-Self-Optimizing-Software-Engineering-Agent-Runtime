@@ -263,3 +263,22 @@ class IntegrationTests(ServerCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LiveOutputTests(unittest.TestCase):
+    def test_streamed_text_reaches_the_live_tail_and_is_bounded(self):
+        from masa.runtime import live
+        from masa.infrastructure.streaming import StreamAssembler
+        assembler = StreamAssembler('openai')
+        assembler.on_text = lambda text: live.append('run-live', text)
+        for piece in ('{"a":', '"b"', '}'):
+            assembler._add(piece)
+        live.update('run-live', 'project_developer', 'm', {'chars': 8, 'seconds': 1})
+        self.assertEqual(live.get('run-live')['tail'], '{"a":"b"}')  # 进度更新不会清掉尾巴 / a progress update keeps the tail
+        live.append('run-live', 'x' * (live.TAIL_CHARS + 50))
+        self.assertEqual(len(live.get('run-live')['tail']), live.TAIL_CHARS)
+        live.update('run-live', 'project_tester', 'm', {'chars': 1, 'seconds': 1})  # 换了步骤就从头 / a new step starts fresh
+        self.assertEqual(live.get('run-live')['tail'], '')
+        assembler.on_text = lambda text: 1 / 0  # 回调失败不影响读流 / a failing callback never breaks the read
+        assembler._add('still fine')
+        live.clear('run-live')

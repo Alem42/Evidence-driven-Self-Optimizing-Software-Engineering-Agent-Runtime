@@ -73,10 +73,17 @@ class StreamAssembler:
             self._line(line.strip())
         return self.chars - before
 
+    on_text = None  # 每收到一段内容就调用（实时输出）；失败不能影响读流 / called with every piece of content (live output); a failure must never affect the read
+
     def _add(self, text):
         if text:
             self.content.append(text)
             self.chars += len(text)
+            if self.on_text is not None:
+                try:
+                    self.on_text(text)
+                except Exception:
+                    pass
 
     def _line(self, line):
         if not line or line.startswith(b':'):  # 空行与 SSE 注释（keep-alive）只算“有字节”，不含内容 / blank lines and SSE comments carry no content
@@ -130,11 +137,13 @@ class StreamAssembler:
         return {'choices': [{'finish_reason': self.finish_reason, 'message': message}], 'usage': self.usage}
 
 
-def _read_loop(response, assembler, *, deadline, should_cancel=None, first_token_seconds=600, stall_seconds=120, on_progress=None,
+def _read_loop(response, assembler, *, deadline, should_cancel=None, first_token_seconds=600, stall_seconds=120, on_progress=None, on_text=None,
                 clock=time.monotonic, max_bytes=MAX_BYTES, max_chars=MAX_CHARS, poll=CANCEL_POLL_SECONDS, threaded=True):
     """读完整个流。每次循环（至多每秒一次，因为套接字有短读超时）检查：取消、总时限、是否 stall。
     Read the whole stream. Every iteration (at least once a second thanks to a short socket read timeout) checks cancellation, the deadline and stalls."""
     started = last_bytes = clock()
+    if on_text is not None:
+        assembler.on_text = on_text
     last_check = last_report = 0.0
     total = 0
     chunks = None

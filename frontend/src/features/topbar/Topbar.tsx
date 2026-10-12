@@ -16,6 +16,8 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
   const inspectorOpen = useUi((s) => s.inspectorOpen);
   const set = useUi((s) => s.set);
   const [now, setNow] = useState(Date.now());
+  // 实时输出：点“生成中”展开，看模型此刻正在写什么（后端只保留最近 2400 个字符）。 Live output: click the generating chip to see what the model is writing right now (the backend keeps only the last 2400 characters).
+  const [showLive, setShowLive] = useState(false);
   const report = useReport(detail.run.id, status.live);
   const totals = report.data?.totals;
   const routing = report.data?.routing;
@@ -45,9 +47,9 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
             job?.model && <span className="chip-static">{job.model}</span>
           )}
           {status.live && job?.live && job.live.chars > 0 && (
-            <span className="chip-static" title="流式传输：这次模型调用正在生成的字符数">
-              <span className="spin" aria-hidden /> 生成中 {job.live.chars.toLocaleString()} 字 · {job.live.seconds}s
-            </span>
+            <button className={'chip-static live-chip' + (showLive ? ' on' : '')} onClick={() => setShowLive(!showLive)} title="流式传输：这次模型调用正在生成的字符数；点击查看它此刻写出的内容">
+              <span className="spin" aria-hidden /> 生成中 {job.live.chars.toLocaleString()} 字 · {job.live.seconds}s {showLive ? '▾' : '▸'}
+            </button>
           )}
           {status.live && started && <span className="meta">{fmtSeconds(Math.max(0, now / 1000 - started))}</span>}
           {gen && status.live && <span className="meta" title={gen.current}>文件 {gen.completed}/{gen.total}</span>}
@@ -72,6 +74,9 @@ export function Topbar({ detail, view, status, job }: { detail: Detail; view?: P
         <Button size="sm" variant="ghost" onClick={() => set({ inspectorOpen: !inspectorOpen })} title="节点详情">{inspectorOpen ? '隐藏详情 ▸' : '◂ 详情'}</Button>
       </div>
       {status.live && <progress className="topbar-progress" aria-label="任务正在运行" />}
+      {status.live && showLive && job?.live && (
+        <pre className="live-tail" aria-label="模型实时输出">{job.live.tail || '（还没有收到内容）'}</pre>
+      )}
     </header>
   );
 }

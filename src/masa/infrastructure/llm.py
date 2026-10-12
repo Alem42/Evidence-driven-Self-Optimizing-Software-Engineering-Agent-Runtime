@@ -143,6 +143,7 @@ class ChatProvider:
         # Streaming hooks set by RoleRuntime before every call: should_cancel() true aborts the connection; on_progress(info) receives live progress.
         self.should_cancel = None
         self.on_progress = None
+        self.on_text = None  # 实时输出：RoleRuntime 在每次调用前设置 / live output: set by RoleRuntime before every call
 
     def unload(self):
         """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
@@ -257,7 +258,7 @@ class ChatProvider:
                 local = self.config['model_type'] == 'local'
                 assembler = StreamAssembler(self.config['protocol'])
                 try:
-                    read_stream(response, assembler, deadline=deadline, should_cancel=self.should_cancel, on_progress=self.on_progress,
+                    read_stream(response, assembler, deadline=deadline, should_cancel=self.should_cancel, on_progress=self.on_progress, on_text=self.on_text,
                                 first_token_seconds=float(self.config.get('first_token_seconds', 900 if local else 240)),
                                 stall_seconds=float(self.config.get('stall_seconds', 180 if local else 90)))
                 except StreamCancelled:
