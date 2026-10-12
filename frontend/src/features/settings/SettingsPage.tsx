@@ -5,6 +5,7 @@ import { DiagnosticsSection } from './DiagnosticsSection';
 import { AccountsSection } from './AccountsSection';
 import { BenchSection } from './BenchSection';
 import { HarnessSection } from './HarnessSection';
+import { LanguagesSection } from './LanguagesSection';
 import { LocalSection } from './LocalSection';
 import { ModelsSection } from './ModelsSection';
 import { OrderSection } from './OrderSection';
@@ -21,7 +22,8 @@ const SECTIONS = [
   ['roles', '动态角色', '角色清单、指挥者状态与触发条件'],
   ['experiments', '实验结果', '不同设置的影响：测试可靠性、A/B、上下文（表与图）'],
   ['bench', '评测', '一键跑固定任务集，看通过率与成本'],
-  ['harness', 'Harness', 'Go 工具链、runner、检查策略'],
+  ['languages', '语言', '语言包：默认语言、工具链与解释器配置'],
+  ['harness', 'Harness', 'runner 与后端能力'],
   ['diagnostics', '诊断', '后台异常记录'],
 ] as const;
 
@@ -68,6 +70,7 @@ export function SettingsPage() {
         {section === 'roles' && <RolesSection />}
         {section === 'experiments' && <ExperimentsSection />}
         {section === 'bench' && <BenchSection />}
+        {section === 'languages' && <LanguagesSection />}
         {section === 'harness' && <HarnessSection />}
         {section === 'diagnostics' && <DiagnosticsSection />}
       </div>

@@ -4,11 +4,12 @@ import { useReport } from '../../api/queries';
 import type { TaskReport } from '../../api/types';
 import { CHAIN_TEXT, fmtDuration, fmtTokens, kindLabel, OUTCOME, REASON_TEXT, reportText } from '../../entities/report';
 import { stageLabels } from '../../entities/status';
+import { operationLabel } from '../../entities/languages';
 import { useUi } from '../../stores/ui';
 import { Badge, Button, Spinner } from '../../shared/ui';
 
 const step = (s: string | null): string => (s ? stageLabels[s] ?? s : '—');
-const OP: Record<string, string> = { go_test: 'go test', go_vet: 'go vet', go_fmt_check: 'gofmt 检查', gate: 'Gate 核对', run_application: '运行程序', go_index: '代码索引' };
+const OP: Record<string, string> = { gate: 'Gate 核对', run_application: '运行程序' };
 
 /** token 占比条：本地 vs API。 Local vs API share bar. */
 function SplitBar({ local, cloud }: { local: number; cloud: number }) {
@@ -205,7 +206,7 @@ function Body({ r }: { r: TaskReport }) {
             {r.tools.map((x, i) => (
               <tr key={i}>
                 <td>{t0 && x.started ? '+' + fmtDuration((x.started - t0) * 1000) : '—'}</td>
-                <td>{OP[x.operation] ?? x.operation}</td>
+                <td>{OP[x.operation] ?? operationLabel(x.operation)}</td>
                 <td><Badge tone={x.status === 'succeeded' || x.status === 'finished' ? 'ok' : 'bad'}>{x.status === 'succeeded' ? '通过' : x.status === 'finished' ? '结束' : x.status === 'failed' ? '未通过' : x.status}</Badge></td>
                 <td>{x.exit_code ?? '—'}</td><td>{fmtDuration(x.duration_ms)}</td>
                 <td className="muted">{x.kind === 'gate' ? '独立核对证据' : x.kind === 'app' ? '用户触发 · 隔离运行' : '隔离副本 · 白名单命令'}</td>

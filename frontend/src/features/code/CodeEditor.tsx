@@ -5,6 +5,8 @@ import { basicSetup } from 'codemirror';
 import { EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { go } from '@codemirror/lang-go';
+import { python } from '@codemirror/lang-python';
+import { highlightOf } from '../../entities/languages';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
@@ -58,9 +60,11 @@ interface Props {
   onChange?: (value: string) => void;
   markers?: Marker[];
   jumpTo?: number;
+  /** 文件路径：按后缀选语法高亮。 The file path: picks the syntax highlighting by extension. */
+  path?: string;
 }
 
-export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo }: Props) {
+export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo, path = '' }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -69,7 +73,7 @@ export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo }: 
   useEffect(() => {
     const extensions: Extension[] = [
       basicSetup,
-      go(),
+      ...(highlightOf(path) === 'python' ? [python()] : highlightOf(path) === 'go' ? [go()] : []),
       syntaxHighlighting(highlight),
       theme,
       markerField,
@@ -83,7 +87,7 @@ export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo }: 
     return () => view.current?.destroy();
     // 只读状态变化时重建；内容同步见下方 effect。 Rebuild only when read-only changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, path]);
 
   // 外部内容变化（切换文件）才整体替换，用户输入不回写，光标不跳动。
   useEffect(() => {

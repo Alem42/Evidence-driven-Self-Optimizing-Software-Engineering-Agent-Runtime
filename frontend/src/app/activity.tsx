@@ -76,7 +76,8 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       hooks?.onDone?.(job);
       // 任务进入终态时自动弹出报告（等待你处理的不弹）。 Auto-open the report once the task reaches a terminal outcome.
       const reportRun = job.result?.id ?? job.run_id;
-      if (reportRun && job.status !== 'failed' && job.status !== 'interrupted')
+      // 只在这个页面会话里发起的任务才自动弹报告：刷新页面后恢复出来的已完成任务不弹（否则一打开页面就被报告盖住）。 Only for tasks started in this page session: a finished task restored after a reload must not cover the page with its report.
+      if (hooks && reportRun && job.status !== 'failed' && job.status !== 'interrupted')
         api<TaskReport>('/projects/' + reportRun + '/report')
           .then((r) => { qc.setQueryData(qk.report(reportRun), r); if (isTerminal(r.outcome)) useUi.getState().set({ reportFor: reportRun }); })
           .catch(() => undefined);

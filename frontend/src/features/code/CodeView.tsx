@@ -6,10 +6,11 @@ import { useDrafts } from '../../stores/ui';
 import { Button, Empty, Segmented, Spinner } from '../../shared/ui';
 import { useResults } from '../../api/queries';
 import { CodeEditor } from './CodeEditor';
+import { isCodePath, isEntryPath, isTestPath } from '../../entities/languages';
 import { useCodeFiles, useSourceReview } from './useCode';
 import { ApproveCodeButton } from '../thread/cards/CodeReviewCard';
 
-const isTest = (p: string) => p.endsWith('_test.go');
+const isTest = isTestPath;
 
 // 代码标签：文件树 + 编辑器；审核阶段可编辑，其余只读；可与修复前内容对比，问题行标红。
 // Code tab: file tree + editor; editable only during review; diff against the pre-repair base.
@@ -23,7 +24,7 @@ export function CodeView({ detail }: { detail: Detail }) {
 
   const paths = useMemo(() => Object.keys(code.files ?? {}).sort((a, b) => Number(isTest(a)) - Number(isTest(b)) || a.localeCompare(b)), [code.files]);
   const wanted = params.get('file');
-  const path = wanted && code.files && Object.hasOwn(code.files, wanted) ? wanted : paths.find((p) => p === 'cmd/app/main.go') ?? paths.find((p) => p.endsWith('.go') && !isTest(p)) ?? paths[0];
+  const path = wanted && code.files && Object.hasOwn(code.files, wanted) ? wanted : paths.find(isEntryPath) ?? paths.find((p) => isCodePath(p) && !isTest(p)) ?? paths[0];
   const line = Number(params.get('line')) || undefined;
 
   // 标注来源：源码检查 + 失败的验证输出。 Markers: source review findings plus failing tool output.
@@ -84,6 +85,7 @@ export function CodeView({ detail }: { detail: Detail }) {
         ) : (
           <CodeEditor
             key={path}
+            path={path}
             value={code.files[path] ?? ''}
             readOnly={readOnly}
             markers={markers}

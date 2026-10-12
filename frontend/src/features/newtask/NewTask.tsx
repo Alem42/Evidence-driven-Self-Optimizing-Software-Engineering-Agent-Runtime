@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
 import { useBenchTasks, useProfiles } from '../../api/queries';
+import { languageTitle } from '../../entities/languages';
 import { pickExamples } from '../../entities/examples';
 import { api } from '../../api/client';
 import type { Triage } from '../../api/types';
@@ -40,6 +41,11 @@ export function NewTask() {
   const boot = bootstrap;
   const push = useToasts((s) => s.push);
   const [goal, setGoal] = useState('');
+  // 语言：默认取后端的默认语言；只有一种语言时不显示选择器。 Language: the backend default; no selector when there is only one.
+  const [language, setLanguage] = useState('');
+  const languages = bootstrap?.languages ?? [];
+  const chosen = language || bootstrap?.language || 'go';
+  const chosenInfo = languages.find((l) => l.id === chosen);
   const [model, setModel] = useState('');
   // 默认：自动执行 + 本地优先有界升级。需要逐步确认或固定模型时再手动切换。
   // Defaults: automatic execution + local-first bounded escalation; switch manually for step-by-step review or a fixed model.
@@ -58,14 +64,16 @@ export function NewTask() {
   useEffect(() => {
     setForce(false);
     if (goal.trim().length < 6) { setTriage(null); return; }
-    const t = setTimeout(() => api<Triage>('/triage', { goal }).then(setTriage).catch(() => setTriage(null)), 500);
+    const t = setTimeout(() => api<Triage>('/triage', { goal, language: chosen }).then(setTriage).catch(() => setTriage(null)), 500);
     return () => clearTimeout(t);
-  }, [goal]);
+  }, [goal, chosen]);
   const blockedByTriage = triage?.verdict === 'infeasible' && !force;
 
   const ready = (profiles?.profiles ?? []).filter(profileReady);
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
-  const blocked = !ready.length || !bootstrap?.runner_ready || working;
+  // 就绪看所选语言的工具链（旧后端没有语言列表时退回 runner_ready）。 Readiness follows the chosen language's toolchain (falls back to runner_ready on an old backend).
+  const toolchainReady = chosenInfo ? chosenInfo.ready : Boolean(bootstrap?.runner_ready);
+  const blocked = !ready.length || !toolchainReady || working;
 
   async function start() {
     if (!goal.trim() || blocked || starting || blockedByTriage) return;
@@ -75,7 +83,7 @@ export function NewTask() {
       const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
         '/projects/plan',
-        { goal, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
+        { goal, language: chosen, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
         { label: '项目规划' },
       );
       push({ tone: 'info', text: '任务已启动，正在规划…' });
@@ -92,7 +100,7 @@ export function NewTask() {
         <span className="eyebrow">NEW TASK</span>
         <h1>描述需求，得到经过验证的代码</h1>
         <p className="muted">
-          目前支持 Go 标准库命令行项目。Planner 规划 → Tester 设计测试 → Developer 生成 → Executor 真实运行检查 → Gate 独立核对。
+          目前支持 {languages.length ? languages.map((l) => l.title ?? l.id).join(' / ') : 'Go'} 标准库命令行项目。Planner 规划 → Tester 设计测试 → Developer 生成 → Executor 真实运行检查 → Gate 独立核对。
         </p>
         <div className="composer-box">
           <textarea
@@ -116,6 +124,13 @@ export function NewTask() {
                     <option key={p.id} value={p.id}>
                       {profileLabel(p)}
                     </option>
+                  ))}
+                </select>
+              )}
+              {languages.length > 1 && (
+                <select aria-label="语言" value={chosen} onChange={(e) => setLanguage(e.target.value)} title="生成项目使用的语言（设置 → 语言 可配置）">
+                  {languages.map((l) => (
+                    <option key={l.id} value={l.id}>{(l.title ?? l.id) + (l.ready ? '' : '（未就绪）')}</option>
                   ))}
                 </select>
               )}
@@ -161,7 +176,11 @@ export function NewTask() {
             还没有可用模型。<button className="link" onClick={() => navigate('/settings/models')}>前往添加</button> 或 <button className="link" onClick={() => navigate('/settings/local')}>选择本地 Ollama 模型</button>。
           </Notice>
         )}
-        {bootstrap && !bootstrap.runner_ready && <Notice tone="bad">Go runner 尚未就绪，请先按环境指南构建。</Notice>}
+        {bootstrap && !toolchainReady && (
+          <Notice tone="bad">
+            {languageTitle(languages, chosen)} 的工具链尚未就绪。<button className="link" onClick={() => navigate('/settings/languages')}>前往设置 → 语言</button> 查看缺什么并配置。
+          </Notice>
+        )}
         {working && <Notice tone="warn">另一个任务正在执行；后端目前串行，完成后才能开始新任务。你仍可浏览历史。</Notice>}
         <div className="examples">
           {examples.map((e) => (

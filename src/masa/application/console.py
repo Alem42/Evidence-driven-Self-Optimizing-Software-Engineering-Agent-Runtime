@@ -154,7 +154,7 @@ class Console:
         if not isinstance(goal, str) or len(goal) > 16000:
             raise MasaError('goal must be text up to 16000 characters')
         from masa.application.checks.triage import assess
-        return assess(goal)
+        return assess(goal, registry.get(body.get('language') or registry.default_id()))  # 规则属于所选语言的包 / the rules belong to the chosen language's pack
 
     def project_report(self, rid):
         """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""

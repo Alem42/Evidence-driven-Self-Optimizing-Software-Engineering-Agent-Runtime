@@ -49,7 +49,8 @@ export function RoutingSection() {
             step={step}
             disabled={value == null}
             value={value == null ? '' : value / scale}
-            onChange={(e) => setBudget(key, e.target.value === '' ? null : Number(e.target.value) * scale)}
+            // 清空输入框得到 0 而不是“不限”（不限只由右边的勾选控制）；否则删光再输入会被误当作取消限制。 Clearing the box gives 0, not "unlimited" (only the checkbox controls that); otherwise erasing and retyping toggled the limit off.
+            onChange={(e) => setBudget(key, e.target.value === '' ? 0 : Number(e.target.value) * scale)}
           />
           <span className="muted">{unit}</span>
           <label className="check">

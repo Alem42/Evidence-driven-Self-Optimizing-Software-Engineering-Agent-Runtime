@@ -134,12 +134,54 @@ export interface Job {
   last_model_metrics?: { generation_tokens_per_second?: number; [k: string]: unknown } | null;
 }
 
+export interface LanguageSummary {
+  id: string;
+  title?: string;
+  ready: boolean;
+  default?: boolean;
+  ui?: { highlight?: string; verify_label?: string; [k: string]: unknown };
+}
+
+export interface LanguageConfigField {
+  key: string;
+  label: string;
+  kind: 'path' | 'text' | 'bool' | 'choice';
+  default?: unknown;
+  help?: string;
+  choices?: string[];
+}
+
+export interface LanguageInfo {
+  id: string;
+  title: string;
+  version?: number;
+  capabilities?: string[];
+  operations?: Record<string, { id: string; label: string }>;
+  readiness: { ok: boolean; details: string[] };
+  config?: LanguageConfigField[];
+  config_values?: Record<string, unknown>;
+  default?: boolean;
+  digest?: string;
+  error?: string;
+}
+
+export interface Languages {
+  default: string;
+  languages: LanguageInfo[];
+  extra_dirs: string[];
+}
+
 export interface Bootstrap {
   console_version: string;
   /** 只读演示部署：不能发起或修改任务。 A read-only demo deployment: nothing can be started or changed. */
   demo?: boolean;
   local_models?: { allowed: boolean; reason: string; vram_gb: number | null; ram_gb: number | null };
   runner_ready: boolean;
+  /** 运行器文件是否存在（语言的工具链是否就绪看 languages[].ready）。 Whether the runner binary exists (a language's toolchain readiness is languages[].ready). */
+  runner_exists?: boolean;
+  /** 默认语言 id。 The default language id. */
+  language?: string;
+  languages?: LanguageSummary[];
   active_run: string | null;
   active_job: (Job & { job_id: string }) | null;
   interrupted_jobs: { job_id: string; run_id?: string; phase?: string }[];

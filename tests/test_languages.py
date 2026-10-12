@@ -1,5 +1,6 @@
 """语言包管理器与一致性检查（对注册表里的每个包参数化）。 The pack manager and the conformance checks, parametrised over every registered pack."""
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 from masa.domain.models import MasaError
 from masa.languages.base import LanguagePack, load_manifest
 from masa.languages.registry import Registry, registry
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class RegistryTests(unittest.TestCase):
@@ -64,6 +67,56 @@ class RegistryTests(unittest.TestCase):
                 path.write_text(json.dumps(bad), encoding='utf-8')
                 with self.subTest(bad=bad), self.assertRaises(ValueError):
                     load_manifest(path)
+
+
+class SettingsApiTests(unittest.TestCase):
+    """设置 → 语言：默认语言与每个包的配置被校验、保存，并影响注册表。 Settings -> Languages: the default and each pack's settings are validated, saved and applied to the registry."""
+
+    def setUp(self):
+        from masa.application.console import Console
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.console = Console(Path(self.temp.name), Path(self.temp.name) / 'no-runner.exe', Path(self.temp.name) / 'no-go.exe', ROOT)
+        self.addCleanup(lambda: registry.configure(default='go', configs={}, extra_dirs=[]))
+
+    def test_the_language_list_carries_readiness_and_config_fields(self):
+        info = {l['id']: l for l in self.console.languages()['languages']}
+        self.assertIn('python', info)
+        self.assertEqual({f['key'] for f in info['python']['config']}, {'interpreter', 'test_framework'})
+        self.assertFalse(info['go']['readiness']['ok'])  # 这个临时环境没有 Go 工具链 / this temp setup has no Go toolchain
+        self.assertEqual(self.console.bootstrap()['language'], 'go')
+        self.assertEqual({l['id'] for l in self.console.bootstrap()['languages']} >= {'go', 'python'}, True)
+
+    def test_saving_validates_and_applies_the_configuration(self):
+        self.console.save_languages({'default': 'python', 'packs': {'python': {'test_framework': 'pytest', 'interpreter': ' ' + sys.executable + ' '}}})
+        python = registry.get('python')
+        self.assertEqual(registry.default_id(), 'python')
+        self.assertEqual(python.framework(), 'pytest')
+        self.assertEqual(python.interpreter(), Path(sys.executable))  # 首尾空白被去掉 / surrounding spaces are stripped
+        self.assertIn('pytest', python.operations['test'].args[-5:] + python.operations['test'].args)
+        saved = json.loads((Path(self.temp.name) / 'languages.json').read_text(encoding='utf-8'))
+        self.assertEqual(saved['default'], 'python')
+        for bad in ({'default': 'cobol'}, {'packs': {'python': {'nope': 1}}}, {'packs': {'python': {'test_framework': 'jest'}}}, {'packs': {'cobol': {}}}, {'extra_dirs': 'x'}):
+            with self.subTest(bad=bad), self.assertRaises(MasaError):
+                self.console.save_languages(bad)
+        # 重新读取：新的 Console 启动时应用保存的配置 / a new Console applies the saved configuration at start
+        from masa.application.console import Console
+        registry.configure(default='go', configs={}, extra_dirs=[])
+        Console(Path(self.temp.name), Path(self.temp.name) / 'no-runner.exe', Path(self.temp.name) / 'no-go.exe', ROOT)
+        self.assertEqual(registry.default_id(), 'python')
+
+    def test_triage_follows_the_chosen_language(self):
+        goal = '写一个 Python 脚本统计文件行数'
+        self.assertEqual(self.console.triage({'goal': goal, 'language': 'go'})['verdict'], 'infeasible')
+        self.assertNotEqual(self.console.triage({'goal': goal, 'language': 'python'})['verdict'], 'infeasible')
+
+    def test_a_task_in_a_language_that_is_not_ready_is_refused_when_a_runner_exists(self):
+        runner = Path(self.temp.name) / 'masa-runner.exe'
+        runner.write_bytes(b'x')
+        self.console.runner_path = runner
+        with self.assertRaisesRegex(MasaError, 'not ready'):
+            self.console._language_of({'language': 'go'})  # 这里没有 Go 工具链 / there is no Go toolchain here
+        self.assertEqual(self.console._language_of({'language': 'python'}), 'python')
 
 
 class ConformanceTests(unittest.TestCase):

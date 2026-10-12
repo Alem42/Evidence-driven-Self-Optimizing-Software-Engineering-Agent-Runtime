@@ -27,7 +27,7 @@ export function failureSummary(result?: { stdout?: string; stderr?: string } | n
 /** 从编译/测试输出中提取 `path.go:12:3: message`，用于编辑器标注与跳转。 */
 export function parseDiagnostics(text: string): SourceFinding[] {
   const found: SourceFinding[] = [];
-  const re = /^\s*(?:\.\/)?([\w./\\-]+\.go):(\d+)(?::\d+)?:?\s*(.*)$/;
+  const re = /^\s*(?:\.\/)?([\w./\\-]+\.(?:go|py)):(\d+)(?::\d+)?:?\s*(.*)$/;
   for (const line of text.split('\n')) {
     const m = re.exec(line);
     if (m) found.push({ path: m[1].replace(/\\/g, '/'), line: Number(m[2]), message: m[3] || '问题' });
