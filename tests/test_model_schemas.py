@@ -22,15 +22,21 @@ class ModelSchemaTests(unittest.TestCase):
 
 
 class LenientTrailingTests(unittest.TestCase):
-    """工人角色每步只执行第一个动作；其它角色对多余内容仍然严格。 A worker role executes the first action only; other roles stay strict about trailing content."""
+    """模型常在第一个 JSON 对象之后追加第二个动作或标记：取第一个完整对象；不完整的第一个对象仍然是错。 Models often append a second action or markup after the first JSON object: the first complete object is used; an incomplete first object is still an error."""
 
-    def test_the_first_action_is_used_and_the_junk_after_it_is_ignored_for_workers_only(self):
+    def test_the_first_object_is_used_and_the_junk_after_it_is_ignored(self):
         from masa.infrastructure.llm import decode_action
         text = '{"tool":"write_file","path":"a.py","content":"x"}' + chr(10) + chr(10) + '{"tool":"run_check","kind":"test"}'
         self.assertEqual(decode_action(text, 'package_worker')['tool'], 'write_file')
         self.assertEqual(decode_action('{"tool":"finish"}</tags>', 'package_worker'), {'tool': 'finish'})
-        with self.assertRaises(json.JSONDecodeError):
-            decode_action(text, 'project_planner')
+        self.assertEqual(decode_action('{"files":{"a.py":"x"}}' + chr(10) + 'Done.', 'project_repair'), {'files': {'a.py': 'x'}})
         with self.assertRaises(json.JSONDecodeError):
             decode_action('{"tool":', 'package_worker')  # 不完整的第一个对象不是“多余内容” / an incomplete first object is not "trailing junk"
+        with self.assertRaises(json.JSONDecodeError):
+            decode_action('not json at all', 'project_planner')
         self.assertEqual(decode_action('{"a":1}', 'project_planner'), {'a': 1})
+
+    def test_raw_newlines_and_tabs_inside_strings_are_accepted(self):
+        from masa.infrastructure.llm import decode_action
+        raw = '{"files":{"a.py":"line one' + chr(10) + chr(9) + 'line two"}}'
+        self.assertEqual(decode_action(raw, 'project_developer')['files']['a.py'], 'line one' + chr(10) + chr(9) + 'line two')

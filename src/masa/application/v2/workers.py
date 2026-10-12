@@ -155,7 +155,9 @@ class WorkerWorkspace:
         if path not in self.own_paths:
             return {'ok': False, 'text': f'{path} is outside your package: you may only write {sorted(self.own_paths)}'}
         if not isinstance(content, str) or '\x00' in content or len(content.encode('utf-8')) > MAX_FILE_BYTES:
-            return {'ok': False, 'text': 'the content must be text of at most 60 KB'}
+            if not isinstance(content, str):
+                return {'ok': False, 'text': 'write_file needs a "content" field holding the complete file text (a JSON string); your reply had none or a different type. Reply again with {"tool":"write_file","path":...,"content":"..."}'}
+            return {'ok': False, 'text': 'the content must be text without NUL characters and at most 60 KB'}
         if not content.strip() and not self.pack.allow_empty(path):
             return {'ok': False, 'text': 'the file must not be empty'}
         return None
@@ -265,9 +267,18 @@ class WorkerWorkspace:
             outcome = self.run_check(action.get('kind') or 'test')
             if outcome.get('passed'):
                 self.passed.add(outcome['passed'])
-                required = {k for k in ('test', 'static') if self.pack.op_id(k) is not None}
+                required = [k for k in ('test', 'static') if self.pack.op_id(k) is not None]
                 complete = all(p in self.files or self.pack.allow_empty(p) for p in self.own_paths)
-                if complete and required <= self.passed:  # 所有检查都在当前内容上通过：自动封包，不再依赖模型记得调用 finish / every check passed on the current content: seal automatically instead of relying on the model to call finish
+                # 一个检查通过、文件都在：另一个必需的检查由工具自己跑，不让模型再花一步去想起它（真实运行里模型测试通过后一直读文件、重写，从没去跑静态检查，到步数上限也没封包）。
+                # One check passed and every planned file exists: the tool runs the other required check itself instead of spending a model step on remembering it (in a real run the model kept re-reading and rewriting after the tests passed and never ran the static check).
+                for kind in required if complete else []:
+                    if kind in self.passed:
+                        continue
+                    extra = self.run_check(kind)
+                    if not extra.get('passed'):
+                        return {**extra, 'text': outcome['text'] + chr(10) + extra['text'], 'ok': False}
+                    self.passed.add(kind)
+                if complete and set(required) <= self.passed:  # 所有检查都在当前内容上通过：自动封包，不再依赖模型记得调用 finish / every check passed on the current content: seal automatically instead of relying on the model to call finish
                     return {'ok': True, 'text': outcome['text'] + '. All checks pass and all planned files exist: package sealed.', 'sealed': True}
             return outcome
         if tool == 'note':
@@ -371,7 +382,7 @@ class V2Generation(ProjectGeneration):
                             break
                         results.append({'step': step, 'tool': action.get('tool'), 'path': action.get('path'), 'ok': outcome['ok'], 'result': outcome['text'][:MAX_RESULT_CHARS]})
                         self.store.event(rid, 'worker_step', {'package': directory, 'step': step, 'tool': action.get('tool'), 'path': action.get('path'), 'ok': outcome['ok'],
-                                                              'summary': outcome['text'][:300]})
+                                                              'keys': sorted(action), 'summary': outcome['text'][:300]})
                         if outcome.get('sealed'):
                             sealed = True
                             break

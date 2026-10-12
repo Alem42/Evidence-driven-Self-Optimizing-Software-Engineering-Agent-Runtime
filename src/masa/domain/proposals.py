@@ -67,6 +67,56 @@ def validate_spec(spec, language=None):
     return spec
 
 
+CHECK_KEYS = ('operation', 'purpose', 'acceptance_indices', 'cases')
+CASE_KEYS = ('name', 'input', 'expected', 'level')
+LEVEL_SYNONYMS = {'e2e': 'cli', 'end-to-end': 'cli', 'end_to_end': 'cli', 'system': 'integration', 'functional': 'integration', 'component': 'integration', 'smoke': 'cli', 'regression': 'unit', 'edge': 'unit', 'boundary': 'unit'}
+
+
+def normalize_checks(checks):
+    """把 Tester 的“格式小错”确定性地改正，而不是整次拒绝再付一次费（真实评测里 39 次 Tester 调用有 17 次因格式被拒）：
+    · 检查对象多出的字段（最常见的是 `level`）丢掉——它们从不被使用；空的 `cases` 数组丢掉；
+    · 同一个操作出现多次（例如分成“单元”和“命令行”两个 py_test）合并成一个：用途拼接、验收索引取并集、用例依次拼接（最多 16 个）；
+    · 用例的 `level` 写成同义词（e2e、end-to-end、system…）映射到 unit/integration/cli；用例里多出的字段丢掉。
+    不认识的操作、缺字段、索引越界等**实质**错误不动，照样由 validate_checks 拒绝。有效的计划原样返回（不改变任何已有行为）。
+    Correct the Tester's formatting slips deterministically instead of rejecting the answer and paying again (in real evaluations 17 of 39 Tester calls were rejected for format reasons):
+    extra fields on a check (most often `level`) are dropped because they are never used, and so are empty `cases` arrays; the same operation appearing several times (e.g. a "unit" and a "cli" py_test) is merged into one
+    (purposes joined, acceptance indices united, cases concatenated, 16 at most); a case `level` written as a synonym is mapped to unit/integration/cli and extra case fields are dropped. Substantive errors (an unknown
+    operation, missing fields, out-of-range indices) are left alone and still rejected by validate_checks. A valid plan is returned unchanged."""
+    if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+        return checks
+    merged, order = {}, []
+    for check in checks:
+        if not {'operation', 'purpose', 'acceptance_indices'} <= set(check):
+            return checks  # 缺必需字段：这是实质错误，交给校验 / a required field is missing: substantive, left to validation
+        item = {k: check[k] for k in CHECK_KEYS if k in check}
+        cases = item.get('cases')
+        if not cases and 'cases' in item:
+            del item['cases']
+        elif isinstance(cases, list):
+            fixed = []
+            for case in cases:
+                if isinstance(case, dict) and set(CASE_KEYS) <= set(case):
+                    case = {k: case[k] for k in CASE_KEYS}
+                    if isinstance(case['level'], str):
+                        level = case['level'].strip().lower()
+                        case['level'] = LEVEL_SYNONYMS.get(level, level)
+                fixed.append(case)
+            item['cases'] = fixed
+        operation = item['operation']
+        if isinstance(operation, str) and operation in merged:
+            first = merged[operation]
+            first['purpose'] = f"{first['purpose']}\n{item['purpose']}" if isinstance(first['purpose'], str) and isinstance(item['purpose'], str) else first['purpose']
+            if isinstance(first['acceptance_indices'], list) and isinstance(item['acceptance_indices'], list):
+                first['acceptance_indices'] = sorted(set(first['acceptance_indices']) | set(item['acceptance_indices']), key=lambda i: (not isinstance(i, int), i if isinstance(i, int) else 0))
+            if item.get('cases'):
+                first['cases'] = (first.get('cases', []) + item['cases'])[:16]
+        else:
+            if isinstance(operation, str):
+                merged[operation] = item
+            order.append(item)
+    return order
+
+
 def validate_checks(checks, spec, require_coverage=True, language=None):
     """验证 Tester 覆盖验收项；只允许固定工具，不接受命令字符串。 Validate coverage and allowlisted checks, never shell commands."""
     if not isinstance(checks, list) or not 1 <= len(checks) <= 3:

@@ -112,16 +112,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 # 工人角色每步只执行一个动作：模型按它自己的“原生工具调用”习惯，常在第一个 JSON 之后再追加第二个动作或一段标记（真实运行里 Flash 就是这样）。只对这些角色接受“第一个完整 JSON 对象 + 其后的杂质”，其余角色仍然严格。
 # A worker role executes ONE action per step: following its native tool-calling habit the model often appends a second action or some markup after the first JSON (that is what Flash did in real runs). Only these roles accept
 # "the first complete JSON object followed by trailing junk"; every other role stays strict.
-LENIENT_TRAILING = frozenset({'package_worker'})
+LENIENT_TRAILING = frozenset({'package_worker', 'project_repair', 'project_test_revision', 'project_developer', 'project_tester', 'project_planner', 'project_diagnoser'})
 
 
 def decode_action(content, purpose=None):
     """把模型的回答解码成 JSON 动作；工人角色容忍第一个对象之后的多余内容。 Decode the model's answer into a JSON action; worker roles tolerate junk after the first object."""
     try:
-        return json.loads(content)
+        return json.loads(content, strict=False)  # strict=False：字符串里的原始换行/制表符不算错（模型写代码时常见）/ raw newlines and tabs inside strings are accepted (common when a model writes code)
     except json.JSONDecodeError as exc:
         if purpose in LENIENT_TRAILING and exc.msg.startswith('Extra data'):
-            first, _end = json.JSONDecoder().raw_decode(content.lstrip())
+            first, _end = json.JSONDecoder(strict=False).raw_decode(content.lstrip())
             if isinstance(first, dict):
                 return first
         raise
@@ -369,7 +369,7 @@ class ChatProvider:
                 # 标记“已收到”，协调器才会带原因重试/升级，而不是把它当成网络失败直接中止（真实模拟中 DeepSeek 返回截断 JSON 即因此中止）。
                 # Mark it as RECEIVED so the coordinator retries/escalates instead of aborting as if it were a transport failure.
                 # sample：出错位置附近的一小段原文（密钥已替换），只进本地账本，方便定位“模型到底写坏了什么”。 A short excerpt around the error (key redacted), stored only in the local ledger, to see what exactly the model broke.
-                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[],'sample':content.replace(self.key,'[REDACTED]')[max(0,exc.pos-160):exc.pos+60] if self.key else content[max(0,exc.pos-160):exc.pos+60]}
+                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[],'reason':exc.msg,'position':exc.pos,'length':len(content),'sample':content.replace(self.key,'[REDACTED]')[max(0,exc.pos-160):exc.pos+60] if self.key else content[max(0,exc.pos-160):exc.pos+60]}
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
             # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
             # Record response shape only, never code, thinking or raw exception text.
@@ -385,4 +385,12 @@ class ChatProvider:
                 if not isinstance(check,dict) or 'operation' in check:raise MasaError('invalid local check object')
                 checks.append({'operation':operation,**check})
             action={**action,'checks':checks}
-        return validate_response(context, action, self.key)
+        try:
+            return validate_response(context, action, self.key)
+        except MasaError:
+            # 被校验拒绝的计划类回答（规格、检查计划、诊断）留一小段原文在本地账本里：以前只留“被拒绝”三个字，没法知道模型到底写了什么（只有本地账本，密钥已替换；代码类角色不存）。
+            # Keep a short excerpt of a rejected planning-type answer (spec, check plan, diagnosis) in the local ledger: before, only "rejected" survived and nobody could see what the model wrote (local ledger only, key redacted; code roles are not stored).
+            if purpose in ('project_planner', 'project_tester', 'project_diagnoser', 'project_triage') and isinstance(self.contract_diagnostic, dict):
+                raw = json.dumps(action, ensure_ascii=False)[:1500]
+                self.contract_diagnostic['rejected'] = raw.replace(self.key, '[REDACTED]') if self.key else raw
+            raise

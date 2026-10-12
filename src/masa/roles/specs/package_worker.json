@@ -18,7 +18,7 @@
     ],
     "writes": "implementation"
   },
-  "validator": "json_schema",
+  "validator": "worker_action",
   "prompt": "package_worker.prompt.md",
   "max_output_tokens": 6000,
   "input": [
@@ -37,48 +37,121 @@
     "spec_examples"
   ],
   "output_schema": {
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-      "tool"
-    ],
-    "properties": {
-      "tool": {
-        "enum": [
-          "read_file",
-          "write_file",
-          "edit_file",
-          "run_check",
-          "note",
-          "finish"
-        ]
+    "oneOf": [
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "path",
+          "content"
+        ],
+        "properties": {
+          "tool": {
+            "const": "write_file"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 60000
+          }
+        }
       },
-      "path": {
-        "type": "string",
-        "maxLength": 300
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "path",
+          "old",
+          "new"
+        ],
+        "properties": {
+          "tool": {
+            "const": "edit_file"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "old": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "new": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        }
       },
-      "content": {
-        "type": "string",
-        "maxLength": 60000
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "path"
+        ],
+        "properties": {
+          "tool": {
+            "const": "read_file"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
       },
-      "old": {
-        "type": "string",
-        "maxLength": 20000
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "kind"
+        ],
+        "properties": {
+          "tool": {
+            "const": "run_check"
+          },
+          "kind": {
+            "enum": [
+              "test",
+              "static"
+            ]
+          }
+        }
       },
-      "new": {
-        "type": "string",
-        "maxLength": 20000
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "text"
+        ],
+        "properties": {
+          "tool": {
+            "const": "note"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
       },
-      "kind": {
-        "enum": [
-          "test",
-          "static"
-        ]
-      },
-      "text": {
-        "type": "string",
-        "maxLength": 1000
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool"
+        ],
+        "properties": {
+          "tool": {
+            "const": "finish"
+          }
+        }
       }
-    }
+    ]
   }
 }

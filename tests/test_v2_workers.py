@@ -40,7 +40,7 @@ def write(path, content):
     return {'tool': 'write_file', 'path': path, 'content': content}
 
 
-GOOD = [write('calc/app.py', APP), write('calc/__main__.py', MAIN), write('tests/test_app.py', TEST), {'tool': 'run_check', 'kind': 'test'}, {'tool': 'finish'}]
+GOOD = [write('calc/app.py', APP), write('calc/__main__.py', MAIN), write('tests/test_app.py', TEST), {'tool': 'run_check', 'kind': 'test'}]  # 测试通过后工具自己跑静态检查并封包 / after the tests pass the tool runs the static check itself and seals
 
 
 @unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
@@ -71,7 +71,7 @@ class WorkerLoopTests(unittest.TestCase):
         self.assertEqual(files['calc/app.py'], APP)
         self.assertEqual(store.read(store.run(draft)['data']['project_plan']['spec_approval_ref'])['spec']['module'], 'calc')
         steps = [e['payload'] for e in events if e['type'] == 'worker_step']
-        self.assertEqual([s['tool'] for s in steps], ['write_file', 'write_file', 'write_file', 'run_check', 'finish'])
+        self.assertEqual([s['tool'] for s in steps], ['write_file', 'write_file', 'write_file', 'run_check'])
         self.assertTrue(all(s['ok'] for s in steps))
         sealed = [e['payload'] for e in events if e['type'] == 'package_sealed']
         self.assertEqual([s['package'] for s in sealed], ['calc'])
@@ -87,6 +87,24 @@ class WorkerLoopTests(unittest.TestCase):
         steps = [e['payload'] for e in events if e['type'] == 'worker_step']
         self.assertEqual(steps[-1]['tool'], 'run_check')
         self.assertIn('package sealed', steps[-1]['summary'])  # 没有调用 finish，也封包了 / sealed without a finish call
+
+    def test_a_malformed_action_is_answered_by_the_tool_instead_of_failing_the_stage(self):
+        # 真实运行：本地 glm 的 write_file 没有 content。以前这会让整个生成阶段失败重来；现在工具把原因回给模型，下一步它改正。 Real run: the local glm's write_file had no content. It used to fail and restart the whole stage; now the tool answers and the model corrects itself.
+        actions = [{'tool': 'write_file', 'path': 'calc/app.py'}, {'tool': 'make_coffee'}, *GOOD]
+        store, draft, worker, files, result, events = self.run_flow(actions)
+        self.assertEqual(result['status'], 'succeeded')
+        steps = [e['payload'] for e in events if e['type'] == 'worker_step']
+        self.assertEqual([s['ok'] for s in steps[:2]], [False, False])
+        self.assertIn('needs a "content" field', steps[0]['summary'])
+        self.assertIn("unknown tool 'make_coffee'", steps[1]['summary'])
+        self.assertEqual(steps[0]['keys'], ['path', 'tool'])
+
+    def test_the_local_structured_output_schema_requires_the_fields_of_each_tool(self):
+        from masa.agents.schemas import response_schema
+        schema = response_schema({'purpose': 'package_worker', 'language': 'python'})
+        write = next(o for o in schema['oneOf'] if o['properties']['tool'] == {'const': 'write_file'})
+        self.assertEqual(sorted(write['required']), ['content', 'path', 'tool'])
+        self.assertEqual(len(schema['oneOf']), 6)
 
     def test_pointless_actions_are_pushed_back(self):
         actions = [write('calc/app.py', APP), write('calc/app.py', APP), {'tool': 'read_file', 'path': 'calc/app.py'}, *GOOD[1:]]
@@ -201,9 +219,9 @@ class SeveralPackagesTests(unittest.TestCase):
         return [r for r in self.store.all_runs() if r['data'].get('parent_run_id') == self.parent and r['status'] == 'failed'][0]
 
     def test_packages_are_written_leaves_first_and_the_entry_last(self):
-        actions = [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
-                   write('calc/app/app.py', APP2), write('tests/test_app.py', APP2_TEST), check('test'), check('static'),
-                   write('calc/__main__.py', MAIN2), check('test'), check('static')]
+        actions = [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'),
+                   write('calc/app/app.py', APP2), write('tests/test_app.py', APP2_TEST), check('test'),
+                   write('calc/__main__.py', MAIN2), check('test')]
         draft, worker = self.generate(actions)
         order = self.events(draft, 'package_order')[0]
         self.assertEqual(order['order'], ['calc/parser', 'calc/app', 'calc'])  # 规格里 app 在 parser 前面，但 app 的用途提到了 parser / the spec lists app before parser, but app's purpose mentions the parser
@@ -215,9 +233,9 @@ class SeveralPackagesTests(unittest.TestCase):
     def test_a_package_that_needs_an_unwritten_package_is_deferred_behind_it(self):
         from unittest.mock import patch
         actions = [write('calc/app/app.py', APP2), write('tests/test_app.py', APP2_TEST), check('test'),  # app 先写，测试因为 parser 还不存在而失败 / app first; its test fails because the parser does not exist yet
-                   write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
-                   check('test'), check('static'),  # app 回来：什么都不用改 / app is back: nothing to change
-                   write('calc/__main__.py', MAIN2), check('test'), check('static')]
+                   write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'),
+                   check('test'),  # app 回来：什么都不用改 / app is back: nothing to change
+                   write('calc/__main__.py', MAIN2), check('test')]
         with patch('masa.application.v2.workers.dependency_edges', lambda pack, spec, groups: {d: set() for d, _ in groups}):  # 不靠启发式排序，逼出“推迟” / no heuristic order: force the deferral
             draft, worker = self.generate(actions)
         deferred = self.events(draft, 'package_deferred')
@@ -228,7 +246,7 @@ class SeveralPackagesTests(unittest.TestCase):
 
     def stuck_actions(self):
         buggy = APP2.replace('print(sum(parse(stdin.read())), file=stdout)', 'print(sum(parse(stdin.read())) + 1, file=stdout)')
-        return [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
+        return [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'),
                 write('calc/app/app.py', buggy), write('tests/test_app.py', APP2_TEST), check('test'), {'tool': 'note', 'text': 'trying'}, check('test'), {'tool': 'note', 'text': 'again'}, check('test')]
 
     def test_the_same_failure_three_times_in_a_row_is_stuck_and_stops_early(self):
@@ -252,11 +270,11 @@ class SeveralPackagesTests(unittest.TestCase):
         with self.assertRaises(MasaError):
             self.generate(self.stuck_actions())
         self.service.seed_run = self.failed_run()['id']
-        draft, worker = self.generate([{'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}, check('test'), check('static'),
-                                       write('calc/__main__.py', MAIN2), check('test'), check('static')], retry_feedback='package calc/app is stuck')
+        draft, worker = self.generate([{'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}, check('test'),
+                                       write('calc/__main__.py', MAIN2), check('test')], retry_feedback='package calc/app is stuck')
         self.assertEqual([e['package'] for e in self.events(draft, 'package_reused')], ['calc/parser'])
         self.assertEqual([e['package'] for e in self.events(draft, 'package_sealed')], ['calc/app', 'calc'])
-        self.assertEqual(self.store.run(draft)['model_calls'], 6)  # 只有 app 和入口花了调用；parser 没有重写 / only app and the entry cost calls; the parser was not rewritten
+        self.assertEqual(self.store.run(draft)['model_calls'], 4)  # 只有 app 和入口花了调用；parser 没有重写 / only app and the entry cost calls; the parser was not rewritten
         self.assertIn('package calc/app is stuck', worker.contexts[0]['previous_attempt_error'])
         files, result = self.finish(draft)
         self.assertEqual(result['status'], 'succeeded', result)
@@ -285,8 +303,8 @@ class GoWorkerTests(unittest.TestCase):
                 meta = store.run(parent)['data']['project_plan']
                 planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': GO_SPEC, 'checks': GO_CHECKS})
                 actions = [write('internal/app/app.go', GO_FILES['internal/app/app.go']), write('internal/app/app_test.go', GO_FILES['internal/app/app_test.go']),
-                           {'tool': 'run_check', 'kind': 'test'}, {'tool': 'finish'},
-                           write('cmd/app/main.go', GO_FILES['cmd/app/main.go']), {'tool': 'finish'}]
+                           {'tool': 'run_check', 'kind': 'test'},  # go vet 与 gofmt 由工具自己跑，通过就封包 / the tool runs go vet and gofmt itself and seals
+                           write('cmd/app/main.go', GO_FILES['cmd/app/main.go']), {'tool': 'run_check', 'kind': 'test'}]
 
                 class GoWorker(ScriptedWorker):
                     def respond(self, context):

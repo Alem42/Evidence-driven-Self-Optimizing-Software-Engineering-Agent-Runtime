@@ -149,7 +149,8 @@ def _validate_project_roles(context, action, key):
         raise MasaError('invalid Tester proposal')
     # 模型对静态检查常写 "cases": []：提示词要求省略，但空数组不携带信息，丢掉它比拒绝整次回答（再花一次调用）便宜。
     # Models often write "cases": [] for static checks: the prompt says to omit it, but an empty array carries no information, and dropping it is cheaper than rejecting the whole answer (and paying again).
-    checks = [{k: v for k, v in c.items() if not (k == 'cases' and not v)} if isinstance(c, dict) else c for c in action['checks']] if isinstance(action['checks'], list) else action['checks']
+    from masa.domain.proposals import normalize_checks
+    checks = normalize_checks(action['checks'])
     return validate_checks(checks, context['spec'], require_coverage=False, language=context.get('language'))
 
 
@@ -209,7 +210,16 @@ def _validate_json_schema(context, action, key):
     return action
 
 
+def _validate_worker_action(context, action, key):
+    """工人的一步动作只检查形状（是对象、有字符串 tool）：缺字段、没有的工具、越界写入由工具带着精确原因回给模型——一个写坏的动作不应让整个生成阶段失败重来。
+    A worker step is checked for shape only (an object with a string tool): missing fields, unknown tools and out-of-scope writes are reported back to the model by the tool with the precise reason; one malformed step must not fail and restart the whole generation stage."""
+    if not isinstance(action.get('tool'), str):
+        raise MasaError('a worker action needs a "tool" field')
+    return {k: (v.replace(key, '[REDACTED]') if key and isinstance(v, str) else v) for k, v in action.items()}
+
+
 VALIDATORS = {
+    'worker_action': _validate_worker_action,
     'triage': _validate_triage,
     'diagnosis': _validate_diagnosis,
     'semantic_review': _validate_semantic_review,

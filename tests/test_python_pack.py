@@ -355,3 +355,46 @@ class ProductSurfaceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NormalizeChecksTests(unittest.TestCase):
+    """Tester 的格式小错被确定性地改正；实质错误仍然被拒绝；有效计划原样不动。 Formatting slips are corrected; substantive errors are still rejected; a valid plan is untouched."""
+
+    def case(self, name='c', level='unit'):
+        return {'name': name, 'input': 'x', 'expected': 'y', 'level': level}
+
+    def validate(self, checks):
+        from masa.domain.proposals import normalize_checks
+        return validate_checks(normalize_checks(checks), SPEC, language='python')
+
+    def test_a_valid_plan_is_returned_unchanged(self):
+        from masa.domain.proposals import normalize_checks
+        self.assertEqual(normalize_checks(CHECKS), CHECKS)
+
+    def test_extra_check_fields_and_empty_cases_are_dropped(self):
+        checks = [{**CHECKS[0], 'level': 'unit', 'timeout': 5}, {**CHECKS[1], 'cases': [], 'level': 'unit'}]
+        result = self.validate(checks)
+        self.assertEqual(set(result[0]), {'operation', 'purpose', 'acceptance_indices', 'cases'})
+        self.assertNotIn('cases', result[1])
+
+    def test_the_same_operation_twice_is_merged(self):
+        checks = [{'operation': 'py_test', 'purpose': 'unit', 'acceptance_indices': [0], 'cases': [self.case('a')]},
+                  {'operation': 'py_test', 'purpose': 'cli', 'acceptance_indices': [0], 'cases': [self.case('b', 'cli')]}]
+        result = self.validate(checks)
+        self.assertEqual(len(result), 1)
+        self.assertEqual([c['name'] for c in result[0]['cases']], ['a', 'b'])
+        self.assertEqual(result[0]['purpose'], 'unit' + NL + 'cli')
+
+    def test_level_synonyms_and_extra_case_fields_are_corrected(self):
+        checks = [{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [0], 'cases': [{**self.case('a', 'E2E'), 'note': 'x'}, self.case('b', 'Integration')]}]
+        cases = self.validate(checks)[0]['cases']
+        self.assertEqual([(c['level'], set(c)) for c in cases], [('cli', {'name', 'input', 'expected', 'level'}), ('integration', {'name', 'input', 'expected', 'level'})])
+
+    def test_substantive_errors_are_still_rejected(self):
+        from masa.domain.proposals import normalize_checks
+        for bad, message in (([{'operation': 'py_compile', 'purpose': 'p', 'acceptance_indices': [0]}], 'unauthorized'),
+                             ([{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [7], 'cases': [self.case()]}], 'acceptance reference'),
+                             ([{'operation': 'py_test', 'purpose': 'p'}], 'invalid check fields'),
+                             ([{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [0], 'cases': [self.case('a', 'weird')]}], 'test level')):
+            with self.subTest(message=message), self.assertRaisesRegex(MasaError, message):
+                validate_checks(normalize_checks(bad), SPEC, language='python')
