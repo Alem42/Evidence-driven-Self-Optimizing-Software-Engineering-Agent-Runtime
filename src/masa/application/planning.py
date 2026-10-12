@@ -69,7 +69,10 @@ class ProjectPlanning:
         # 本地模型复核可行性：只能升级为“有风险”，失败也不影响规划。Local review may only raise a warning; failures never block planning.
         if triage_provider is not None and not resume_id and not reuse and not retry_of:
             try:
-                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal})
+                # 复核用自己的冻结键：它常常是本地模型，而规划者可能随路由换成云端——共用 model_snapshot_ref 会把“换模型”误判成“有人改了配置”（真实任务因此失败过两次）。
+                # Triage freezes under its own key: it is usually the local model while the planner may be routed to the cloud - sharing model_snapshot_ref made that
+                # switch look like "someone changed the configuration" (two real tasks failed that way).
+                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal},freeze_key='triage_snapshot_ref')
                 plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{**opinion,'by':triage_provider.profile.get('model')}}
                 if opinion['verdict']=='risky' and plan['triage'].get('verdict')=='ok':plan['triage']['verdict']='risky'
             except Exception as exc:  # 预检只是建议：任何失败都不能影响规划 / advisory only: no failure may block planning
