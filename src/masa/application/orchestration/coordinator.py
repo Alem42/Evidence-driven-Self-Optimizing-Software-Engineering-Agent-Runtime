@@ -222,6 +222,18 @@ class WorkflowCoordinator:
         if reject_noop and int(self.job.get('noop_streak',0))>0:
             raise NoProgress('the fix returned the files unchanged on every attempt, including the strongest available model')
 
+    def _check_examples(self, verified, runner):
+        """策略 planner_examples：成功之后用真实程序核对 Planner 的示例（只记录，永远不影响裁决，任何错误都被吞掉）。 Policy planner_examples: after success check the Planner's examples against the real program (recorded only, never affects the verdict, any error is swallowed)."""
+        if not (self._ladder and self.router.policy.get('planner_examples')):return
+        try:
+            from masa.application.checks.examples import check_examples
+            data=self.store.run(verified)['data']
+            spec=self.store.read(self.store.read(data['project_bundle']['approval_ref'])['spec_approval_ref'])['spec']
+            report=check_examples(self.store,runner,verified,spec)
+            if report:self.job['examples']={'total':report['total'],'passed':report['passed']}
+        except Exception:
+            pass
+
     def _stopped(self, stop, run_id):
         """路由决定停止：保留证据，任务以说明结束，而不是报错。 A routing stop ends the task with a note and keeps all evidence."""
         self._emit('task_stopped',{'reason':stop.reason,'detail':stop.detail},run_id)
@@ -351,6 +363,7 @@ class WorkflowCoordinator:
                 return
             if result['status']=='succeeded':
                 self._library_settle(True,'succeeded')
+                self._check_examples(verified,runner)
                 self._maybe_review(verified)  # 只读建议，永远不影响裁决；策略 conductor 关闭时什么都不做 / advisory only, never affects the verdict; a no-op unless policy `conductor` is on
                 self.job.update(status='completed',result={'id':verified})
                 return
@@ -949,7 +962,7 @@ class WorkflowCoordinator:
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
                                        contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None,
-                                       language=self.language)
+                                       language=self.language,examples=bool(self._ladder and self.router.policy.get('planner_examples')))
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

@@ -120,6 +120,9 @@ export function RoutingSection() {
           <Field label="包间接口契约（规格里至少 3 个内部包时，写代码前先写结构化契约）">
             <input type="checkbox" checked={!!draft.policy.package_contract} onChange={(e) => setPolicy({ package_contract: e.target.checked })} />
           </Field>
+          <Field label="Planner 示例（Planner 额外写 3–8 个“参数/标准输入 → 逐字节输出/退出码”的示例，作为唯一的精确期望来源；Tester 自动并入，任务成功后用真实程序再核对一遍，只记录不改变裁决）">
+            <input type="checkbox" checked={!!draft.policy.planner_examples} onChange={(e) => setPolicy({ planner_examples: e.target.checked })} />
+          </Field>
           <Field label="断言裁判（失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为 Diagnoser 的独立证据）">
             <input type="checkbox" checked={!!draft.policy.assertion_referee} onChange={(e) => setPolicy({ assertion_referee: e.target.checked })} />
           </Field>

@@ -132,6 +132,9 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 	HideWindow(cmd)
 	cmd.Dir, cmd.Env = cfg.Workspace, env
 	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if op.ArgvFromRequest {
+		cmd.Stdin = strings.NewReader(req.Stdin) // 没有就是空输入，而不是继承运行器的标准输入 / empty input when absent, never the runner's own stdin
+	}
 	// A descendant holding a pipe must not keep the worker alive indefinitely.
 	cmd.WaitDelay = 300 * time.Millisecond
 	err := cmd.Run()

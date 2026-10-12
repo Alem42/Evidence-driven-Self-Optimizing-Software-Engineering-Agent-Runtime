@@ -346,6 +346,7 @@ export interface RoutingPolicy {
   library?: number;
   context_budget?: boolean;
   package_contract?: boolean;
+  planner_examples?: boolean;
   assertion_referee?: boolean;
 }
 

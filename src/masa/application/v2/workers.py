@@ -355,7 +355,8 @@ class V2Generation(ProjectGeneration):
                         context = {'goal': goal, 'acceptance': spec['acceptance'], 'examples': self._examples(approved), 'package': directory or '.',
                                    'own_files': [{'path': p, 'purpose': purposes[p]} for p in sorted(purposes)], 'files': workspace.own_view(),
                                    'interfaces': workspace.interfaces(), 'last_results': results[-KEPT_RESULTS:], 'notes': workspace.notes,
-                                   'step': step, 'max_steps': MAX_STEPS, 'language_notes': self.pack.worker_notes()}
+                                   'step': step, 'max_steps': MAX_STEPS, 'language_notes': self.pack.worker_notes(),
+                                   **({'spec_examples': spec['examples']} if spec.get('examples') else {})}
                         if retry_feedback and step == 1 and round_no == 1:
                             context['previous_attempt_error'] = str(retry_feedback)[:1000]
                         invocation = 'initial' if first else f'w:{directory}:{round_no}:{step}'[:100]

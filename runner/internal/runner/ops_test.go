@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,4 +81,38 @@ func TestHelperPrintsEnvironment(t *testing.T) {
 	if os.Getenv("MASA_TEST_SECRET") != "" {
 		println("hidden")
 	}
+}
+
+func TestStdinReachesOnlyRunKindOperations(t *testing.T) {
+	ops := &Ops{Version: 1, RootMarker: "marker.txt", Env: EnvPolicy{Set: map[string]string{"MASA_TEST_STDIN": "1"}}, Operations: map[string]OpDef{
+		"plain": {Command: Command{Exe: os.Args[0]}},
+		"run":   {Command: Command{Exe: os.Args[0], Args: []string{"-test.run=TestHelperEchoesStdin", "-test.v"}}, ArgvFromRequest: true, Run: true}}}
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "marker.txt"), nil, 0o600)
+	base := Request{ProtocolVersion: 1, RequestID: "r", SnapshotID: "s", TimeoutMS: 20000, MaxOutputBytes: 65536}
+	plain := base
+	plain.Operation, plain.Stdin = "plain", "x"
+	if res := Execute(context.Background(), plain, Config{Workspace: root, Ops: ops}); res.Status != "rejected" {
+		t.Fatalf("stdin accepted by a non-run operation: %+v", res)
+	}
+	big := base
+	big.Operation, big.Stdin = "run", strings.Repeat("a", 9000)
+	if res := Execute(context.Background(), big, Config{Workspace: root, Ops: ops}); res.Status != "rejected" {
+		t.Fatalf("oversized stdin accepted: %+v", res)
+	}
+	ok := base
+	ok.Operation, ok.Stdin = "run", "hello from stdin"
+	res := Execute(context.Background(), ok, Config{Workspace: root, Ops: ops})
+	if res.Status != "completed" || !strings.Contains(res.Stdout+res.Stderr, "got:hello from stdin") {
+		t.Fatalf("%+v", res)
+	}
+}
+
+// TestHelperEchoesStdin 只在被上面的测试当子进程运行时才读标准输入。 Reads stdin only when run as a child by the test above.
+func TestHelperEchoesStdin(t *testing.T) {
+	if os.Getenv("MASA_TEST_STDIN") != "1" {
+		return
+	}
+	data, _ := io.ReadAll(os.Stdin)
+	println("got:" + string(data))
 }

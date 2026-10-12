@@ -105,11 +105,12 @@ function RepairBox({ detail, advice, ownership }: { detail: Detail; advice?: { a
 // 一行一个参数，避免 shell 解析；程序输出与测试结论相互独立。
 function AppRunner({ detail }: { detail: Detail }) {
   const [args, setArgs] = useState('');
+  const [stdin, setStdin] = useState('');
   const [result, setResult] = useState<any>(null);
   const start = useAction(
     () =>
       new Promise<void>((resolve, reject) => {
-        startJob('/runs/' + detail.run.id + '/run-application', { argv: args === '' ? [] : args.split('\n') }, {
+        startJob('/runs/' + detail.run.id + '/run-application', { argv: args === '' ? [] : args.split('\n'), ...(stdin ? { stdin } : {}) }, {
           label: '运行程序',
           onDone: (job) => {
             if (job.status === 'failed') reject(new Error(job.error ?? '运行失败'));
@@ -126,6 +127,7 @@ function AppRunner({ detail }: { detail: Detail }) {
     <div className="repair">
       <h4>运行这个程序</h4>
       <textarea rows={2} value={args} disabled={start.busy} onChange={(e) => setArgs(e.target.value)} placeholder="程序参数，每行一个；留空表示无参数" />
+      <textarea rows={2} value={stdin} disabled={start.busy} onChange={(e) => setStdin(e.target.value)} placeholder="标准输入（最多 8192 个字符）；留空表示没有输入" />
       <div className="row">
         <Button variant="primary" size="sm" disabled={start.busy} onClick={start.run}>{start.busy ? '正在构建并运行…' : '运行程序'}</Button>
         {start.busy && <Button size="sm" onClick={stop.run}>停止</Button>}

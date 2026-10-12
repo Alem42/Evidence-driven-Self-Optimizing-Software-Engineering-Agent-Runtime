@@ -33,7 +33,8 @@
     "notes",
     "step",
     "max_steps",
-    "language_notes"
+    "language_notes",
+    "spec_examples"
   ],
   "output_schema": {
     "type": "object",

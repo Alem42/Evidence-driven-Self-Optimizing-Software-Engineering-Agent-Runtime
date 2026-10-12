@@ -19,8 +19,12 @@ def validate_spec(spec, language=None):
     """校验可移植目录与标准库 CLI 规格，不相信模型输出；语言相关的规则来自语言包。 Validate portable standard-library CLI specifications; language rules come from the pack."""
     pack = _pack(language)
     layout = pack.layout
-    if not isinstance(spec, dict) or set(spec) != {'summary','module','entrypoint','files','acceptance'}:
+    # examples 是可选字段（Planner 示例，策略 planner_examples）：旧规格没有它，照样合法。 `examples` is optional (the Planner's examples, policy planner_examples): old specs without it stay valid.
+    if not isinstance(spec, dict) or set(spec) - {'examples'} != {'summary','module','entrypoint','files','acceptance'}:
         raise MasaError('invalid ProjectSpec fields')
+    if 'examples' in spec:
+        from masa.domain.examples import validate_examples
+        validate_examples(spec['examples'])
     text(spec['summary'])
     if not re.fullmatch(layout['module_regex'], text(spec['module'], 160)):
         raise MasaError(f'invalid {pack.title} module name')

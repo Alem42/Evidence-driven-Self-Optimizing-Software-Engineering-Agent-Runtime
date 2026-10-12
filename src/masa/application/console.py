@@ -511,7 +511,7 @@ class Console:
                 store=Store(self.root)
                 try:
                     from masa.application.applications import run_application
-                    result=run_application(store,self._runner(),rid,body.get('argv',[]),self.app_cancel.is_set)
+                    result=run_application(store,self._runner(),rid,body.get('argv',[]),self.app_cancel.is_set,body.get('stdin',''))
                     self.jobs[ident].update(status='completed',result={'id':rid,'app_result':result})
                 except Exception as exc:
                     self.diagnostics.record('worker:application',exc)

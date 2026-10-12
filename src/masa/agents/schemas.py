@@ -53,6 +53,10 @@ def response_schema(context):
                 'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}
+    if context.get('examples_required'):
+        spec['required'] = spec['required'] + ['examples']
+        spec['properties']['examples'] = {'type':'array','minItems':3,'maxItems':8,'items':{'type':'object','additionalProperties':False,'required':['name','args','stdin','stdout','exit_code'],
+            'properties':{'name':string,'args':{'type':'array','maxItems':6,'items':string},'stdin':string,'stdout':string,'exit_code':{'type':'integer','minimum':0,'maximum':255}}}}
     if not context.get('clarification_allowed'):
         return spec
     option={'type':'object','additionalProperties':False,'required':['id','label'],

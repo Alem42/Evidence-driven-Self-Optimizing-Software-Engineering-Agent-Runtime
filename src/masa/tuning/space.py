@@ -35,6 +35,7 @@ SCALARS = {
     'policy.test_audit': (bool, None, None),
     'policy.context_budget': (bool, None, None),
     'policy.package_contract': (bool, None, None),
+    'policy.planner_examples': (bool, None, None),
     'policy.assertion_referee': (bool, None, None),
     'policy.library': (int, 0, 2),
 }

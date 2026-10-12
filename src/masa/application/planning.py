@@ -47,7 +47,7 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None):
+                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None, examples=False):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         # 语言：显式给出的优先；续跑/重试/复用沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry/reuse follow the original run; else the default language.
@@ -96,6 +96,9 @@ class ProjectPlanning:
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
             else:
                 values={'goal':goal}
+                if examples or plan.get('examples_required'):
+                    values['examples_required']=True  # Planner 示例（策略 planner_examples）/ Planner examples (policy planner_examples)
+                    plan['examples_required']=True
                 # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
                 # A received-but-rejected response is retried once with the concrete rejection reason.
                 if retry_feedback:values['previous_attempt_error']=str(retry_feedback)[:1000]
@@ -133,6 +136,11 @@ class ProjectPlanning:
             # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
             if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
             checks = self.call(rid, provider, 'project_tester', tester_values)
+            # Planner 示例确定性地并入测试检查（放在最前面），模型不转抄 / the Planner's examples are merged into the test check deterministically (first), no model re-types them
+            from masa.domain.examples import merge_into_checks
+            checks = merge_into_checks(checks, spec, pack.op_id('test'))
+            if spec.get('examples'):
+                self.store.event(rid, 'planner_examples', {'count': len(spec['examples']), 'names': [e['name'] for e in spec['examples']]})
             validate_checks(checks,spec,require_coverage=False,language=pack.id)
             if audit_provider is not None:
                 self._audit_cases(rid,audit_provider,goal,spec,checks,plan)

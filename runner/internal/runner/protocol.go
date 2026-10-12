@@ -18,6 +18,8 @@ type Request struct {
 	TimeoutMS       int      `json:"timeout_ms"`
 	MaxOutputBytes  int      `json:"max_output_bytes"`
 	Argv            []string `json:"argv,omitempty"`
+	// Stdin：只有运行类操作（带 argv 的操作）可以给标准输入，最多 8 KiB。 Standard input: only run-kind operations (those that take an argv) may carry it, 8 KiB at most.
+	Stdin string `json:"stdin,omitempty"`
 }
 
 type Result struct {
@@ -66,6 +68,9 @@ func (r Request) Validate(policy Policy) error {
 	}
 	if !policy.Operations[r.Operation] {
 		return fmt.Errorf("operation is not allowed")
+	}
+	if len(r.Stdin) > 8192 || (!policy.Argv[r.Operation] && r.Stdin != "") {
+		return fmt.Errorf("stdin outside runner policy")
 	}
 	if len(r.Argv) > 64 || (!policy.Argv[r.Operation] && len(r.Argv) > 0) {
 		return fmt.Errorf("argv outside runner policy")
