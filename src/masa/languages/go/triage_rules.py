@@ -8,9 +8,9 @@ INFEASIBLE, RISKY = 'infeasible', 'risky'
 RULES = [
     ('language', INFEASIBLE,
      r'(?:用|使用|以|in|using|with)\s*(?:python|java(?!script)|javascript|typescript|node(?:\.js)?|rust|c\+\+|c#|php|ruby|swift|kotlin|scala|lua|shell|bash|powershell)\b|'
-     r'\b(?:python|javascript|typescript|rust|c\+\+|c#|php|ruby|kotlin)\s*(?:实现|编写|写|版本|语言|program|script)',
-     '要求的不是 Go。目前 harness 只能生成并验证 Go 项目（Go 工具链是唯一的检查工具）。',
-     '改成 Go 标准库的命令行程序；其它语言要等语言包（M2 之后）。'),
+     r'\b(?:python|javascript|typescript|rust|c\+\+|c#|php|ruby|kotlin|java)\s*(?:实现|编写|写|版本|语言|脚本|程序|命令行|工具|项目|代码|program|script|cli|tool|project|app)',
+     '要求的不是 Go。当前选择的语言是 Go，只能生成并验证 Go 项目。',
+     '改成 Go 标准库的命令行程序；要用其它语言，请在新任务里选择对应的语言（设置 → 语言 可以看到可用的语言）。'),
     ('third_party', INFEASIBLE,
      r'\b(?:gin|echo|fiber|cobra|viper|gorm|sqlx|logrus|zap|testify|urfave/cli|goquery|colly|chi|mux)\b|github\.com/|第三方(?:库|包|依赖|框架)|外部(?:库|依赖)|go\s*get\b|go\.sum',
      '用到了第三方依赖。检查在隔离副本里运行，没有网络、不安装依赖，go.mod 也被固定为无依赖。',

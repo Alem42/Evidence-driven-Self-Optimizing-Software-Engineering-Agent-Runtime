@@ -34,7 +34,7 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
 # 演示模式（只读）下允许的 GET 前缀和 POST 路径。其余一律拒绝：特别是会用到 API 密钥的 /api/accounts、会动本地模型的 /api/ollama、读硬件的 /api/hardware。
 # Prefixes (GET) and paths (POST) allowed in demo (read-only) mode; everything else is refused, notably /api/accounts (uses the API key), /api/ollama and /api/hardware.
-DEMO_GET = ('/api/session', '/api/bootstrap', '/api/projects', '/api/runs', '/api/jobs', '/api/settings', '/api/routing', '/api/roles',
+DEMO_GET = ('/api/session', '/api/bootstrap', '/api/languages', '/api/projects', '/api/runs', '/api/jobs', '/api/settings', '/api/routing', '/api/roles',
             '/api/workflows', '/api/bench/tasks', '/api/bench/status', '/api/bench/results')
 DEMO_POST = ('/api/triage',)  # 确定性规则预检，不调用任何模型 / deterministic pre-check, calls no model
 DEMO_MESSAGE = '演示模式（只读）：这个部署只用于展示，不能发起或修改任务。 This deployment is a read-only demo.'
@@ -191,6 +191,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     result = console.settings.save(body) if write else console.settings.public()
                 elif path == '/api/triage' and write:
                     result = console.triage(body)
+                elif path == '/api/languages':
+                    result = console.save_languages(body) if write else console.languages()
                 elif path == '/api/routing':
                     result = console.settings.save_routing(body) if write else console.settings.routing()
                 elif path == '/api/settings/order' and write:

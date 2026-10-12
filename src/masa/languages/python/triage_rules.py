@@ -9,9 +9,9 @@ INFEASIBLE, RISKY = 'infeasible', 'risky'
 RULES = [
     ('language', INFEASIBLE,
      r'(?:用|使用|以|in|using|with)\s*(?:golang|go\b|java(?!script)|javascript|typescript|node(?:\.js)?|rust|c\+\+|c#|php|ruby|swift|kotlin|scala|lua|shell|bash|powershell)\b|'
-     r'\b(?:golang|javascript|typescript|rust|c\+\+|c#|php|ruby|kotlin)\s*(?:实现|编写|写|版本|语言|program|script)',
-     '要求的不是 Python。当前选择的语言包是 Python，只能生成并验证 Python 项目。',
-     '改成 Python 标准库的命令行程序；其它语言请在新任务里选择对应的语言包。'),
+     r'\b(?:golang|go|javascript|typescript|rust|c\+\+|c#|php|ruby|kotlin|java)\s*(?:实现|编写|写|版本|语言|脚本|程序|命令行|工具|项目|代码|program|script|cli|tool|project|app)',
+     '要求的不是 Python。当前选择的语言是 Python，只能生成并验证 Python 项目。',
+     '改成 Python 标准库的命令行程序；要用其它语言，请在新任务里选择对应的语言（设置 → 语言 可以看到可用的语言）。'),
     ('third_party', INFEASIBLE,
      r'\b(?:numpy|pandas|scipy|requests|flask|django|fastapi|sqlalchemy|click|typer|rich|pydantic|matplotlib|beautifulsoup|bs4|selenium|aiohttp|httpx|tensorflow|torch|scikit-learn|sklearn|pillow|opencv)\b|'
      r'pip\s+install|第三方(?:库|包|依赖|框架)|外部(?:库|依赖)|requirements\.txt',

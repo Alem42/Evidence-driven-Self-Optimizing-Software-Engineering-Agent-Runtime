@@ -64,6 +64,36 @@ class Console:
         self.bench_thread = None
         Store(self.root).close()
 
+    def _runner(self):
+        """执行器；语言的工具链属于各自的语言包，缺失时只影响那种语言的任务（探测会告诉用户）。 The executor; a language's toolchain belongs to its pack, so a missing one only affects tasks in that language (the probe tells the user)."""
+        return Runner(self.runner_path, self.go_path if self.go_path.is_file() else None)
+
+    def languages(self):
+        """每个语言包的说明、就绪状态与当前配置（设置页用）。 Every pack's description, readiness and current configuration (for the Settings page)."""
+        return {'default': registry.default_id(), 'languages': registry.describe(self._probe_executor()), 'extra_dirs': self.settings.load_languages().get('extra_dirs', [])}
+
+    def save_languages(self, body):
+        self.settings.save_languages(body)
+        return self.languages()
+
+    def _language_of(self, body):
+        """任务的语言：请求里的优先，否则默认语言；必须已注册且工具链就绪。 The task's language: the request's, else the default; it must be registered and its toolchain ready."""
+        language = body.get('language') or registry.default_id()
+        pack = registry.get(language)
+        # 没有运行器时（测试/开发替身）不做就绪检查，真正的错误会在执行时明确报出 / without a runner (a test or dev harness) readiness is not checked; the real error is reported at execution
+        ready = pack.probe(self._probe_executor()) if self.runner_path.is_file() else None
+        if ready is not None and not ready.ok:
+            raise MasaError(f'language {pack.title} is not ready: ' + '; '.join(ready.details))
+        return pack.id
+
+    def _probe_executor(self):
+        """给语言包探测工具链用的执行器；运行器不存在时给一个空对象（探测会如实说缺什么）。 The executor language packs probe their toolchains with; an empty object when there is no runner (the probe then says what is missing)."""
+        import types
+        try:
+            return self._runner()
+        except MasaError:
+            return types.SimpleNamespace()
+
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
         # 持久 running 不足以代表活着；以当前进程的 worker 为准。
@@ -83,6 +113,10 @@ class Console:
             "routing_defaults": self.settings.routing(),
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
+            "runner_exists": self.runner_path.is_file(),
+            "language": registry.default_id(),
+            "languages": [{"id": i["id"], "title": i.get("title"), "ready": bool((i.get("readiness") or {}).get("ok")), "ui": i.get("ui", {}), "default": bool(i.get("default"))}
+                          for i in registry.describe(self._probe_executor()) if "error" not in i],
             "active_run": self.active,
             "active_job": active_job,
             "interrupted_jobs": [{'job_id':ident,'run_id':job.get('run_id'),'phase':job.get('phase')}
@@ -276,7 +310,7 @@ class Console:
                     else None
                 )
                 runtime = Runtime(
-                    store, Runner(self.runner_path, self.go_path), provider
+                    store, self._runner(), provider
                 )
                 graph = full_verification_policy(language) if body.get("full_checks") else None
                 if body.get('role_demo'):
@@ -330,7 +364,7 @@ class Console:
                     raise MasaError('human review required before rerunning generated code')
                 source = Path(data['workspace'])
                 verify_snapshot(source, data['snapshot_id'])
-                runtime = Runtime(store, Runner(self.runner_path, self.go_path))
+                runtime = Runtime(store, self._runner())
                 # 项目重验保留已批准 Agent 图，旧演示继续使用完整固定检查。
                 # Preserve approved agent graphs on reruns; legacy demos retain full checks.
                 graph=Graph.from_dict(data['graph']) if data['graph'].get('policy_version')=='agent-check-plan-v1' else harness_policy()
@@ -455,7 +489,7 @@ class Console:
                 provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
                 if plan.get('provider')!=provider.profile:
                     raise MasaError('select the original API profile to resume')
-                runner=Runner(self.runner_path,self.go_path)
+                runner=self._runner()
                 if plan.get('repair_of'):
                     if on_created:on_created(rid)
                     result=ProjectGeneration(store,runner).resume_revision(rid,provider)
@@ -477,7 +511,7 @@ class Console:
                 store=Store(self.root)
                 try:
                     from masa.application.applications import run_application
-                    result=run_application(store,Runner(self.runner_path,self.go_path),rid,body.get('argv',[]),self.app_cancel.is_set)
+                    result=run_application(store,self._runner(),rid,body.get('argv',[]),self.app_cancel.is_set)
                     self.jobs[ident].update(status='completed',result={'id':rid,'app_result':result})
                 except Exception as exc:
                     self.diagnostics.record('worker:application',exc)
@@ -560,12 +594,12 @@ class Console:
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
             from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
-                runner=Runner(self.runner_path,self.go_path)
+                runner=self._runner()
                 try:
                     router=None
                     if routing:
@@ -680,7 +714,7 @@ class Console:
         with self.lock:
             self._available()
             store=Store(self.root)
-            try:return review_sources(store,Runner(self.runner_path,self.go_path),rid,body)
+            try:return review_sources(store,self._runner(),rid,body)
             finally:store.close()
 
     def answer_clarification(self, rid, body):
@@ -689,7 +723,7 @@ class Console:
             self._available()
             store=Store(self.root)
             try:
-                ProjectPlanning(store,Runner(self.runner_path,self.go_path)).answer(
+                ProjectPlanning(store,self._runner()).answer(
                     rid,body.get('question_id'),body.get('answers'))
                 status=store.run(rid)['data']['project_plan']['status']
             finally:store.close()
@@ -749,7 +783,7 @@ class Console:
                     if old['status']!='failed' or not old['data'].get('project_plan',{}).get('spec_ref'):
                         raise MasaError('only failed plans with saved Planner output can retry Tester')
                     goal=old['data']['goal']
-                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, goal,on_created,reuse)
+                rid = ProjectPlanning(store, self._runner()).generate(provider, goal,on_created,reuse,language=None if reuse else self._language_of(body))
                 return {'id':rid}
             finally:
                 store.close()
@@ -760,7 +794,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                ProjectPlanning(store, Runner(self.runner_path, self.go_path)).approve(rid, body)
+                ProjectPlanning(store, self._runner()).approve(rid, body)
                 return {'id':rid}
             finally:
                 store.close()
@@ -772,7 +806,7 @@ class Console:
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider,on_created)}
+                return {'id':ProjectGeneration(store, self._runner()).generate(rid,provider,on_created)}
             finally:
                 store.close()
 
@@ -783,7 +817,7 @@ class Console:
             provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created,use_intelligence=True)}
+                return {'id':ProjectGeneration(store,self._runner()).repair(rid,provider,body.get('feedback',''),on_created,use_intelligence=True)}
             finally:store.close()
 
     def revise_project_tests(self, rid, body, on_created=None):
@@ -793,7 +827,7 @@ class Console:
             provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).revise_tests(
+                return {'id':ProjectGeneration(store,self._runner()).revise_tests(
                     rid,provider,body.get('feedback',''),on_created)}
             finally:store.close()
 
@@ -803,7 +837,7 @@ class Console:
             self._available()
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).format_test_files(rid)}
+                return {'id':ProjectGeneration(store,self._runner()).format_test_files(rid)}
             finally:store.close()
 
     def approve_project_code(self, rid, body):
@@ -812,7 +846,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                child = ProjectGeneration(store, Runner(self.runner_path,self.go_path)).approve(rid,body)
+                child = ProjectGeneration(store, self._runner()).approve(rid,body)
                 status = store.run(child)['status']
             finally:
                 store.close()
@@ -827,7 +861,7 @@ class Console:
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                rid = CodeGeneration(store, Runner(self.runner_path, self.go_path)).generate(
+                rid = CodeGeneration(store, self._runner()).generate(
                     provider, body.get('goal',''), body.get('repo',''), body.get('target','solution.go'),
                     body.get('tests',''), body.get('parent_run_id'))
                 return {'id':rid}
@@ -840,7 +874,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                service = CodeGeneration(store, Runner(self.runner_path, self.go_path))
+                service = CodeGeneration(store, self._runner())
                 if body.get('action') == 'reject':
                     service.reject(rid)
                     return {'id':rid}
@@ -871,7 +905,7 @@ class Console:
             try:
                 store = Store(self.root)
                 Runtime(
-                    store, Runner(self.runner_path, self.go_path), provider
+                    store, self._runner(), provider
                 ).execute(rid, pause_after)
             except Exception as exc:
                 # Provider failures are sanitized; never expose credentials in worker diagnostics.

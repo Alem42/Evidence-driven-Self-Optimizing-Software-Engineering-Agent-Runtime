@@ -90,15 +90,18 @@ def main(argv=None) -> int:
         if args.command in {"run", "resume"}:
             if args.pause_after < 0:
                 raise MasaError("pause-after must not be negative")
-            runtime = Runtime(store, Runner(args.runner, args.go))
+            runtime = Runtime(store, Runner(args.runner, args.go if args.go.is_file() else None))  # 语言的工具链缺失只影响那种语言 / a missing language toolchain only affects that language
             if args.command == "run":
+                language = args.language or registry.default_id()
+                if args.operation and args.operation not in registry.get(language).operation_ids():
+                    raise MasaError(f"operation {args.operation} does not belong to language {language}")
                 budget = Budget(model_calls=args.model_calls, tool_calls=args.tool_calls,
                                 deadline_seconds=args.deadline_seconds, tool_timeout_ms=args.tool_timeout_ms)
                 from masa.runtime.graph import collaboration_policy
                 if args.collaboration and args.patch:
                     raise MasaError('read-only role demo cannot apply a patch')
                 run_id = runtime.create(args.repo, args.goal, budget, args.operation, intelligence=args.intelligence,
-                                        graph=collaboration_policy(args.operation, args.language) if args.collaboration else None, language=args.language)
+                                        graph=collaboration_policy(args.operation, language) if args.collaboration else None, language=language)
                 print(f"run_id={run_id}", file=sys.stderr, flush=True)
                 if args.patch:
                     # 补丁先发布新快照，再让验证图执行；用户源仓库不参与写入。
