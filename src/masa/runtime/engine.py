@@ -148,7 +148,7 @@ class Runtime:
                     raise MasaError('model_profile_mismatch: resume requires the original provider configuration')
                 graph = Graph.from_dict(data["graph"])
                 validate(graph)
-                if self._profile() != data["profile"]:
+                if self._profile(registry.for_run(data)) != data["profile"]:
                     raise MasaError("tool_profile_mismatch: resume requires the original tool binaries")
                 self.store.read(data["manifest_ref"])
                 verify_snapshot(Path(data["workspace"]), data["snapshot_id"])
@@ -156,7 +156,7 @@ class Runtime:
                     return self.store.run(run_id)
                 builder, index = None, None
                 if data.get('intelligence'):
-                    from masa.languages.go.index import Intelligence
+                    from masa.languages.go.index import Intelligence  # 可选能力 index：只有声明了它的语言包才有 / optional capability: only packs that declare it have it
                     from masa.intelligence.context import ContextBuilder
                     engine = Intelligence(self.store, self.executor)
                     index = engine.ensure(run_id)

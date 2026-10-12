@@ -17,11 +17,13 @@ class ContextBuilder:
         role="developer",
         query=None,
         tool_results=None,
-        operation="go_test",
+        operation=None,
         budget_bytes=32000,
         handoffs=None,
     ):
         """优先保留必需契约与结果，确定性选择证据并记录裁剪。 Preserve required contracts/results, select evidence deterministically, and audit omissions."""
+        from masa.languages.registry import registry
+        operation = operation or registry.for_run(self.store.run(run_id)["data"]).op_id("test")
         if (
             role not in {"planner", "developer", "tester", "reviewer", "verifier"}
             or type(budget_bytes) is not int

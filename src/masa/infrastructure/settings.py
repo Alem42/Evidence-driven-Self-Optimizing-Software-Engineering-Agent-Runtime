@@ -9,6 +9,7 @@ import uuid
 from masa.infrastructure.llm import ChatProvider, validate_config
 from masa.domain.models import MasaError
 from masa.infrastructure import providers, capability
+from masa.languages.registry import registry
 
 
 class Settings:
@@ -353,12 +354,13 @@ class Settings:
     def test(self, ident):
         """一次真实协议探测，不发送仓库内容。 Probe the real protocol once without repository content."""
         provider = self.provider(ident)
+        test_operation = registry.get().op_id("test")  # 探测只需要任意一个已授权的工具名 / any authorised tool name will do for the probe
         try:
             result = provider.respond(
                 {
                     "goal": "Connection test: request the allowed verification tool.",
-                    "operation": "go_test",
-                    "allowed_tools": ["go_test"],
+                    "operation": test_operation,
+                    "allowed_tools": [test_operation],
                     "tool_results": [],
                 }
             )

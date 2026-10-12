@@ -54,21 +54,14 @@
   "go_env": 6,
   "go_word": 1
  },
- "infrastructure/settings.py": {
-  "op_ids": 2
- },
  "infrastructure/workspaces.py": {
   "go_mod": 1
- },
- "intelligence/context.py": {
-  "op_ids": 1
  },
  "intelligence/library.py": {
   "go_file": 1
  },
  "intelligence/repair_context.py": {
-  "go_file": 2,
-  "go_mod": 1,
+  "go_file": 1,
   "pack_import": 1
  },
  "interfaces/cli.py": {
@@ -117,9 +110,5 @@
   "go_file": 1,
   "gofmt": 1,
   "pack_import": 1
- },
- "runtime/patches.py": {
-  "go_file": 1,
-  "go_word": 3
  }
 }
