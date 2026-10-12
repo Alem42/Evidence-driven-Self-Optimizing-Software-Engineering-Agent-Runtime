@@ -98,8 +98,8 @@ class Runtime:
         from masa.domain.proposals import validate_spec, validate_checks
         from masa.runtime.graph import validate
         from masa.domain.models import Node
-        validate_spec(spec)
-        validate_checks(checks, spec)
+        validate_spec(spec, language)
+        validate_checks(checks, spec, language=language)
         # 采用已批准的 Agent 检查选择，最终 Gate 始终由 Runtime 添加。
         # Compile approved agent choices; Runtime always adds the independent Gate.
         from masa.runtime.graph import CHECK_NODES

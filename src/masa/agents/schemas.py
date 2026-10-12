@@ -49,7 +49,7 @@ def response_schema(context):
         return 'json'
     spec={'type':'object','additionalProperties':False,
             'required':['summary','module','entrypoint','files','acceptance'],
-            'properties':{'summary':string,'module':string,'entrypoint':{'type':'string','const':pack.entrypoint()},
+            'properties':{'summary':string,'module':string,'entrypoint':pack.entrypoint_schema(),
                 'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}

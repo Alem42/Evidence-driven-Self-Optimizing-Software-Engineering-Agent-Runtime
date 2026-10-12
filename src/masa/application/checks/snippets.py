@@ -18,7 +18,7 @@ def source_snippets(diagnostics, files, radius=4, limit=8, pack=None):
     out, seen = [], set()
     for text in diagnostics:
         for match in location.finditer(text):
-            name = match.group(1).replace('\\', '/')
+            name = pack.relative_path(match.group(1)).replace('\\', '/')
             while name.startswith('./'):
                 name = name[2:]
             line = int(match.group(2))

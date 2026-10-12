@@ -19,12 +19,12 @@ def validate_spec(spec, language=None):
     """校验可移植目录与标准库 CLI 规格，不相信模型输出；语言相关的规则来自语言包。 Validate portable standard-library CLI specifications; language rules come from the pack."""
     pack = _pack(language)
     layout = pack.layout
-    entry = pack.entrypoint(spec)
     if not isinstance(spec, dict) or set(spec) != {'summary','module','entrypoint','files','acceptance'}:
         raise MasaError('invalid ProjectSpec fields')
     text(spec['summary'])
     if not re.fullmatch(layout['module_regex'], text(spec['module'], 160)):
         raise MasaError(f'invalid {pack.title} module name')
+    entry = pack.entrypoint(spec)
     if spec['entrypoint'] != entry:
         raise MasaError(f'entrypoint must be {entry}')
     files = spec['files']
@@ -59,6 +59,7 @@ def validate_spec(spec, language=None):
         text(criterion)
     if len(canonical(spec).encode('utf-8')) > 40000:
         raise MasaError('project specification exceeds 40 KB')
+    pack.validate_spec(spec)  # 语言包的额外规则（例如 Python 的包必须有 __init__.py）/ extra language rules (e.g. Python packages need __init__.py)
     return spec
 
 
@@ -147,7 +148,7 @@ def validate_file_proposal(files, spec, target_path, language=None):
     if not isinstance(files, dict) or set(files) != {target_path}:
         raise MasaError('file proposal must contain exactly the requested target file')
     content = files[target_path]
-    if not isinstance(content, str) or not content.strip() or '\x00' in content:
+    if not isinstance(content, str) or (not content.strip() and not pack.allow_empty(target_path)) or '\x00' in content:
         raise MasaError('invalid generated file content')
     if len(content.encode('utf-8')) > 60000:
         raise MasaError('file exceeds 60 KB')
@@ -162,8 +163,8 @@ def validate_files(files, spec, language=None):
     if not isinstance(files, dict) or set(files) != {f['path'] for f in spec['files']}:
         raise MasaError('files must exactly match the approved project structure')
     total = 0
-    for content in files.values():
-        if not isinstance(content, str) or not content.strip() or '\x00' in content:
+    for path, content in files.items():
+        if not isinstance(content, str) or (not content.strip() and not pack.allow_empty(path)) or '\x00' in content:
             raise MasaError('invalid generated file content')
         size = len(content.encode('utf-8'))
         if size > 60000:

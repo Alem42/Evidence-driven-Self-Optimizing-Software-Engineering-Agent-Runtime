@@ -131,7 +131,12 @@ class LanguagePack:
         return str(path).replace('\\', '/').endswith(self.source_exts)
 
     def entrypoint(self, spec=None):
+        """入口文件路径（可依赖规格，例如 Python 的 <module>/__main__.py）。 The entrypoint path (may depend on the spec, e.g. <module>/__main__.py)."""
         return self.layout['entrypoint']
+
+    def entrypoint_schema(self):
+        """规划阶段给模型提供商的入口字段 schema（此时还没有规格）。 The entrypoint field's schema for the planner's provider (there is no spec yet)."""
+        return {'type': 'string', 'const': self.entrypoint()}
 
     def keep_paths(self, paths):
         """修复时无论如何都要带上的文件（清单与测试）。 Files always kept in a repair context (manifest and tests)."""
@@ -210,6 +215,10 @@ class LanguagePack:
         """由规格确定、不由模型生成的文件。 Files determined by the spec, never written by the model."""
         return {}
 
+    def allow_empty(self, path):
+        """这个文件可以是空的吗（例如 Python 的 __init__.py）？ May this file be empty (e.g. Python's __init__.py)?"""
+        return False
+
     def validate_spec(self, spec):
         """中立校验之外的语言规则；不合格抛 MasaError。 Language rules on top of the neutral checks; raise MasaError."""
 
@@ -276,6 +285,10 @@ class LanguagePack:
     def assertion_of(self, message):
         """{'call','got','want'} 或 None。 Parse an assertion message."""
         return None
+
+    def relative_path(self, path):
+        """把诊断里可能带绝对路径的文件名还原成项目内的相对路径。 Turn a path from a diagnostic (possibly absolute) into a project-relative one."""
+        return path
 
     def location_regex(self):
         """匹配 `文件:行[:列]` 的正则（字符串）。 Regex (string) matching `file:line[:col]`."""

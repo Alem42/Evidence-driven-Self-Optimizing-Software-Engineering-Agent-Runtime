@@ -1,0 +1,31 @@
+{
+  "id": "python",
+  "title": "Python",
+  "version": 1,
+  "api_version": 1,
+  "capabilities": [],
+  "layout": {
+    "source_exts": [".py"],
+    "manifest_files": ["pyproject.toml"],
+    "test_suffixes": ["test_*.py"],
+    "root_marker": "pyproject.toml",
+    "entrypoint": "{module}/__main__.py",
+    "min_files": 4,
+    "max_files": 20,
+    "template": "py-cli",
+    "module_regex": "[a-z][a-z0-9_]*",
+    "subdir_hint": "<module>/<name>",
+    "export_regex": "^[A-Za-z][A-Za-z0-9_]*$"
+  },
+  "operations": {
+    "test":   {"id": "py_test",   "label": "python 测试", "exe": "toolchain", "args": ["-E", "-s", "-B", "-X", "utf8", "-m", "unittest", "discover", "-s", "tests", "-v"]},
+    "static": {"id": "py_static", "label": "python 静态检查", "exe": "toolchain", "args": ["-E", "-s", "-B", "-X", "utf8", "{lint}", "."]},
+    "run":    {"id": "py_run",    "label": "运行程序", "exe": "toolchain", "args": ["-E", "-s", "-B", "-X", "utf8", "{launcher}"]}
+  },
+  "ui": {
+    "highlight": "python",
+    "diagnostic_exts": [".py"],
+    "verify_label": "Python 验证",
+    "format_name": "格式"
+  }
+}
