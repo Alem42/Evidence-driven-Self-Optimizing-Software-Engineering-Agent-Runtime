@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
+from masa.languages.registry import registry as languages
 from masa.domain.models import CallCancelled, MasaError, TransportFailure, canonical, ContextOverflow
 from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, StreamError, StreamStalled, StreamTimeout, StreamTooLarge,
                                            abandon, read_stream)
@@ -194,10 +195,9 @@ class ChatProvider:
             self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
         )
         instruction = instruction_for(context)
-        if self.config['protocol']=='ollama' and purpose=='project_tester':
-            instruction+=' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
-        if self.config['protocol']=='ollama' and purpose=='project_developer' and context.get('generation_mode')!='files-v1':
-            instruction+=' Copy this exact go.mod value: '+json.dumps(f"module {context['spec']['module']}\n\ngo 1.27.0\n")+'. Keep implementation concise. Avoid repetitive comments.'
+        if self.config['protocol']=='ollama':
+            # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
+            instruction+=languages.for_run(context).transport_hint(context)
         # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
         # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
         streaming = bool(self.config.get('streaming', True))

@@ -9,6 +9,7 @@ from masa.application.checks import ownership
 from masa.application.orchestration import conductor
 from masa.application.orchestration.flow import FlowEngine, GUARDS
 from masa.roles import registry
+from masa.languages.registry import registry as languages
 from masa.application.orchestration.workflows import FIX_V1
 from masa.application.checks.triage import assess
 from masa.runtime.engine import Runtime
@@ -52,6 +53,8 @@ class WorkflowCoordinator:
         self.checkpoint=WorkflowCheckpoint(job)
         self._deferred=[]  # 还没有锚点 run 时先缓存的事件 / events waiting for an anchor run
         self._library_handle=None
+        self.language=(job.get('request') or {}).get('language') or languages.default_id()  # 这个任务的语言（任务期间不变）/ the task's language, fixed for its lifetime
+        self.pack=languages.for_run({'language':self.language})
 
     # ───────────── 事件与路由 / events and routing ─────────────
     @property
@@ -276,6 +279,9 @@ class WorkflowCoordinator:
         store,runner=self.store,self.runner
         goal=self.job['request']['goal']
         phase=self._phase
+        origin=self.job['request'].get('continue_from')
+        if origin:  # 从某个失败的验证继续：沿用那个运行的语言 / continuing from a failed verification: keep that run's language
+            self.pack=languages.for_run(store.run(origin)['data']);self.language=self.pack.id
         if self._ladder and not self.job.get('budget_emitted'):
             self._emit('task_budget',self.router.describe())
         planning=ProjectPlanning(store,runner)
@@ -335,7 +341,7 @@ class WorkflowCoordinator:
                 return
             checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref']))
                     for t in store.tools(verified) if t['result_ref']]
-            analysis=ownership.analyse(checks)
+            analysis=ownership.analyse(checks,self.pack)
             self._close_attempt(analysis)
             # 测试修订之后同一批断言原样还在失败：说明修订没有真正改到点子上（策略 assertion_referee 时给出明确提示）。
             # The same assertions still fail unchanged after a test revision: the revision did not hit the point (a clear hint when policy assertion_referee is on).
@@ -378,14 +384,14 @@ class WorkflowCoordinator:
                 return
             # 连续三次相同断言提示检查规格/测试，不再诱使 Developer 迎合错误测试。
             # Three identical assertion failures require spec/test review instead of another implementation repair.
-            assertion=repeated_assertion_signature(checks)
+            assertion=repeated_assertion_signature(checks,self.pack)
             if self.checkpoint.record_assertion(verified,assertion):
                 self.job.update(status='completed',result={'id':verified},
                     note='same test assertion failed three times; inspect specification and test expectation before further repair')
                 return
             # 确定会失败的运行：同一失败签名在多轮后仍不变，并且更强的模型也已经试过，就停下交给人，不再继续花钱。
             # A doomed run: the same failure signature survives several rounds AND the strongest model was already tried.
-            repeats=self.checkpoint.record_signature(verified,failure_signature(checks))
+            repeats=self.checkpoint.record_signature(verified,failure_signature(checks,self.pack))
             if repeats>=int(self.router.policy.get('stuck_after',99)) and self._strongest_tried():
                 self._emit('task_stopped',{'reason':'stuck','detail':f'同一失败签名连续 {repeats} 次未变化'},verified,always=True)
                 self.job.update(status='completed',result={'id':verified},
@@ -425,7 +431,7 @@ class WorkflowCoordinator:
 
         def classify(ctx):
             primary=analysis['primary']
-            if primary=='ambiguous' and test_revision_needed(evidence,checks):
+            if primary=='ambiguous' and test_revision_needed(evidence,checks,self.pack):
                 primary='test'  # 旧规则仍作为兜底 / the legacy rule remains as a fallback
             history=len(self._history('fix'))
             noop=int(self.job.get('noop_streak',0))
@@ -435,7 +441,7 @@ class WorkflowCoordinator:
             only_assertions=bool(analysis['items']) and all(i['kind']=='assertion' for i in analysis['items'])
             wants=(repeats>=2 or (primary=='ambiguous' and history>=2) or (only_assertions and not self.job.get('diagnoses')))
             can=bool(self._ladder and self.router.policy.get('diagnose') and diagnoses<int(self.router.policy.get('diagnose_max',0)))
-            result={'primary':primary,'format_only':format_only(checks),'can_diagnose':can,
+            result={'primary':primary,'format_only':format_only(checks,self.pack),'can_diagnose':can,
                     'arbitrate_due':bool(assertion) and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'),
                     'needs_diagnosis':bool(can and wants),
                     'rewrite_due':bool(self._ladder and primary in ('implementation','ambiguous') and int(self.job.get('stall',0))>=REWRITE_AFTER_STALLS
@@ -457,7 +463,7 @@ class WorkflowCoordinator:
             return {'diagnosed':True,'diagnosis':diagnosis,'can_diagnose':False}
 
         def instructions(owner):
-            parts=[ownership.hint(analysis,owner),self._attempt_summary()]
+            parts=[ownership.hint(analysis,owner,self.pack),self._attempt_summary()]
             diagnosis=ctx_diagnosis()
             if diagnosis:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
@@ -512,7 +518,7 @@ class WorkflowCoordinator:
 
         def revise_tests(ctx):
             phase('test_revision',verified,attempt+1)
-            base='Fix the recorded test-file errors, including any gofmt failure. Preserve behavioral assertions and requirements.'
+            base='Fix the recorded test-file errors, including any '+self.pack.ui().get('format_name','format')+' failure. Preserve behavioral assertions and requirements.'
             flipped=not facts.get('flipped') and (facts.get('halt_kind')=='noop' or int(facts.get('noop_count',0))>=3)
             if flipped:
                 # 最强模型多次审视后认为实现无需改动：逐条重新手算期望值（字节数要把换行和多字节字符算进去），只改算错的期望。
@@ -599,7 +605,7 @@ class WorkflowCoordinator:
             result=Runtime(store,self.runner).execute(ident)
             if result['status']=='succeeded':return ident,True,0
             checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref'])) for t in store.tools(ident) if t['result_ref']]
-            return ident,False,len(ownership.analyse(checks)['items']) if checks else 10**6
+            return ident,False,len(ownership.analyse(checks,self.pack)['items']) if checks else 10**6
         candidates=[]  # (draft, verified, passed, items, candidate id, level)
         try:
             ident,passed,items=evaluate(first)
@@ -751,7 +757,7 @@ class WorkflowCoordinator:
         cases=[]
         for item in analysis['items']:
             if item['kind']==ownership.ASSERTION and len(cases)<6:
-                case=referee.case_for(len(cases),item,bundle)
+                case=referee.case_for(len(cases),item,bundle,self.pack)
                 if case:cases.append(case)
         if not cases:
             return None
@@ -799,7 +805,7 @@ class WorkflowCoordinator:
             approved=store.read(bundle['spec_approval_ref'])
             files,budget={},24000
             for path,text in bundle['files'].items():
-                if path.endswith('.go') and not path.endswith('_test.go') and budget>0:
+                if self.pack.is_source(path) and budget>0:
                     files[path]=text[:6000];budget-=len(files[path])
             context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'files':files}
             provider,_=self._pick('code_reviewer','review',need=context,anchor=verified,stage='review')
@@ -890,9 +896,9 @@ class WorkflowCoordinator:
         # 用例审计（默认关闭）：只在天梯模式且有云端候选时才有审计者。 Case audit (off by default): only in ladder mode with a cloud candidate.
         audit_provider=self.router.cheapest('case_deriver') if (self._ladder and self.router.policy.get('test_audit')) else None
         if not plan and not self.resuming:
-            triage=assess(goal)
+            triage=assess(goal,self.pack)
             if triage['verdict']=='infeasible' and not self.job['request'].get('force'):
-                blocked=planning.record_triage_block(goal,triage)
+                blocked=planning.record_triage_block(goal,triage,self.language)
                 self.job.update(run_id=blocked,status='completed',result={'id':blocked},
                                 note='triage: '+'; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible'))
                 return None
@@ -924,7 +930,8 @@ class WorkflowCoordinator:
                                        retry_of=retry_of,retry_feedback=planner_feedback,
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
-                                       contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None)
+                                       contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None,
+                                       language=self.language)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None
@@ -965,7 +972,7 @@ class WorkflowCoordinator:
                 rejected=self._retryable(failed_id) or str(failed.get('error') or 'response rejected by validation')
                 planner_feedback=(rejected+'. Contract reminder: return {"checks":[...]} with 1 to 3 checks; each check has EXACTLY the fields operation, purpose, '
                                   'acceptance_indices (a list of zero-based integers that are valid acceptance indices) and, only when concrete cases are given, cases; '
-                                  'operation is go_test (required), go_vet or go_fmt_check, each at most once; every case has exactly name, input, expected, level '
+                                  'operation is '+self.pack.op_id('test')+' (required), '+' or '.join(self.pack.operations[k].id for k in ('static','format') if k in self.pack.operations)+', each at most once; every case has exactly name, input, expected, level '
                                   '(unit, integration or cli), where input is a string (may be empty) and name and expected are non-empty strings.')[:1000]
                 reuse=failed_id
                 phase('planning_retry',failed_id)

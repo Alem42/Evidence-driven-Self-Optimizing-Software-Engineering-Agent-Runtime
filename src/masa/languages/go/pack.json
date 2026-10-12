@@ -27,6 +27,7 @@
   "ui": {
     "highlight": "go",
     "diagnostic_exts": [".go"],
-    "verify_label": "Go 验证"
+    "verify_label": "Go 验证",
+    "format_name": "gofmt"
   }
 }

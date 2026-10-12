@@ -8,7 +8,7 @@ from pathlib import Path
 
 from masa.languages.base import ConfigField, LanguagePack, Readiness
 
-from masa.languages.go import tooling, validation
+from masa.languages.go import assertions, failures, prompts, tooling, validation
 from masa.languages.go.outline import outline_go
 from masa.languages.go.validation import GO_VERSION
 
@@ -87,6 +87,38 @@ class GoPack(LanguagePack):
 
     def location_regex(self):
         return tooling._LOCATION
+
+    # ---------- 失败解析 / failure parsing ----------
+    def parse_failures(self, checks):
+        return failures.parse_failures(checks, self.op_id('format'))
+
+    def needs_test_revision(self, evidence, checks=()):
+        return failures.needs_test_revision(evidence, checks, self.op_id('format'))
+
+    def assertion_signature(self, checks):
+        return failures.assertion_signature(checks, self.op_id('test'))
+
+    def failure_signature(self, checks):
+        return failures.failure_signature(checks)
+
+    def test_advice(self):
+        return failures.TEST_ADVICE
+
+    def assertion_of(self, message):
+        return assertions.assertion_of(message)
+
+    def test_function_source(self, files, path, line, limit=1500):
+        return assertions.source_of_test_function(files, path, line, limit)
+
+    def triage_rules(self):
+        from masa.languages.go.triage_rules import RISKS, RULES
+        return RULES, RISKS
+
+    def project_prompt(self, context, default_instruction):
+        return prompts.project_roles_prompt(context, default_instruction)
+
+    def transport_hint(self, context):
+        return prompts.transport_hint(context)
 
     def outline(self, source):
         return outline_go(source)

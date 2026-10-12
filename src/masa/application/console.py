@@ -33,7 +33,7 @@ from masa.infrastructure import capability
 from masa.infrastructure.diagnostics import DiagnosticLog
 
 
-from masa.application.checks.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature
+from masa.application.checks.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature  # noqa: F401 (re-exported)
 
 
 class Console:
@@ -300,7 +300,7 @@ class Console:
         """读取工具账本中的实际输出。 Read actual outputs from the tool ledger."""
         store = Store(self.root)
         try:
-            store.run(rid)
+            pack = registry.for_run(store.run(rid)['data'])
             checks = [
                 {'id': row['id'], 'step_id': row['step_id'],
                  'operation': store.read(row['request_ref'])['operation'],
@@ -308,8 +308,8 @@ class Console:
                 for row in store.tools(rid)]
             completed=[(c['operation'],c['result']) for c in checks if c['result']]
             from masa.application.checks import ownership
-            analysis=ownership.analyse(completed)
-            return {'checks':checks,'repair_advice':repair_advice(completed),
+            analysis=ownership.analyse(completed,pack)
+            return {'checks':checks,'repair_advice':repair_advice(completed,pack),
                     'ownership':{'primary':analysis['primary'],'lines':ownership.describe(analysis)}}
         finally:
             store.close()

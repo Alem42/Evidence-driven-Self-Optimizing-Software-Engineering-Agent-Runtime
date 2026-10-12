@@ -1,43 +1,14 @@
 {
- "agents/protocol.py": {
-  "go_file": 15,
-  "go_mod": 9,
-  "go_template": 5,
-  "go_word": 8,
-  "gofmt": 3,
-  "op_ids": 4
- },
- "agents/schemas.py": {
-  "go_file": 2,
-  "go_template": 1,
-  "op_ids": 2
- },
  "application/checks/__init__.py": {
   "gofmt": 1
- },
- "application/checks/check_policy.py": {
-  "go_file": 11,
-  "go_word": 1,
-  "gofmt": 3,
-  "op_ids": 4
  },
  "application/checks/contract.py": {
   "go_word": 2
  },
- "application/checks/ownership.py": {
-  "go_file": 4,
-  "go_word": 3,
-  "gofmt": 1,
-  "op_ids": 1
- },
- "application/checks/referee.py": {
-  "go_word": 1
- },
  "application/checks/triage.py": {
-  "go_file": 2,
-  "go_mod": 1,
-  "go_template": 2,
-  "go_word": 4
+  "go_file": 1,
+  "go_template": 1,
+  "go_word": 1
  },
  "application/console.py": {
   "go_file": 2,
@@ -51,10 +22,8 @@
   "gofmt": 2
  },
  "application/orchestration/coordinator.py": {
-  "go_file": 3,
-  "go_mod": 1,
-  "gofmt": 1,
-  "op_ids": 1
+  "go_file": 2,
+  "go_mod": 1
  },
  "application/orchestration/flow.py": {
   "go_template": 1
@@ -80,10 +49,6 @@
  },
  "domain/proposals.py": {
   "go_word": 2
- },
- "infrastructure/llm.py": {
-  "go_mod": 1,
-  "op_ids": 1
  },
  "infrastructure/runner.py": {
   "go_env": 6,

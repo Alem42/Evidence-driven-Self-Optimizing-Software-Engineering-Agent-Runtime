@@ -11,52 +11,34 @@ the test wrote and which one the implementation gave, the anchoring is broken. T
 """
 import collections
 import hashlib
-import re
 
-# Go 测试里最常见的失败行：“<表达式> = <实际>, want <期望>”、“got X, want Y”。 The common Go failure lines.
-_CALL = re.compile(r'^(?P<call>.+?) = (?P<got>.+?),? want (?P<want>.+)$')
-_PLAIN = re.compile(r'^(?:\w+:\s*)?got:?\s+(?P<got>.+?),?\s+want:?\s+(?P<want>.+)$', re.I)
-_SUBSTANCE = re.compile(r'[\w"`]|' + "'")  # 至少有一个字母数字或引号，排除逗号之类的残片 / at least one alphanumeric or quote, to exclude fragments such as a lone comma
+from masa.languages.registry import DEFAULT_LANGUAGE, registry
 
 
-def parse_assertion(message):
-    """{'call', 'got', 'want'} 或 None（解析不了就不裁判，回退到原来的流程）。 or None when it cannot be parsed (no refereeing then, the old flow goes on)."""
-    text = str(message).strip()
-    m = _CALL.match(text) or _PLAIN.match(text)
-    if not m:
-        return None
-    parts = m.groupdict()
-    got, want = parts['got'].strip(), parts['want'].strip()
-    if not _SUBSTANCE.search(got) or not _SUBSTANCE.search(want) or got == want or len(got) > 300 or len(want) > 300:
-        return None
-    return {'call': (parts.get('call') or 'the checked value').strip()[:300], 'got': got, 'want': want}
+def _pack(pack=None):
+    return pack or registry.get(DEFAULT_LANGUAGE)
 
 
-def source_of_test_function(files, path, line, limit=1500):
-    """失败行所在的测试函数源码（给模型看测试的前置数据）；找不到返回空串。 The source of the test function holding the failing line (the setup the model needs); empty when not found."""
-    for name, text in files.items():
-        if name == path or name.endswith('/' + str(path)):
-            lines = text.splitlines()
-            if not 1 <= int(line or 0) <= len(lines):
-                return ''
-            start = int(line) - 1
-            while start > 0 and not lines[start].startswith('func '):
-                start -= 1
-            end = int(line)
-            while end < len(lines) and not lines[end].startswith('func '):
-                end += 1
-            return '\n'.join(lines[start:end])[:limit]
-    return ''
+def parse_assertion(message, pack=None):
+    """{'call', 'got', 'want'} 或 None（解析不了就不裁判，回退到原来的流程）。断言消息的写法由语言包解析。
+    or None when it cannot be parsed (no refereeing then, the old flow goes on). The assertion wording is parsed by the language pack."""
+    return _pack(pack).assertion_of(message)
 
 
-def case_for(index, item, files):
+def source_of_test_function(files, path, line, limit=1500, pack=None):
+    """失败行所在的测试函数源码（给模型看测试的前置数据）；找不到返回空串。 The source of the test function holding the failing line; empty when not found."""
+    return _pack(pack).test_function_source(files, path, line, limit)
+
+
+def case_for(index, item, files, pack=None):
     """一个失败断言 → 发给裁判的一条用例。item 是 ownership 的条目。 One failing assertion -> one referee case; item is an ownership entry."""
-    parsed = parse_assertion(item['message'])
+    pack = _pack(pack)
+    parsed = parse_assertion(item['message'], pack)
     if not parsed:
         return None
     swap = int(hashlib.sha1(item['message'].encode('utf-8')).hexdigest(), 16) % 2 == 1
     first, second = (parsed['want'], parsed['got']) if swap else (parsed['got'], parsed['want'])
-    return {'index': index, 'call': parsed['call'], 'test_source': source_of_test_function(files, item.get('path'), item.get('line')),
+    return {'index': index, 'call': parsed['call'], 'test_source': pack.test_function_source(files, item.get('path'), item.get('line')),
             'options': {'A': first, 'B': second}, '_a_is': 'want' if swap else 'got'}
 
 

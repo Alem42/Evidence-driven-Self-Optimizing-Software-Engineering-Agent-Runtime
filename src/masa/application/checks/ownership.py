@@ -12,72 +12,18 @@ Failure ownership: in one failed verification, which problems belong to the impl
   · 否则测试有编译/准备错误 → 修订测试。 Otherwise test compile/setup errors → revise the tests.
   · 否则（只有断言失败）→ 归属不明，交给原有的“修实现 → 仲裁”流程或 Diagnoser。 Assertion-only failures stay ambiguous.
 """
-import json
-import re
-
-IMPLEMENTATION, TEST, AMBIGUOUS = 'implementation', 'test', 'ambiguous'
-COMPILE, SETUP, ASSERTION, FORMAT = 'compile', 'setup', 'assertion', 'format'
-
-# 带列号的是编译器/vet 诊断；只带行号的是测试运行时的断言输出。 With a column = compiler/vet; line only = a runtime assertion.
-_LOCATED = re.compile(r'^\s*(?:\./)?([\w./\\:-]*?[\w-]+\.go):(\d+)(?::(\d+))?:?\s*(.*)$')
-_SETUP_MARKERS = ('import cycle not allowed in test', 'found packages', 'no Go files in', 'cannot find package', 'is a program, not an importable package',
-                  'use of internal package', 'no required module provides package')
+from masa.languages.base import AMBIGUOUS, ASSERTION, COMPILE, FORMAT, IMPLEMENTATION, SETUP, TEST
+from masa.languages.registry import DEFAULT_LANGUAGE, registry
 
 
-def _lines(text):
-    for raw in str(text or '').splitlines():
-        try:
-            frame = json.loads(raw)
-            raw = frame.get('Output', '') if isinstance(frame, dict) else raw
-        except (ValueError, TypeError):
-            pass
-        for line in str(raw).splitlines():
-            if line.strip():
-                yield line.rstrip()
+def _pack(pack=None):
+    return pack or registry.get(DEFAULT_LANGUAGE)
 
 
-def _owner(path):
-    return TEST if path.replace('\\', '/').endswith('_test.go') else IMPLEMENTATION
-
-
-def analyse(checks) -> dict:
-    """checks = [(operation, result)]。返回逐条诊断 + 汇总。无模型、无 I/O。 Per-item diagnostics plus a summary; pure."""
-    items, seen = [], set()
-
-    def add(owner, kind, path, line, message):
-        key = (owner, kind, path, message[:80])
-        if key not in seen and len(items) < 40:
-            seen.add(key)
-            items.append({'owner': owner, 'kind': kind, 'path': path, 'line': line, 'message': message[:240]})
-
-    for operation, result in checks:
-        if result.get('exit_code') == 0 and result.get('status') == 'completed':
-            continue
-        if operation == 'go_fmt_check':
-            for line in _lines(result.get('stdout')):
-                path = line.strip().replace('\\', '/')
-                if path.endswith('.go'):
-                    add(_owner(path), FORMAT, path, None, 'gofmt 格式不合格')
-            continue
-        for line in _lines(str(result.get('stdout', '')) + '\n' + str(result.get('stderr', ''))):
-            located = _LOCATED.match(line)
-            if located:
-                path = located.group(1).replace('\\', '/')
-                col, message = located.group(3), located.group(4).strip()
-                if message.startswith('vet.exe:') or message.startswith('# '):
-                    message = message.split(':', 1)[-1].strip()
-                if any(m in message for m in _SETUP_MARKERS):
-                    add(_owner(path), SETUP, path, int(located.group(2)), message)
-                elif col is not None:
-                    add(_owner(path), COMPILE, path, int(located.group(2)), message)
-                elif _owner(path) == TEST:
-                    # 测试运行时的断言：可能是测试期望写错，也可能是实现行为错——归属不明。
-                    # A runtime assertion: the expectation may be wrong or the behaviour may be: ambiguous.
-                    add(AMBIGUOUS, ASSERTION, path, int(located.group(2)), message)
-                continue
-            if any(m in line for m in _SETUP_MARKERS):
-                # 测试包准备错误（如 import cycle）发生在测试一侧。 Test-package setup problems belong to the test side.
-                add(TEST, SETUP, '', None, line.strip())
+def analyse(checks, pack=None) -> dict:
+    """checks = [(operation, result)]。返回逐条诊断 + 汇总。无模型、无 I/O；原始输出怎么解析由语言包决定。
+    Per-item diagnostics plus a summary; pure. How the raw output is parsed is the language pack's business."""
+    items = _pack(pack).parse_failures(checks)
     return {'items': items, **_summary(items)}
 
 
@@ -101,27 +47,16 @@ def _fmt(items, limit=8):
     return '\n'.join(f"- {i['path'] or '(测试包)'}{':' + str(i['line']) if i['line'] else ''}: {i['message']}" for i in items[:limit])
 
 
-# 常见测试侧问题的具体做法：本地小模型往往看不懂诊断，直接告诉它怎么改。
-# Concrete advice for common test-side problems: small local models often cannot read the diagnostic.
-_TEST_ADVICE = (
-    ('import cycle', '测试文件与被测代码在同一个包里时，不能 import 这个包本身。删掉对自己包的 import，直接调用同包的函数；'
-                     '如果必须从外部测试，把测试文件的包名改成 <包名>_test 并 import 该包。'),
-    ('found packages', '同一目录里的所有 Go 文件必须使用同一个包名（外部测试包 <包名>_test 除外）。把测试文件的 package 改成与实现一致。'),
-    ('is a program, not an importable package', '不能 import package main。把逻辑放进 internal/<name> 包，main 只做参数解析并调用它。'),
-    ('no Go files in', '测试里构建命令时，目标目录必须包含 Go 文件：从测试所在目录构建 "."，不要构建空目录。'),
-)
-
-
-def hint(analysis: dict, owner: str) -> str:
+def hint(analysis: dict, owner: str, pack=None) -> str:
     """给修复/测试修订调用的聚焦说明：只列属于它的问题，并明确另一侧由别的步骤处理。
     A focused instruction for the fix call: list only the problems it owns and say the other side is handled elsewhere."""
     mine = [i for i in analysis['items'] if i['owner'] == owner and i['kind'] in (COMPILE, SETUP, FORMAT)]
     other = TEST if owner == IMPLEMENTATION else IMPLEMENTATION
     if owner == IMPLEMENTATION:
-        text = '【聚焦】只修下列实现文件里的错误（file:line: message）；测试文件是冻结的，位于 _test.go 的错误由别的步骤处理，请忽略：\n' + _fmt(mine)
+        text = '【聚焦】只修下列实现文件里的错误（file:line: message）；测试文件是冻结的，位于 ' + _pack(pack).layout['test_suffixes'][0] + ' 的错误由别的步骤处理，请忽略：' + chr(10) + _fmt(mine)
     else:
         text = '【聚焦】只修订下列测试文件里的错误（file:line: message）；实现文件的错误由别的步骤处理，不要改实现：\n' + _fmt(mine)
-        for marker, advice in _TEST_ADVICE:
+        for marker, advice in _pack(pack).test_advice():
             if any(marker in i['message'] for i in analysis['items']):
                 text += '\n【做法】' + advice
     if not mine:

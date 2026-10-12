@@ -3,12 +3,14 @@ import copy
 
 
 from masa.roles import registry
+from masa.languages.registry import registry as languages
 
 
 def response_schema(context):
     """约束 Planner 规格或澄清，保留业务校验。 Constrain specs or clarification without replacing validation."""
     string={'type':'string'}
     purpose=context.get('purpose')
+    pack=languages.for_run(context)  # 语言包决定文件类别、检查名与入口 / the language pack decides file kinds, check names and the entrypoint
     # 数据驱动的角色（以及已迁入 JSON 的诊断、预检）：输出契约就在注册表里。 Data-driven roles (and the diagnoser / triage, now in JSON): the contract lives in the registry.
     spec=registry.get(purpose)
     if spec is not None and spec.output_schema is not None:
@@ -17,7 +19,7 @@ def response_schema(context):
         # 在传输层就限制修复文件类别，Domain 再独立核对冻结边界。
         # Restrict repair paths in transport; Domain independently enforces frozen boundaries.
         tests=purpose=='project_test_revision'
-        paths=[p for p in context['original_files'] if p.endswith('.go') and p.endswith('_test.go')==tests]
+        paths=[p for p in context['original_files'] if pack.is_code(p) and pack.is_test(p)==tests]
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'minProperties':1,
                                      'properties':{p:string for p in paths}}}}
@@ -41,14 +43,14 @@ def response_schema(context):
         test={**check,'required':check['required']+['cases']}
         static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
         return {'type':'object','additionalProperties':False,'required':['checks'],
-                'properties':{'checks':{'type':'object','additionalProperties':False,'required':['go_test'],
-                    'properties':{'go_test':test,'go_vet':static,'go_fmt_check':static}}}}
+                'properties':{'checks':{'type':'object','additionalProperties':False,'required':[pack.op_id('test')],
+                    'properties':{pack.op_id(kind):(test if kind=='test' else static) for kind in ('test','static','format') if kind in pack.operations}}}}
     if purpose!='project_planner':
         return 'json'
     spec={'type':'object','additionalProperties':False,
             'required':['summary','module','entrypoint','files','acceptance'],
-            'properties':{'summary':string,'module':string,'entrypoint':{'type':'string','const':'cmd/app/main.go'},
-                'files':{'type':'array','minItems':3,'maxItems':20,'items':{'type':'object','additionalProperties':False,
+            'properties':{'summary':string,'module':string,'entrypoint':{'type':'string','const':pack.entrypoint()},
+                'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}
     if not context.get('clarification_allowed'):

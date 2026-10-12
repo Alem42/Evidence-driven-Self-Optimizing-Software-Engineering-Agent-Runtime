@@ -16,8 +16,11 @@ API_VERSION = 1
 KINDS = ('test', 'static', 'format', 'build', 'run', 'index')
 # 可选能力：没声明的功能由核心关闭，界面隐藏。 Optional capabilities: undeclared ones are switched off by the core and hidden in the UI.
 CAPABILITIES = ('index', 'single_file_review', 'mutation_review', 'formatter')
-OWNERS = ('implementation', 'test')
-FAILURE_KINDS = ('compile', 'setup', 'assertion', 'format')
+# 失败归属与类别（语言无关）。 Failure ownership and kinds (language-neutral).
+IMPLEMENTATION, TEST, AMBIGUOUS = 'implementation', 'test', 'ambiguous'
+COMPILE, SETUP, ASSERTION, FORMAT = 'compile', 'setup', 'assertion', 'format'
+OWNERS = (IMPLEMENTATION, TEST)
+FAILURE_KINDS = (COMPILE, SETUP, ASSERTION, FORMAT)
 
 
 @dataclass(frozen=True)
@@ -221,9 +224,25 @@ class LanguagePack:
         yield from str(text or '').splitlines()
 
     # ---------- 失败解析 / failure parsing ----------
-    def analyse_failures(self, checks):
-        """checks=[(operation_id, result)] → {'items': [Diagnostic dict], 'summary': ...}。 Parse raw check results."""
-        return {'items': [], 'summary': {}}
+    def parse_failures(self, checks):
+        """checks=[(operation_id, result)] → 诊断字典列表（Diagnostic.to_dict() 的形状，最多 40 条）。 Parse raw check results into diagnostic dicts (at most 40)."""
+        return []
+
+    def needs_test_revision(self, evidence, checks=()):
+        """失败证据是否表明问题在测试源码或测试准备里。 Does the evidence point at test source or test setup?"""
+        return False
+
+    def assertion_signature(self, checks):
+        """失败断言的指纹（元组）；空表示没有断言失败。 Fingerprint of the failing assertions; empty means none."""
+        return ()
+
+    def failure_signature(self, checks):
+        """归一化的失败签名（去掉路径、行列号和数字）。 A normalised failure signature (paths, positions and numbers stripped)."""
+        return ()
+
+    def test_advice(self):
+        """[(诊断里的标记, 给小模型的具体做法)]。 [(marker in a diagnostic, concrete advice for a small model)]."""
+        return ()
 
     def assertion_of(self, message):
         """{'call','got','want'} 或 None。 Parse an assertion message."""
@@ -237,13 +256,22 @@ class LanguagePack:
         return ''
 
     # ---------- 提示词 / prompts ----------
+    def transport_hint(self, context):
+        """本地（ollama）传输的补充说明。 Extra instruction text for the local (ollama) transport."""
+        return ''
+
+    def project_prompt(self, context, default_instruction):
+        """Planner / Tester / Developer / Repair / TestRevision 这一族角色的提示词（随 purpose 与上下文分支）。 The prompt of the project-role family (branches on purpose and context)."""
+        raise NotImplementedError
+
     def fragment(self, name, default=''):
         """提示词片段（见 prompts/ 目录）。 A prompt fragment."""
         return default
 
     # ---------- 其它 / other ----------
     def triage_rules(self):
-        return []
+        """(不可行规则, 风险规则) 两个列表；规则引擎在核心。 (infeasible rules, risk rules); the engine lives in the core."""
+        return [], []
 
     def outline(self, source):
         """签名摘要。 A signature digest."""
