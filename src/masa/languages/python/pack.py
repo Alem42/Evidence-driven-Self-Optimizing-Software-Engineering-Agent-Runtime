@@ -189,6 +189,9 @@ class PythonPack(LanguagePack):
     def declares(self, source, name):
         return checks.declares(source, name)
 
+    def samples(self):
+        return {'syntax_error': ('a.py', 'def f(:' + chr(10))}
+
     def outline(self, source):
         return checks.outline(source)
 

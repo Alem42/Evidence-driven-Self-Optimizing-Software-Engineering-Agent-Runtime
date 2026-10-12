@@ -1,6 +1,7 @@
 """语言包管理器与一致性检查（对注册表里的每个包参数化）。 The pack manager and the conformance checks, parametrised over every registered pack."""
 import json
 import sys
+import types
 import tempfile
 import unittest
 from pathlib import Path
@@ -141,6 +142,31 @@ class ConformanceTests(unittest.TestCase):
             for op in pack.operations.values():
                 self.assertNotIn(op.id, seen, f'{op.id} used by {seen.get(op.id)} and {pack.id}')
                 seen[op.id] = pack.id
+
+    def test_the_conformance_check_passes_for_every_pack_and_catches_a_broken_one(self):
+        from masa.languages import conformance
+        probe = types.SimpleNamespace()
+        for pack in self.packs():
+            with self.subTest(pack=pack.id):
+                failed = [name for name, ok, _ in conformance.check(pack, probe) if not ok]
+                self.assertEqual(failed, [])
+        class Broken(LanguagePack):
+            pass
+        broken = Broken(manifest={'id': 'broken', 'layout': {'source_exts': ['.x'], 'root_marker': 'x.json', 'entrypoint': 'main.x', 'test_suffixes': ['_t.x']},
+                                  'operations': {'test': {'id': 'go_test'}}})  # 操作 id 与 Go 冲突 / the id collides with Go's
+        names = [name for name, ok, _ in conformance.check(broken, probe) if not ok]
+        self.assertIn('operations: ids do not collide with another pack', names)
+
+    def test_the_lang_command_lists_and_checks(self):
+        import contextlib
+        import io
+        from masa.interfaces.cli import main
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(['lang', 'list']), 0)
+            self.assertEqual(main(['lang', 'check', 'python']), 0)
+        self.assertIn('python', out.getvalue())
+        self.assertIn('ok   operations: ids are unique', out.getvalue())
 
     def test_describe_is_json_serialisable(self):
         json.dumps(registry.describe())

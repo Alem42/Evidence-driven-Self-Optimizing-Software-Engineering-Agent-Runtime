@@ -331,6 +331,10 @@ class LanguagePack:
         """评测的独立判官。 The benchmark's independent oracle."""
         raise NotImplementedError
 
+    def samples(self):
+        """一致性检查用的小样本，例如 {'syntax_error': (路径, 源码)}。 Small samples for the conformance check, e.g. {'syntax_error': (path, source)}."""
+        return {}
+
     def ui(self):
         """给前端的提示。 Hints for the frontend."""
         return dict(self.manifest.get('ui', {}))

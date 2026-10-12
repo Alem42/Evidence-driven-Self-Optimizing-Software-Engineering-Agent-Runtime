@@ -1,5 +1,7 @@
 # 当前断点（接续用）
 
+**2026-10-13**：语言包 P0–P7 与 P8 部分完成并推送：Go 从核心解耦（耦合字面量 355→78，Go 行为逐字节不变、等价检查 IDENTICAL），运行器改为按语言包生成的操作清单执行，**Python 包**跑通（脚本化端到端 + 真实 Flash 约 ¥0.77，判官下 9/12 通过、2 次假通过已用“导入名检查”堵上），前端有语言选择与 设置→语言（解释器、unittest/pytest、额外包目录），`masa lang list/info/check`。详见 progress/PROGRESS_2026-10-13_001。**下一步**：V2 工人循环（design/RUNTIME_V2.md，M0 运行视图可先做）；第二轮模拟用户测试（Python 与新设置页）的报告若已返回见该进展文档。工具：`scripts/eval/lang_eval.py`（Flash only）、docs/guides/ADD_A_LANGUAGE.md。
+
 **2026-10-12**：冻结键 bug 已修（`dab8707`：本地复核用自己的 `triage_snapshot_ref`）。用户决定：新建与 V1 **并存**的 Runtime V2（按包推进的自主工人循环，Pro 只做规划、其余用本地模型 + Flash），并把 Go 专属内容抽成**语言包**以支持 Python/C# 等。两份设计稿已写完，**代码未动，等用户审核**：design/RUNTIME_V2.md、design/LANGUAGE_PACKS.md（含 Go 耦合盘点、接口、迁移阶段 P0–P8、纵切片方案、第 15 节待拍板问题）。注意：工作区里另一会话有未提交的云端部署改动（Dockerfile、compose、settings.py、llm.py、server.py 等），迁移时只用显式路径 git add。
 
 **2026-10-10（三）**：补充 ¥4 做三个新开关的配对评测，花 ¥3.62，**查出并修掉一个默认路径上的大问题**：规划者让 `main.go` “读取 stdin”，而入口检查禁止这样做，规格里又没有能放 `Run` 的包，于是 bank 基线三轮整包重写耗尽 token（¥1.72，失败）。修复：文件重写用尽仍不合格就立刻失败（不再写后面的文件）+ 规划者提示词写明入口规则（提交 `02118fe`，循环等价性仍 IDENTICAL，提示词快照只改 planner 两项）。修复后 bank 三个臂（关/契约/裁判）各 1 次全部通过，基线只花 ¥0.17；样本太小不能下结论，`context_budget` 在云端窗口下不会触发所以没单独跑。**待用户选**（A 保持关闭 / B 补配对 / C 先验证默认流程，推荐 C 再 B）：见 progress/PROGRESS_2026-10-10_003_switch-pairs.md。下一个值得做的优化：阶段重试时复用已合格的文件（未实现）。

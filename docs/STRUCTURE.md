@@ -5,6 +5,7 @@
 ```
 src/masa/
   domain/            纯数据与规则（模型、提案校验、令牌估算、澄清、评审规则）
+  languages/         ★ 语言包：接口（base）、管理器（registry）、一致性检查（conformance）、go/ 与 python/ 两个包；核心只通过 registry 询问，不 import 具体语言
   roles/             RoleSpec 注册表：角色即数据（specs/*.json + *.prompt.md）
   agents/            提示词/校验器/schema 的分发（读 roles），脚本化假模型
   runtime/           账本驱动的执行：engine（Gate）、roles（角色调用）、tools、patches、live

@@ -139,6 +139,9 @@ class GoPack(LanguagePack):
         from masa.languages.go import oracle
         return oracle.judge(files, task, self._go(executor))
 
+    def samples(self):
+        return {'syntax_error': ('a.go', 'package a' + chr(10) + 'func (' + chr(10))}
+
     def outline(self, source):
         return outline_go(source)
 

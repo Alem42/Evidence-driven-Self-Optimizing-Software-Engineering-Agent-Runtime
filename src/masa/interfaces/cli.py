@@ -37,6 +37,11 @@ def parser():
                     help="serve the built frontend from this directory on the same origin (env MASA_STATIC_DIR)")
     ui.add_argument("--demo", action="store_true", default=os.environ.get("MASA_DEMO", "").lower() in ("1", "true", "yes"),
                     help="read-only demo: refuse everything that starts, changes or deletes work (env MASA_DEMO=1)")
+    lang = sub.add_parser("lang", help="language packs: list, info, check")
+    lang_sub = lang.add_subparsers(dest="lang_command", required=True)
+    lang_sub.add_parser("list")
+    for name in ("info", "check"):
+        lang_sub.add_parser(name).add_argument("language", choices=registry.ids())
     run = sub.add_parser("run")
     run.add_argument("--repo", required=True, type=Path)
     run.add_argument("--goal", default="Verify the selected Go check; do not modify source.")
@@ -63,6 +68,28 @@ def parser():
     return p
 
 
+def _lang_command(args) -> int:
+    """masa lang list | info <id> | check <id>：语言包的清单、说明与一致性检查。 Language packs: listing, description and the conformance check."""
+    import types
+    from masa.languages import conformance
+    probe = types.SimpleNamespace(go_executable=args.go if args.go.is_file() else None)
+    if args.lang_command == "list":
+        for info in registry.describe(probe):
+            ready = (info.get("readiness") or {}).get("ok")
+            print(f"{info['id']:<10} {'ready' if ready else 'NOT READY':<10} {'default' if info.get('default') else '':<8} {', '.join((info.get('readiness') or {}).get('details', []))}")
+        for name, error in registry.errors().items():
+            print(f"{name:<10} FAILED TO LOAD  {error}")
+        return 0
+    pack = registry.get(args.language)
+    if args.lang_command == "info":
+        print(json.dumps(pack.describe(), ensure_ascii=False, indent=2))
+        return 0
+    results = conformance.check(pack, probe)
+    for name, ok, detail in results:
+        print(f"{'ok  ' if ok else 'FAIL'} {name}" + (f"  ({detail})" if detail else ""))
+    return 0 if all(ok for _, ok, _ in results) else 1
+
+
 def main(argv=None) -> int:
     """装配应用并输出可诊断结果。 Compose the application and return diagnostic results."""
     args = parser().parse_args(argv)
@@ -75,6 +102,8 @@ def main(argv=None) -> int:
             serve(args.state_dir, args.runner, args.go, PROJECT, args.port, origins,
                   bind=args.bind, hosts=tuple(args.host or env_list("MASA_ALLOWED_HOSTS")), static_dir=args.static_dir, demo=args.demo)
             return 0
+        if args.command == "lang":
+            return _lang_command(args)
         store = Store(args.state_dir)
         if args.command == 'inspect':
             from masa.intelligence.context import ContextBuilder
