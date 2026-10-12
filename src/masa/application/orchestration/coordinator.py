@@ -93,7 +93,7 @@ class WorkflowCoordinator:
         all_history[chain]=self._history(chain)+[{'candidate':decision.candidate,'level':decision.level}]
         self.job['route_history']=all_history
 
-    def _pick(self, role, chain, *, need=None, anchor=None, stage=None):
+    def _pick(self, role, chain, *, need=None, anchor=None, stage=None, release=True):
         """向路由器要下一次尝试的模型；stop 时抛 RoutingStop。 Ask the router for the next attempt; stop raises RoutingStop."""
         decision,provider,spend=self.router.decide(role,chain,self._history(chain),
                                                     anchor_run=anchor or self.job.get('run_id'),need=need)
@@ -102,7 +102,8 @@ class WorkflowCoordinator:
             raise RoutingStop(decision.reason,decision.detail)
         # 切换到另一个模型（或云端）之前，先释放不再使用的本地模型：不能有空挂的模型。
         # Before switching to another model (or the cloud), release local models no longer in use: no idle models.
-        released=self.router.release(keep=provider)
+        # release=False：同一阶段里本地模型马上还要用（例如云端先写测试、本地再写实现），卸载只会让它再冷加载一次。 release=False: the local model is needed again within the same stage (cloud writes the tests, then the local model the implementation); unloading it only forces another cold load.
+        released=self.router.release(keep=provider) if release else []
         if released:self._emit('models_released',{'models':released,'reason':'switching'},anchor,always=True)
         return provider,decision
 
@@ -159,6 +160,7 @@ class WorkflowCoordinator:
         feedback=None
         n=0
         transport_used=0
+        reachable_failures=0
         while n<self._attempts_allowed(chain):
             provider,decision=self._pick(role,chain,need=need,stage=stage)
             # 发请求之前就记下“这次由谁修复”：请求中途崩溃后，恢复时路由器仍知道这个候选已经试过。
@@ -181,6 +183,18 @@ class WorkflowCoordinator:
                 raise  # 由工作流决定下一步 / the workflow decides what next
             except TransportFailure:
                 if chain.startswith('fix'):self.job['pending_fix']=None  # 传输失败不是模型的错 / not the model's fault
+                # 服务器明明可达（探测立刻成功）、同一个请求却连续两次没有响应：这不是“等服务器恢复”能解决的（典型：大模型冷加载超过时限）。
+                # 记一次失败让路由器升级到下一个候选，而不是原地重复到用完 transport_retries。服务器真的不可达时仍按原来的方式等待。
+                # The server is reachable (the probe succeeds at once) yet the same request got no response twice: waiting cannot fix that (typically a big model's cold load exceeding the limit).
+                # Record a failure so the router escalates, instead of repeating in place until transport_retries runs out. A server that is really down is still waited for as before.
+                probe=getattr(provider,'reachable',None)
+                if callable(probe) and (getattr(provider,'config',None) or {}).get('model_type')=='local' and probe():
+                    reachable_failures+=1
+                    if reachable_failures>=2:
+                        self._fail(chain,decision)
+                        n+=1
+                        reachable_failures=0
+                        continue
                 if self._wait_for_server(provider,transport_used):
                     transport_used+=1
                     continue
@@ -1008,7 +1022,7 @@ class WorkflowCoordinator:
                     # A stronger model writes the tests first (Tester level); the weaker model implements against the frozen tests.
                     test_provider=None
                     if self._ladder and (getattr(provider,'config',None) or {}).get('model_type')=='local':
-                        candidate,_=self._pick('project_tester','gen_tests',need=[goal,approved],stage='generation')
+                        candidate,_=self._pick('project_tester','gen_tests',need=[goal,approved],stage='generation',release=False)
                         if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local':
                             test_provider=candidate
                     # 云端整包生成被截断后，本任务的生成改为逐文件（记在 job 里，之后的重试不再回到整包）。
@@ -1016,6 +1030,9 @@ class WorkflowCoordinator:
                     if fb and 'incomplete output' in str(fb) and not self.job.get('per_file'):
                         self.job['per_file']=True
                         self._emit('generation_per_file',{'reason':'cloud output was cut off'},always=True)
+                    if getattr(generation,'workers',False):
+                        # V2：重试时上一次尝试里已封包的包直接沿用，卡住的包带着写了一半的文件由更强的模型接着做 / V2: on a retry the previous attempt's sealed packages are reused and a stuck package continues from its half-written files with the stronger model
+                        generation.seed_run=self.job.get('run_id') if fb else None
                     return generation.generate(plan,provider,lambda rid:phase('generation',rid),
                                                resume_id=resume,retry_feedback=fb,test_provider=test_provider,
                                                per_file=bool(self.job.get('per_file')))

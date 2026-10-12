@@ -86,7 +86,8 @@ def unknown_import_messages(files, paths, module, planned_paths, extra_allowed=(
         if not path.endswith('.py') or not isinstance(text, str):
             continue
         directory = path.rsplit('/', 1)[0].replace('/', '.') if '/' in path else ''
-        bad, third = [], []
+        bad, third, itself = [], [], []
+        own = path[:-3].replace('/', '.')
         for name, level, names in imports_of(text):
             if level:  # 相对导入：先还原成绝对路径（.=本包，..=上一层）/ relative import: make it absolute first (. = this package, .. = the parent)
                 base = directory.split('.') if directory else []
@@ -96,12 +97,17 @@ def unknown_import_messages(files, paths, module, planned_paths, extra_allowed=(
                     bad.append('.' * level + name)
                 continue
             top = name.split('.')[0]
+            if name == own:
+                itself.append(name)
+                continue
             if top == module:
                 if name not in modules and not any(m.startswith(name + '.') for m in modules):
                     bad.append(name)
             elif top not in STDLIB and top != 'tests' and top not in extra_allowed:
                 third.append(name)
         problems = []
+        if itself:
+            problems.append('imports itself (' + ', '.join(sorted(set(itself))) + '): a module cannot import from its own file, that is a circular import and fails with ImportError. Define the function in this file, or import it from the module that really defines it.')
         if bad:
             problems.append('imports ' + ', '.join(sorted(set(bad))) + ', but the approved spec has no Python file for that module, so it can never import. '
                             'Import only these modules of this project: ' + (', '.join(importable) or '(none)')

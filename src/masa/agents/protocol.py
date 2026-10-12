@@ -128,7 +128,10 @@ def _validate_project_roles(context, action, key):
         return validate_files(files, context['spec'], context.get('language'))
     if set(action) != {'checks'}:
         raise MasaError('invalid Tester proposal')
-    return validate_checks(action['checks'], context['spec'], require_coverage=False, language=context.get('language'))
+    # 模型对静态检查常写 "cases": []：提示词要求省略，但空数组不携带信息，丢掉它比拒绝整次回答（再花一次调用）便宜。
+    # Models often write "cases": [] for static checks: the prompt says to omit it, but an empty array carries no information, and dropping it is cheaper than rejecting the whole answer (and paying again).
+    checks = [{k: v for k, v in c.items() if not (k == 'cases' and not v)} if isinstance(c, dict) else c for c in action['checks']] if isinstance(action['checks'], list) else action['checks']
+    return validate_checks(checks, context['spec'], require_coverage=False, language=context.get('language'))
 
 
 def _validate_code_proposal(context, action, key):

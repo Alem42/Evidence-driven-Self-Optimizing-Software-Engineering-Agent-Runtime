@@ -270,7 +270,10 @@ class ChatProvider:
             # 不读取错误响应正文，避免上游回显密钥或请求内容进入日志。
             # Never expose upstream error bodies, which may echo credentials or request contents.
             response = urllib.request.build_opener(NoRedirect()).open(
-                request, timeout=max(0.1, min(30.0, deadline - time.monotonic()))  # 连接阶段的时限；读取阶段由流式读取循环自己控制 / connect-phase limit; the read phase is governed by the stream loop
+                # 连接阶段的时限；读取阶段由流式读取循环自己控制。本地模型要等到加载完成才会有响应头（冷加载可达几十秒到几分钟），所以用“首字”时限而不是 30 秒——30 秒会把加载掐断，下一次再从头加载（真实运行里连续失败 4 次）。
+                # Connect-phase limit; the read phase is governed by the stream loop. A local model sends no response headers until it has loaded (a cold load takes tens of seconds to minutes), so it gets the first-token limit instead of 30 s:
+                # 30 s aborted the load and the next try started cold again (four failures in a row in a real run).
+                request, timeout=max(0.1, min(float(self.config.get('first_token_seconds', 900)) if self.config['model_type'] == 'local' else 30.0, deadline - time.monotonic()))
             )
             try:
                 local = self.config['model_type'] == 'local'

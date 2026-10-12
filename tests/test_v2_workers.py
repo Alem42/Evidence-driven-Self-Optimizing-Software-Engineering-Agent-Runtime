@@ -140,6 +140,128 @@ class WorkerLoopTests(unittest.TestCase):
         self.assertIn('exactly once', steps[1]['summary'])
 
 
+# ───────────── 多包：依赖顺序、推迟、卡住检测、失败后沿用已封包的包 / several packages: order, deferral, stuck detection, reuse after a failure ─────────────
+PARSER = 'def parse(text):' + NL + '    return [int(item) for item in text.split()]' + NL
+PARSER_TEST = NL.join(['import unittest', '', 'from calc.parser.parser import parse', '', '', 'class ParserTests(unittest.TestCase):', '    def test_parse(self):', '        self.assertEqual(parse("1 2"), [1, 2])', ''])
+APP2 = NL.join(['from calc.parser.parser import parse', '', '', 'def run(args, stdin, stdout, stderr):', '    print(sum(parse(stdin.read())), file=stdout)', '    return 0', ''])
+APP2_TEST = NL.join(['import io', 'import unittest', '', 'from calc.app.app import run', '', '', 'class AppTests(unittest.TestCase):', '    def test_run(self):', '        out = io.StringIO()',
+                     '        self.assertEqual(run([], io.StringIO("5 5"), out, io.StringIO()), 0)', '        self.assertEqual(out.getvalue(), "10" + chr(10))', ''])
+MAIN2 = MAIN.replace('from calc.app import run', 'from calc.app.app import run')
+SPEC2 = {'summary': 'sum integers', 'module': 'calc', 'entrypoint': 'calc/__main__.py',
+         'files': [{'path': 'pyproject.toml', 'purpose': 'metadata'}, {'path': 'calc/__init__.py', 'purpose': 'package'},
+                   {'path': 'calc/app/__init__.py', 'purpose': 'package'}, {'path': 'calc/app/app.py', 'purpose': 'run: reads stdin, uses the parser package to parse the integers and prints their sum'},
+                   {'path': 'calc/parser/__init__.py', 'purpose': 'package'}, {'path': 'calc/parser/parser.py', 'purpose': 'parse whitespace separated integers'},
+                   {'path': 'calc/__main__.py', 'purpose': 'thin entry that calls the app package'}, {'path': 'tests/test_parser.py', 'purpose': 'tests of the parser'},
+                   {'path': 'tests/test_app.py', 'purpose': 'tests of run'}],
+         'acceptance': ['prints the sum of the integers on stdin followed by a newline']}
+
+
+def check(kind='test'):
+    return {'tool': 'run_check', 'kind': kind}
+
+
+@unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
+class SeveralPackagesTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        enter = patch('masa.application.v2.workers.SOLO_FILES', 0)  # 强制按包拆分 / force the per-package split
+        enter.start()
+        self.addCleanup(enter.stop)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(Path(self.temp.name))
+        self.addCleanup(self.store.close)
+        self.runner = Runner(RUNNER)
+        planning = ProjectPlanning(self.store, self.runner)
+
+        class Planner(FakeModel):
+            def respond(self, context):
+                self.contexts.append(copy.deepcopy(context))
+                return copy.deepcopy(SPEC2 if context['purpose'] == 'project_planner' else CHECKS)
+        self.parent = planning.generate(Planner(), 'sum integers', language='python')
+        meta = self.store.run(self.parent)['data']['project_plan']
+        planning.approve(self.parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': SPEC2, 'checks': CHECKS})
+        self.service = V2Generation(self.store, self.runner)
+
+    def generate(self, actions, **kwargs):
+        worker = ScriptedWorker(actions)
+        draft = self.service.generate(self.parent, worker, **kwargs)
+        return draft, worker
+
+    def events(self, rid, kind):
+        return [e['payload'] for e in self.store.events(rid) if e['type'] == kind]
+
+    def finish(self, draft):
+        meta = self.store.run(draft)['data']['project_plan']
+        files = self.store.read(meta['files_ref'])
+        verified = self.service.approve(draft, {'files_ref': meta['files_ref'], 'files': files})
+        return files, Runtime(self.store, self.runner).execute(verified)
+
+    def failed_run(self):
+        return [r for r in self.store.all_runs() if r['data'].get('parent_run_id') == self.parent and r['status'] == 'failed'][0]
+
+    def test_packages_are_written_leaves_first_and_the_entry_last(self):
+        actions = [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
+                   write('calc/app/app.py', APP2), write('tests/test_app.py', APP2_TEST), check('test'), check('static'),
+                   write('calc/__main__.py', MAIN2), check('test'), check('static')]
+        draft, worker = self.generate(actions)
+        order = self.events(draft, 'package_order')[0]
+        self.assertEqual(order['order'], ['calc/parser', 'calc/app', 'calc'])  # 规格里 app 在 parser 前面，但 app 的用途提到了 parser / the spec lists app before parser, but app's purpose mentions the parser
+        self.assertEqual(order['depends_on']['calc/app'], ['calc/parser'])
+        self.assertEqual([e['package'] for e in self.events(draft, 'package_sealed')], ['calc/parser', 'calc/app', 'calc'])
+        files, result = self.finish(draft)
+        self.assertEqual(result['status'], 'succeeded', result)
+
+    def test_a_package_that_needs_an_unwritten_package_is_deferred_behind_it(self):
+        from unittest.mock import patch
+        actions = [write('calc/app/app.py', APP2), write('tests/test_app.py', APP2_TEST), check('test'),  # app 先写，测试因为 parser 还不存在而失败 / app first; its test fails because the parser does not exist yet
+                   write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
+                   check('test'), check('static'),  # app 回来：什么都不用改 / app is back: nothing to change
+                   write('calc/__main__.py', MAIN2), check('test'), check('static')]
+        with patch('masa.application.v2.workers.dependency_edges', lambda pack, spec, groups: {d: set() for d, _ in groups}):  # 不靠启发式排序，逼出“推迟” / no heuristic order: force the deferral
+            draft, worker = self.generate(actions)
+        deferred = self.events(draft, 'package_deferred')
+        self.assertEqual([(d['package'], d['waiting_for']) for d in deferred], [('calc/app', ['calc/parser'])])
+        self.assertEqual([e['package'] for e in self.events(draft, 'package_sealed')], ['calc/parser', 'calc/app', 'calc'])
+        files, result = self.finish(draft)
+        self.assertEqual(result['status'], 'succeeded', result)
+
+    def stuck_actions(self):
+        buggy = APP2.replace('print(sum(parse(stdin.read())), file=stdout)', 'print(sum(parse(stdin.read())) + 1, file=stdout)')
+        return [write('calc/parser/parser.py', PARSER), write('tests/test_parser.py', PARSER_TEST), check('test'), check('static'),
+                write('calc/app/app.py', buggy), write('tests/test_app.py', APP2_TEST), check('test'), {'tool': 'note', 'text': 'trying'}, check('test'), {'tool': 'note', 'text': 'again'}, check('test')]
+
+    def test_the_same_failure_three_times_in_a_row_is_stuck_and_stops_early(self):
+        from masa.application.v2.workers import Stuck
+        with self.assertRaisesRegex(MasaError, 'package calc/app is stuck after 7 steps'):
+            self.generate(self.stuck_actions())
+        stuck = self.events(self.failed_run()['id'], 'worker_stuck')
+        self.assertEqual((stuck[0]['package'], stuck[0]['step']), ('calc/app', 7))  # 在包内第 7 步就停了，没有烧到 16 步 / stopped at the 7th step of the package, not after 16
+        self.assertIn('3 checks in a row', stuck[0]['why'])
+
+    def test_the_second_check_with_the_same_failure_carries_a_warning_to_try_something_else(self):
+        from masa.application.v2.workers import Stuck
+        worker = ScriptedWorker(self.stuck_actions())
+        with self.assertRaises(MasaError):
+            self.service.generate(self.parent, worker)
+        seen = [c['last_results'][-1]['result'] for c in worker.contexts if c.get('last_results') and c['last_results'][-1]['tool'] == 'run_check' and not c['last_results'][-1]['ok']]
+        self.assertTrue(any('same problem as the previous check' in text for text in seen), seen)
+
+    def test_after_a_stuck_attempt_sealed_packages_are_reused_and_the_stuck_one_continues_from_its_files(self):
+        from masa.application.v2.workers import Stuck
+        with self.assertRaises(MasaError):
+            self.generate(self.stuck_actions())
+        self.service.seed_run = self.failed_run()['id']
+        draft, worker = self.generate([{'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}, check('test'), check('static'),
+                                       write('calc/__main__.py', MAIN2), check('test'), check('static')], retry_feedback='package calc/app is stuck')
+        self.assertEqual([e['package'] for e in self.events(draft, 'package_reused')], ['calc/parser'])
+        self.assertEqual([e['package'] for e in self.events(draft, 'package_sealed')], ['calc/app', 'calc'])
+        self.assertEqual(self.store.run(draft)['model_calls'], 6)  # 只有 app 和入口花了调用；parser 没有重写 / only app and the entry cost calls; the parser was not rewritten
+        self.assertIn('package calc/app is stuck', worker.contexts[0]['previous_attempt_error'])
+        files, result = self.finish(draft)
+        self.assertEqual(result['status'], 'succeeded', result)
+
+
 GO = Path(__file__).resolve().parents[1] / '.tools/go/bin/go.exe'
 
 

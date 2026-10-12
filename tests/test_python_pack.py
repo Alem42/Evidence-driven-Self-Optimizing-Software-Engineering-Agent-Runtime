@@ -101,6 +101,21 @@ class ChecksTests(unittest.TestCase):
         again = checks.name_import_problems(lacking, ['calc/app/app.py'], 'calc')
         self.assertIn('calc/__main__.py imports', again['calc/app/app.py'])
 
+    def test_a_file_that_imports_itself_is_caught(self):
+        # 真实运行（FizzBuzz）：app.py 第一行 `from fizzbuzzcli.app.app import run`，整个测试模块因此无法导入。 The real FizzBuzz run: line 1 of app.py imported from itself, so the whole test module failed to import.
+        planned = ['pyproject.toml', 'calc/__init__.py', 'calc/app/__init__.py', 'calc/app/app.py', 'calc/__main__.py', 'tests/test_app.py']
+        files = {'calc/app/app.py': 'from calc.app.app import run' + NL + NL + 'def run(a, i, o, e):' + NL + '    return 0' + NL}
+        found = checks.unknown_import_messages(files, ['calc/app/app.py'], 'calc', planned)
+        self.assertIn('imports itself', found['calc/app/app.py'])
+        self.assertIn('circular import', found['calc/app/app.py'])
+
+    def test_empty_cases_arrays_are_dropped_from_a_check_plan_instead_of_rejecting_the_answer(self):
+        from masa.agents.protocol import validate_response
+        context = {'purpose': 'project_tester', 'spec': SPEC, 'language': 'python'}
+        plan = [{**CHECKS[0]}, {**CHECKS[1], 'cases': []}]
+        self.assertEqual(len(validate_response(context, {'checks': plan}, '')), 2)
+        self.assertNotIn('cases', validate_response(context, {'checks': plan}, '')[1])
+
     def test_an_entry_that_reads_input_itself_is_refused(self):
         bad = 'import sys' + NL + 'for line in sys.stdin:' + NL + '    print(line)' + NL
         self.assertIn('for ... in sys.stdin', checks.entry_problem_messages({'calc/__main__.py': bad}, ['calc/__main__.py'], 'calc/__main__.py')['calc/__main__.py'])

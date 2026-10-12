@@ -282,3 +282,26 @@ class LiveOutputTests(unittest.TestCase):
         assembler.on_text = lambda text: 1 / 0  # 回调失败不影响读流 / a failing callback never breaks the read
         assembler._add('still fine')
         live.clear('run-live')
+
+
+class ConnectLimitTests(ServerCase):
+    """本地模型要等加载完才有响应头：连接阶段的时限不能是 30 秒。 A local model sends no response headers until it has loaded, so the connect limit cannot be 30 seconds."""
+
+    def limit_for(self, model_type, **extra):
+        import urllib.request
+        from unittest import mock
+        seen = []
+
+        class Opener:
+            def open(self, request, timeout=None):
+                seen.append(timeout)
+                raise OSError('stop here')
+        provider = self.provider(**extra)
+        provider.config['model_type'] = model_type
+        with mock.patch.object(urllib.request, 'build_opener', lambda *a, **k: Opener()), self.assertRaises(TransportFailure):
+            provider.respond(self.CONTEXT)
+        return seen[0]
+
+    def test_local_calls_wait_for_the_load_cloud_calls_keep_the_short_limit(self):
+        self.assertGreater(self.limit_for('local', first_token_seconds=300), 100)
+        self.assertLessEqual(self.limit_for('cloud'), 30.0)
