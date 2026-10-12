@@ -21,7 +21,8 @@ from masa.infrastructure.store import Store  # noqa: E402
 
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
 ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}},
-        'v1x': {'runtime': 'v1', 'policy': {'planner_examples': True}}, 'v2x': {'runtime': 'v2', 'policy': {'planner_examples': True}}}
+        'v1x': {'runtime': 'v1', 'policy': {'planner_examples': True}}, 'v2x': {'runtime': 'v2', 'policy': {'planner_examples': True}},
+        'v1y': {'runtime': 'v1', 'policy': {'planner_examples': True, 'examples_as_tests': False}}, 'v2y': {'runtime': 'v2', 'policy': {'planner_examples': True, 'examples_as_tests': False}}}
 
 
 def prepare(source, folder, with_local):

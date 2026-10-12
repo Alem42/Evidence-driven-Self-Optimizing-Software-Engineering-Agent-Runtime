@@ -962,7 +962,7 @@ class WorkflowCoordinator:
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
                                        contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None,
-                                       language=self.language,examples=bool(self._ladder and self.router.policy.get('planner_examples')))
+                                       language=self.language,examples=bool(self._ladder and self.router.policy.get('planner_examples')),examples_as_tests=bool(self.router.policy.get('examples_as_tests',True)) if self._ladder else True)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

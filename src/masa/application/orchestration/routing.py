@@ -49,6 +49,9 @@ DEFAULT_POLICY = {
     # Planner 示例（默认关闭）：Planner 额外写 3–8 个“参数/标准输入 → 逐字节标准输出/退出码”的示例，作为全项目唯一的精确期望来源；Tester 自动并入、Developer 以它为准，任务成功后再用真实程序核对一遍（只记录，不改变裁决）。
     # Planner examples (off by default): the Planner also writes 3-8 byte-exact args/stdin -> stdout/exit-code examples as the project's single source of exact expectations; merged into the check plan, authoritative for the Developer, and re-checked against the real program after success (recorded only, never changes the verdict).
     'planner_examples': False,
+    # Planner 示例的用法（仅在 planner_examples 打开时有意义）：true = 示例并入 Tester 的用例（测试套件变大、更严格）；false = 示例只作为 Developer/Repair 的权威参考与成功后的黑盒核对，不并入测试。
+    # How the examples are used (only meaningful with planner_examples): true = merged into the Tester's cases (a bigger, stricter suite); false = authoritative guidance for the Developer/Repair plus the post-success black-box check, not merged into the tests.
+    'examples_as_tests': True,
     # 断言裁判（默认关闭）：失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为独立证据交给 Diagnoser；并在“测试修订没改动失败断言”时给出明确提示。 Assertion referee (off by default).
     'assertion_referee': False,
     # 经验库（默认关闭）：0 关 / 1 只记录失败签名与被验证有效的做法 / 2 再把命中的做法注入修复指令。 Experience library (off by default): 0 off / 1 record only / 2 also inject hits into repair instructions.
@@ -303,7 +306,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget', 'package_contract', 'planner_examples', 'assertion_referee'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget', 'package_contract', 'planner_examples', 'examples_as_tests', 'assertion_referee'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

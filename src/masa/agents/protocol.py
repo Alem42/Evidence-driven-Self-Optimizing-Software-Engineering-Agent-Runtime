@@ -46,8 +46,9 @@ PLANNER_EXAMPLES_NOTE = (
     'acceptance states the rule in words, examples show it in bytes, and they must agree.')
 EXAMPLES_NOTE = (
     ' The spec contains concrete "examples" (args, stdin, byte-exact stdout, exit code). They are authoritative: every exact expected value in a test must be one of them or follow directly from them and from spec.acceptance; '
-    'if your own belief about the behaviour contradicts an example, the example wins. The examples are already part of the check plan as cli cases.')
+    'if your own belief about the behaviour contradicts an example, the example wins. ')
 TESTER_EXAMPLES_NOTE = (' The spec examples are added to the check plan automatically as cli cases: do NOT repeat them. Return only the additional cases (boundaries and error paths they do not cover); the plan keeps 16 cases at most including the examples.')
+TESTER_GUIDANCE_NOTE = (' The spec examples are NOT added to the check plan: they are guidance. Write your own cases (4..12) and make every expected value agree with them.')
 
 
 def _project_roles_prompt(context):
@@ -59,7 +60,10 @@ def _project_roles_prompt(context):
     if purpose == 'project_planner' and context.get('examples_required'):
         text += PLANNER_EXAMPLES_NOTE
     elif isinstance(context.get('spec'), dict) and context['spec'].get('examples'):
-        text += EXAMPLES_NOTE + (TESTER_EXAMPLES_NOTE if purpose == 'project_tester' else '')
+        merged = context.get('examples_as_tests', True) if purpose == 'project_tester' else context.get('examples_as_tests')
+        if merged is None:  # 开发/修复上下文里看检查计划里有没有并入的示例用例 / for the development and repair contexts: are example cases in the check plan?
+            merged = any(str(case.get('name', '')).startswith('example: ') for check in (context.get('checks') or []) if isinstance(check, dict) for case in check.get('cases', []) if isinstance(case, dict))
+        text += EXAMPLES_NOTE + ((TESTER_EXAMPLES_NOTE if merged else TESTER_GUIDANCE_NOTE) if purpose == 'project_tester' else (' The examples are already part of the check plan as cli cases.' if merged else ''))
     return text
 
 

@@ -193,3 +193,32 @@ class StdinTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GuidanceOnlyTests(unittest.TestCase):
+    def test_examples_not_merged_into_the_cases_are_described_as_guidance(self):
+        tester = instruction_for({'purpose': 'project_tester', 'spec': SPEC_X, 'language': 'python', 'examples_as_tests': False})
+        self.assertIn('NOT added to the check plan', tester)
+        self.assertNotIn('do NOT repeat them', tester)
+        merged_checks = [{'operation': 'py_test', 'cases': ex.cases_from_examples(EXAMPLES)}]
+        plain_checks = [{'operation': 'py_test', 'cases': [{'name': 'other'}]}]
+        self.assertIn('already part of the check plan', instruction_for({'purpose': 'project_developer', 'spec': SPEC_X, 'checks': merged_checks, 'language': 'python'}))
+        self.assertNotIn('already part of the check plan', instruction_for({'purpose': 'project_developer', 'spec': SPEC_X, 'checks': plain_checks, 'language': 'python'}))
+
+    @unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
+    def test_the_planner_can_keep_examples_out_of_the_check_plan(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                class Planner(FakeModel):
+                    def respond(self, context):
+                        self.contexts.append(copy.deepcopy(context))
+                        return copy.deepcopy(SPEC_X if context['purpose'] == 'project_planner' else CHECKS)
+                planner = Planner()
+                parent = ProjectPlanning(store, Runner(RUNNER)).generate(planner, 'sum integers', language='python', examples=True, examples_as_tests=False)
+                checks = store.read(store.run(parent)['data']['project_plan']['checks_ref'])
+                self.assertFalse(any(str(c['name']).startswith('example: ') for check in checks for c in check.get('cases', [])))
+                self.assertFalse(planner.contexts[1].get('examples_as_tests', True))
+                self.assertEqual(store.read(store.run(parent)['data']['project_plan']['spec_ref'])['examples'], EXAMPLES)  # 示例仍在规格里 / the examples stay in the spec
+            finally:
+                store.close()

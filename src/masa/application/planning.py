@@ -47,7 +47,7 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None, examples=False):
+                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None, examples=False, examples_as_tests=True):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         # 语言：显式给出的优先；续跑/重试/复用沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry/reuse follow the original run; else the default language.
@@ -123,6 +123,8 @@ class ProjectPlanning:
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
             tester_values = {'goal':goal, 'spec':spec}
+            if spec.get('examples') and not examples_as_tests:
+                tester_values['examples_as_tests'] = False  # 示例只作参考，不并入用例 / the examples are guidance only, not merged into the cases
             # 多包项目的包间契约（策略 package_contract，默认关闭）：规格里至少有 3 个内部包才需要；失败就忽略契约，规划照常。 Package contract for multi-package projects (policy package_contract, off by default): wanted only with three or more internal packages; a failure ignores it and planning goes on.
             if contract_provider is not None and contract_wanted(spec, pack):
                 try:
@@ -138,7 +140,7 @@ class ProjectPlanning:
             checks = self.call(rid, provider, 'project_tester', tester_values)
             # Planner 示例确定性地并入测试检查（放在最前面），模型不转抄 / the Planner's examples are merged into the test check deterministically (first), no model re-types them
             from masa.domain.examples import merge_into_checks
-            checks = merge_into_checks(checks, spec, pack.op_id('test'))
+            checks = merge_into_checks(checks, spec, pack.op_id('test')) if examples_as_tests else checks
             if spec.get('examples'):
                 self.store.event(rid, 'planner_examples', {'count': len(spec['examples']), 'names': [e['name'] for e in spec['examples']]})
             validate_checks(checks,spec,require_coverage=False,language=pack.id)
