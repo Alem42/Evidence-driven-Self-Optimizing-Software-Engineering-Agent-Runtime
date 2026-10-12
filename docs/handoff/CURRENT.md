@@ -1,5 +1,7 @@
 # 当前断点（接续用）
 
+**2026-10-13（深夜）**：复盘了用户的两次真实运行（大写转换、FizzBuzz，见 progress/PROGRESS_2026-10-13_002）：失败不是 Tester/Planner 的问题，主要是本地大模型冷加载被 30 秒连接时限掐断后原样重试 4 次（已修：本地连接时限=首字时限、同阶段不卸载本地模型、可达却无响应两次就升级）、规格 summary 与验收矛盾、Tester 空 cases 数组被拒（已容忍）、弱模型的自导入（已加确定性检查）。V2 补了依赖顺序、推迟、卡住检测、失败后沿用已封包的包（零 token 测试 14 个；多包真实验证未做）。**待决策**：小任务走 V2 solo 快路径并做与 V1 的同预算对照；Planner 加“具体示例”。
+
 **2026-10-13（晚）**：Runtime V2 第一个切片已实现并推送：`request.runtime=v2` 时用“包工人循环”生成草稿（角色 package_worker、写范围由工具强制、自动封包、小任务合成一个包、账本事件 worker_step/package_sealed），验证/Gate/修复仍是 V1 的；真实 Flash 的 Python 4/4 通过判官（¥0.027–0.063/个，样本很小）。第二轮模拟用户测试的 7 类问题已修（见 progress/PROGRESS_2026-10-13_001）。后端 599 测试通过、等价检查 IDENTICAL。**下一步**：V2 的失败重开出错的包、依赖顺序、卡住检测/升级、与 V1 的同预算配对（小样本）、运行视图；本地模型（glm-4.7-flash）冒烟。
 
 **2026-10-13**：语言包 P0–P7 与 P8 部分完成并推送：Go 从核心解耦（耦合字面量 355→78，Go 行为逐字节不变、等价检查 IDENTICAL），运行器改为按语言包生成的操作清单执行，**Python 包**跑通（脚本化端到端 + 真实 Flash 约 ¥0.77，判官下 9/12 通过、2 次假通过已用“导入名检查”堵上），前端有语言选择与 设置→语言（解释器、unittest/pytest、额外包目录），`masa lang list/info/check`。详见 progress/PROGRESS_2026-10-13_001。**下一步**：V2 工人循环（design/RUNTIME_V2.md，M0 运行视图可先做）；第二轮模拟用户测试（Python 与新设置页）的报告若已返回见该进展文档。工具：`scripts/eval/lang_eval.py`（Flash only）、docs/guides/ADD_A_LANGUAGE.md。
