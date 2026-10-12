@@ -6,25 +6,45 @@ import os
 from pathlib import Path
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 
 from masa.domain.models import MasaError, canonical
+from masa.languages.registry import registry
 
 
 class Runner:
-    def __init__(self, executable: Path, go_executable: Path):
+    def __init__(self, executable: Path, go_executable: Path | None = None):
         self.executable = executable.resolve()
-        self.go_executable = go_executable.resolve()
-        if not self.executable.is_file() or not self.go_executable.is_file():
+        # go_executable 是旧名字（账本画像与旧测试都用它），只有对应的语言包会读它；其它语言的工具链由各自的包配置。
+        # go_executable is the historical name (ledger profiles and old tests use it) and only its pack reads it; other languages' toolchains are configured by their packs.
+        self.go_executable = go_executable.resolve() if go_executable else None
+        if not self.executable.is_file() or (self.go_executable is not None and not self.go_executable.is_file()):
             raise MasaError("runner or Go binary missing; run scripts/build.ps1 first")
 
     def execute(self, request: dict, workspace: Path, cancelled) -> dict:
-        allowed = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE",
-                   "LOCALAPPDATA", "GOROOT", "GOCACHE", "GOMODCACHE", "GOPATH"}
+        # 操作怎么执行由语言包生成的清单决定；请求里只有操作名。 How an operation runs comes from a pack-generated table; the request carries only the operation name.
+        pack = registry.pack_of_operation(request["operation"])
+        ops = pack.runner_ops(self)
+        # 运行器进程自己的环境：只带语言包允许传给被测代码的变量（运行器从自己的环境里读它们）。 The runner process's own environment: only what the pack lets the code under test see (the runner reads them from its own environment).
+        allowed = {name.upper() for name in ops["env"]["allow"]}
         env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
-        env["GOROOT"] = str(self.go_executable.parent.parent)
-        proc = subprocess.Popen([str(self.executable), "--workspace", str(workspace), "--go", str(self.go_executable)],
+        env.update(pack.runner_env(self))
+        handle, ops_path = tempfile.mkstemp(prefix="masa-ops-", suffix=".json")
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(ops, fh)
+        proc = None
+        try:
+            return self._execute(request, workspace, cancelled, ops_path, env)
+        finally:
+            try:
+                os.unlink(ops_path)
+            except OSError:
+                pass
+
+    def _execute(self, request: dict, workspace: Path, cancelled, ops_path: str, env: dict) -> dict:
+        proc = subprocess.Popen([str(self.executable), "--workspace", str(workspace), "--ops", ops_path],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **NO_WINDOW, **NEW_SESSION)
         output: queue.Queue = queue.Queue()
         limit = request["max_output_bytes"] * 12 + 65536

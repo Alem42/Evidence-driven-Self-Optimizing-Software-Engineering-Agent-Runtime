@@ -34,7 +34,16 @@ type Result struct {
 	Phase           string `json:"phase,omitempty"`
 }
 
-func Decode(data []byte) (Request, error) {
+// Policy 是请求校验用的名单：允许哪些操作、哪些操作可以带 argv。 What a request may name: allowed operations, and which of them take an argv.
+type Policy struct {
+	Operations map[string]bool
+	Argv       map[string]bool
+}
+
+// DefaultPolicy 是没有操作清单时的 Go 名单（与以前写死的一致）。 The Go lists used when there is no ops table (identical to the previous hard-coded ones).
+func DefaultPolicy() Policy { return LegacyGoOps("/x").Policy() }
+
+func Decode(data []byte, policy Policy) (Request, error) {
 	var r Request
 	if len(data) > MaxRequestBytes {
 		return r, fmt.Errorf("request too large")
@@ -48,17 +57,17 @@ func Decode(data []byte) (Request, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return r, fmt.Errorf("trailing request data")
 	}
-	return r, r.Validate()
+	return r, r.Validate(policy)
 }
 
-func (r Request) Validate() error {
+func (r Request) Validate(policy Policy) error {
 	if r.ProtocolVersion != 1 || r.RequestID == "" || len(r.RequestID) > 128 || r.SnapshotID == "" {
 		return fmt.Errorf("invalid protocol, request ID, or snapshot")
 	}
-	if r.Operation != "go_test" && r.Operation != "go_vet" && r.Operation != "go_fmt_check" && r.Operation != "go_index" && r.Operation != "app_run" {
+	if !policy.Operations[r.Operation] {
 		return fmt.Errorf("operation is not allowed")
 	}
-	if len(r.Argv) > 64 || (r.Operation != "app_run" && len(r.Argv) > 0) {
+	if len(r.Argv) > 64 || (!policy.Argv[r.Operation] && len(r.Argv) > 0) {
 		return fmt.Errorf("argv outside runner policy")
 	}
 	for _, arg := range r.Argv {

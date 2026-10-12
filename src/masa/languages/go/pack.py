@@ -44,6 +44,21 @@ class GoPack(LanguagePack):
         out['gofmt'] = hashlib.sha256(fmt.read_bytes()).hexdigest()
         return out
 
+    def executables(self, executor):
+        go = self._go(executor)
+        return {'toolchain': go, 'format': self._gofmt(executor)} if go else {}
+
+    def runner_env(self, executor):
+        go = self._go(executor)
+        return {'GOROOT': str(go.parent.parent)} if go else {}
+
+    def env_policy(self, executor):
+        """与以前写死在运行器里的 Go 环境逐项相同。 Identical, item by item, to the Go environment that used to be hard-coded in the runner."""
+        go = self._go(executor)
+        return {'allow': ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOROOT'],
+                'set': {'GOENV': 'off', 'GOWORK': 'off', 'GOTOOLCHAIN': 'local', 'CGO_ENABLED': '0', 'GOPROXY': 'off', 'GOFLAGS': '-mod=readonly'},
+                'path_prepend': [str(go.parent)] if go else []}
+
     def config_schema(self):
         return [ConfigField('go', 'go 可执行文件', 'path', '', '留空使用启动参数 --go 或环境变量 MASA_GO')]
 

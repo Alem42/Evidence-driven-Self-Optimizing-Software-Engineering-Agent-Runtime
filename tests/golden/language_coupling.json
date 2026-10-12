@@ -51,7 +51,7 @@
   "go_word": 2
  },
  "infrastructure/runner.py": {
-  "go_env": 6,
+  "go_env": 5,
   "go_word": 1
  },
  "infrastructure/workspaces.py": {

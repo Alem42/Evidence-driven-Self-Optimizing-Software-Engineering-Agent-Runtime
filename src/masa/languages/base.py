@@ -168,9 +168,38 @@ class LanguagePack:
         """写进账本 profile 的工具链身份（路径与哈希）。 Toolchain identity recorded in the ledger profile (paths and hashes)."""
         return {}
 
+    def executables(self, executor):
+        """{可执行文件的角色: 绝对路径}，供操作表里的 exe 引用（例如 toolchain、format）。 {role: absolute path} the operation table refers to (e.g. toolchain, format)."""
+        return {}
+
+    def runner_env(self, executor):
+        """运行器进程需要额外带上的环境变量（会经由 env_policy.allow 传给被测代码）。 Extra variables for the runner process (passed on to the code under test via env_policy.allow)."""
+        return {}
+
+    def env_policy(self, executor):
+        """被测代码能看到的环境：{'allow': [...], 'set': {...}, 'path_prepend': [...]}。 The environment the code under test sees."""
+        return {'allow': ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'LOCALAPPDATA'], 'set': {}, 'path_prepend': []}
+
     def runner_ops(self, executor):
-        """运行器的命令清单（见 docs/design/LANGUAGE_PACKS.md 第 8 节）。 The runner's command table."""
-        raise NotImplementedError
+        """运行器的命令清单（见 docs/design/LANGUAGE_PACKS.md 第 8 节）：由清单里的操作定义与本包的工具链路径生成。 The runner's operation table, generated from the manifest's operation definitions and this pack's toolchain paths."""
+        exes = self.executables(executor)
+
+        def resolve(role):
+            return str(exes.get(role, role))
+        operations = {}
+        for kind, op in self.operations.items():
+            if op.exe == 'builtin':
+                operations[op.id] = {'builtin': op.id}
+                continue
+            entry = {'exe': resolve(op.exe), 'args': list(op.args)}
+            if op.fail_if_stdout:
+                entry['fail_if_stdout_nonempty'] = True
+            if op.build:
+                entry['build'] = {'exe': resolve(op.build['exe']), 'args': list(op.build.get('args', ()))}
+            if kind == 'run':
+                entry.update(argv_from_request=True, run=True)
+            operations[op.id] = entry
+        return {'version': 1, 'root_marker': self.root_marker, 'env': self.env_policy(executor), 'operations': operations}
 
     def config_schema(self):
         """设置页里这个包可调的项。 What the Settings page lets the user tune for this pack."""
