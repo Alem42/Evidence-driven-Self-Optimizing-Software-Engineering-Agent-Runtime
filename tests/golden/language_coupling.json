@@ -1,0 +1,223 @@
+{
+ "agents/protocol.py": {
+  "go_file": 15,
+  "go_mod": 9,
+  "go_template": 5,
+  "go_word": 8,
+  "gofmt": 3,
+  "op_ids": 4
+ },
+ "agents/schemas.py": {
+  "go_file": 2,
+  "go_template": 1,
+  "op_ids": 2
+ },
+ "application/checks/__init__.py": {
+  "gofmt": 1
+ },
+ "application/checks/check_policy.py": {
+  "go_file": 11,
+  "go_word": 1,
+  "gofmt": 3,
+  "op_ids": 4
+ },
+ "application/checks/contract.py": {
+  "go_file": 3,
+  "go_word": 2
+ },
+ "application/checks/entrypoint.py": {
+  "go_file": 10,
+  "gofmt": 1
+ },
+ "application/checks/goimports.py": {
+  "go_word": 2,
+  "gofmt": 2
+ },
+ "application/checks/imports.py": {
+  "go_file": 4,
+  "go_word": 4
+ },
+ "application/checks/leaks.py": {
+  "go_file": 1,
+  "go_word": 1
+ },
+ "application/checks/ownership.py": {
+  "go_file": 4,
+  "go_word": 3,
+  "gofmt": 1,
+  "op_ids": 1
+ },
+ "application/checks/referee.py": {
+  "go_word": 1
+ },
+ "application/checks/snippets.py": {
+  "go_file": 2,
+  "go_word": 1
+ },
+ "application/checks/testlint.py": {
+  "go_file": 2,
+  "gofmt": 1
+ },
+ "application/checks/triage.py": {
+  "go_file": 2,
+  "go_mod": 1,
+  "go_template": 2,
+  "go_word": 4
+ },
+ "application/console.py": {
+  "go_file": 1,
+  "op_ids": 2
+ },
+ "application/generation.py": {
+  "go_env": 3,
+  "go_file": 19,
+  "go_mod": 12,
+  "go_word": 8,
+  "gofmt": 25,
+  "op_ids": 1
+ },
+ "application/orchestration/context_plan.py": {
+  "go_word": 1
+ },
+ "application/orchestration/coordinator.py": {
+  "go_file": 3,
+  "go_mod": 1,
+  "gofmt": 1,
+  "op_ids": 1
+ },
+ "application/orchestration/flow.py": {
+  "go_template": 1
+ },
+ "application/orchestration/workflows.py": {
+  "gofmt": 2
+ },
+ "application/planning.py": {
+  "go_mod": 2,
+  "go_template": 2,
+  "op_ids": 2
+ },
+ "application/reports.py": {
+  "go_word": 3
+ },
+ "application/review/mutation.py": {
+  "go_file": 1,
+  "op_ids": 1
+ },
+ "application/review/single_file.py": {
+  "go_env": 1,
+  "go_file": 8,
+  "go_mod": 2,
+  "go_word": 2,
+  "gofmt": 2
+ },
+ "application/review/source_review.py": {
+  "go_word": 1,
+  "op_ids": 1
+ },
+ "application/review/test_review.py": {
+  "op_ids": 1
+ },
+ "bench/oracle.py": {
+  "go_env": 6
+ },
+ "bench/tasks.py": {
+  "go_word": 3
+ },
+ "domain/models.py": {
+  "op_ids": 2
+ },
+ "domain/proposals.py": {
+  "go_file": 13,
+  "go_mod": 6,
+  "go_template": 2,
+  "go_word": 11,
+  "op_ids": 3
+ },
+ "infrastructure/llm.py": {
+  "go_mod": 1,
+  "op_ids": 1
+ },
+ "infrastructure/runner.py": {
+  "go_env": 6,
+  "go_word": 1
+ },
+ "infrastructure/settings.py": {
+  "op_ids": 2
+ },
+ "infrastructure/workspaces.py": {
+  "go_mod": 2,
+  "go_word": 1
+ },
+ "intelligence/context.py": {
+  "op_ids": 1
+ },
+ "intelligence/index.py": {
+  "go_file": 2,
+  "go_word": 1,
+  "op_ids": 1
+ },
+ "intelligence/library.py": {
+  "go_file": 1
+ },
+ "intelligence/repair_context.py": {
+  "go_file": 1,
+  "go_mod": 1
+ },
+ "interfaces/cli.py": {
+  "go_file": 3,
+  "go_word": 4,
+  "op_ids": 1
+ },
+ "interfaces/mcp_server.py": {
+  "go_file": 4,
+  "go_mod": 6,
+  "go_word": 1,
+  "gofmt": 1,
+  "op_ids": 1
+ },
+ "roles/specs/assertion_referee.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/code_generation.prompt.md": {
+  "go_word": 1,
+  "gofmt": 1
+ },
+ "roles/specs/code_reviewer.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/package_contract.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_conductor.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_diagnoser.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_triage.json": {
+  "go_word": 1
+ },
+ "roles/specs/project_triage.prompt.md": {
+  "go_file": 1,
+  "go_template": 1,
+  "go_word": 1
+ },
+ "roles/specs/test_skeptic.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/workflow_tuner.prompt.md": {
+  "go_word": 1
+ },
+ "runtime/engine.py": {
+  "go_env": 2,
+  "gofmt": 3,
+  "op_ids": 2
+ },
+ "runtime/graph.py": {
+  "op_ids": 8
+ },
+ "runtime/patches.py": {
+  "go_file": 1,
+  "go_word": 3
+ }
+}
