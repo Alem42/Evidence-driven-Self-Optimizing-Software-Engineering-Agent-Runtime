@@ -269,6 +269,14 @@ class LanguagePack:
         """checks=[(operation_id, result)] → 诊断字典列表（Diagnostic.to_dict() 的形状，最多 40 条）。 Parse raw check results into diagnostic dicts (at most 40)."""
         return []
 
+    def assertion_diffs(self, checks, limit=3):
+        """失败断言里实际值与期望值真正不同的部分：[{'path','line','got','want'}]，给断言裁判；没有这种能力的语言返回空列表。 The parts where the actual and expected values really differ in failing assertions, for the assertion referee; empty for a language without it."""
+        return []
+
+    def failure_details(self, checks, limit=1400):
+        """前几个失败的“期望 vs 实际”原文（例如 unittest 的逐行差异），给自主工人看；没有的语言返回空串。 The expected-vs-actual text of the first failures (e.g. unittest's line diff) for autonomous workers; empty for a language without it."""
+        return ''
+
     def needs_test_revision(self, evidence, checks=()):
         """失败证据是否表明问题在测试源码或测试准备里。 Does the evidence point at test source or test setup?"""
         return False

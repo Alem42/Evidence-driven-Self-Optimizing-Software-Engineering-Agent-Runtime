@@ -206,6 +206,19 @@ class PythonPack(LanguagePack):
         for candidate in files:
             if not checks.is_test_path(candidate) and candidate.endswith('.py') and stem in candidate.rsplit('/', 1)[0].split('/')[1:]:
                 return candidate.rsplit('/', 1)[0]
+        # 测试名由包名和文件名拼成（tests/test_command_parser.py ↔ command/parser.py）：按词数打分，唯一最高分的包认领它；否则归入入口所在的包。真实运行里这类测试全被归给入口包，command 包没有自己的测试，它的工人永远封不了包。
+        # The test name is a mix of package and file names (tests/test_command_parser.py <-> command/parser.py): score packages by the words they share with it and let the unique top scorer claim it; otherwise the entry's package. In a real run all such tests went to the entry package, so the command package had no tests of its own and its worker could never seal.
+        words = set(stem.split('_')) - {''}
+        scores = {}
+        for candidate in files:
+            if checks.is_test_path(candidate) or not candidate.endswith('.py') or candidate.endswith('__init__.py') or '/' not in candidate:
+                continue
+            directory, name = candidate.rsplit('/', 1)
+            tokens = ({directory.rsplit('/', 1)[-1]} | set(name[:-3].split('_'))) - {''}
+            scores[directory] = scores.get(directory, set()) | tokens
+        ranked = sorted(((len(words & tokens), directory) for directory, tokens in scores.items() if directory.count('/') >= 1), reverse=True)
+        if ranked and ranked[0][0] > 0 and (len(ranked) == 1 or ranked[0][0] > ranked[1][0]):
+            return ranked[0][1]
         return (spec or {}).get('module', '')
 
     def worker_notes(self):
@@ -221,6 +234,12 @@ class PythonPack(LanguagePack):
     # ---------- 失败解析 / failure parsing ----------
     def parse_failures(self, checks_results):
         return failures.parse_failures(checks_results, self.op_id('test'), self.op_id('static'))
+
+    def assertion_diffs(self, checks, limit=3):
+        return failures.assertion_diffs(checks, self.op_id('test'), limit)
+
+    def failure_details(self, checks, limit=1400):
+        return failures.details(checks, self.op_id('test'), limit)
 
     def needs_test_revision(self, evidence, checks_results=()):
         return failures.needs_test_revision(evidence, checks_results, self.op_id('test'), self.op_id('static'))

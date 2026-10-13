@@ -539,6 +539,26 @@ class Console:
                     except Exception:pass
         except Exception:pass
 
+    @staticmethod
+    def _v2_policy(body):
+        """V2 的生成阶段每个等级只试一次：同一个等级的第二次尝试从第一次写了一半的文件接着做，真实运行里 6 次里 6 次都以同样的方式卡住（本地模型反复 finish），白白多花 5–10 分钟；卡住后直接升级。用户显式给的 attempts_per_level 不改。
+        A V2 generation stage tries each level once: the second attempt at the same level continues from the first one's half-written files and in real runs it got stuck the same way every time (the local model finishing over and over), costing 5-10 minutes for nothing; after being stuck it escalates at once. An explicit attempts_per_level is left alone."""
+        policy=body.get('policy')
+        if body.get('runtime')=='v2' and not (isinstance(policy,dict) and 'attempts_per_level' in policy):
+            return {'assertion_referee':True,**(policy if isinstance(policy,dict) else {}),'attempts_per_level':{'generation':1}}
+        if body.get('runtime')=='v2' and isinstance(policy,dict) and 'assertion_referee' not in policy:
+            return {**policy,'assertion_referee':True}  # 工人的测试期望常常算错，断言裁判便宜且实测有效 / worker-written test expectations are often wrong; the referee is cheap and measured to work
+        return policy
+
+    @staticmethod
+    def _v2_budget(body):
+        """V2 的工人循环每一步都是一次模型调用（10 文件的项目一次运行要 80–150 次，而默认的 40 次上限会在中途把任务停掉）：V2 默认放宽到 150，用户显式给的预算不改。
+        Every step of a V2 worker loop is a model call (a 10-file project takes 80-150 per run and the default limit of 40 would stop it half way): V2 defaults to 150, an explicit user budget is left alone."""
+        budget=body.get('budget')
+        if body.get('runtime')=='v2' and not (isinstance(budget,dict) and 'max_model_calls' in budget):
+            return {**(budget if isinstance(budget,dict) else {}),'max_model_calls':150}
+        return budget
+
     def auto_fix(self, rid, body):
         """从一次失败的验证继续自动修复：跳过规划与生成，沿用任务的路由与预算设置。
         Continue the automatic repair from a failed verification (no re-planning); history is rebuilt from the version lineage."""
@@ -573,7 +593,7 @@ class Console:
             # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
             routing=previous.get('routing') if resume_job else None
             if not resume_job and body.get('routing')=='ladder':
-                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),policy=body.get('policy'),
+                routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._v2_policy(body),
                                        profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
             if routing:

@@ -398,3 +398,59 @@ class NormalizeChecksTests(unittest.TestCase):
                              ([{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [0], 'cases': [self.case('a', 'weird')]}], 'test level')):
             with self.subTest(message=message), self.assertRaisesRegex(MasaError, message):
                 validate_checks(normalize_checks(bad), SPEC, language='python')
+
+
+class FailureDetailsTests(unittest.TestCase):
+    def test_the_line_diff_after_the_exception_line_is_kept_for_the_first_failures(self):
+        # 真实运行：异常行把长字符串缩成 'erro[21 chars]...'，工人看不出期望与实际差在哪；逐行差异在异常行之后。
+        # Real run: the exception line abbreviates long strings to 'erro[21 chars]...' so the worker could not see the difference; the line diff follows the exception line.
+        pack = registry.get('python')
+        block = NL.join(['FAIL: test_x (test_app.T.test_x)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_app.py", line 64, in test_x', '    self.assertEqual(a, b)',
+                         "AssertionError: 'erro[21 chars]ror: exists' != 'erro[21 chars]ror: bad'", '- error: ok', '+ error: exists', '?        ++++', '', '-' * 70, 'Ran 2 tests in 0.001s', '', 'FAILED (failures=1)', ''])
+        text = pack.failure_details([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + block, 'stdout': ''})])
+        self.assertIn('- error: ok' + NL + '+ error: exists', text)
+        self.assertTrue(text.startswith('FAIL: test_x'))
+        self.assertNotIn('Ran 2 tests', text)
+        self.assertNotIn('FAILED (', text)
+        self.assertEqual(pack.failure_details([('other_op', {'stderr': block})]), '')
+
+
+class TestsFollowTheirPackageTests(unittest.TestCase):
+    SPEC = {'module': 'bankledger', 'files': [{'path': p, 'purpose': 'x'} for p in (
+        'bankledger/__main__.py', 'bankledger/app/app.py', 'bankledger/command/parser.py', 'bankledger/store/accounts.py', 'bankledger/transfer/rules.py', 'bankledger/report/format.py',
+        'tests/test_command_parser.py', 'tests/test_store_accounts.py', 'tests/test_transfer_rules.py', 'tests/test_report_format.py', 'tests/test_app.py', 'tests/test_integration.py')]}
+
+    def test_a_test_named_after_package_and_file_goes_to_that_package(self):
+        # 真实运行：tests/test_command_parser.py 被归给入口包，command 包没有自己的测试，工人永远封不了包。
+        # Real run: tests/test_command_parser.py went to the entry package, so the command package had no tests of its own and its worker could never seal.
+        pack = registry.get('python')
+        got = {f['path']: pack.package_of(f['path'], self.SPEC) for f in self.SPEC['files'] if f['path'].startswith('tests/')}
+        self.assertEqual(got, {'tests/test_command_parser.py': 'bankledger/command', 'tests/test_store_accounts.py': 'bankledger/store', 'tests/test_transfer_rules.py': 'bankledger/transfer',
+                               'tests/test_report_format.py': 'bankledger/report', 'tests/test_app.py': 'bankledger/app', 'tests/test_integration.py': 'bankledger'})
+
+
+class PlannerSpecShapeTests(unittest.TestCase):
+    def test_an_extra_field_is_dropped_and_a_missing_one_is_named(self):
+        # 真实运行：三次规划分别是“只有 summary”“多了 acceptance_note”“缺 acceptance”，旧消息只说“字段无效”，任务在规划阶段失败。
+        # Real run: three planning attempts were "summary only", "an extra acceptance_note" and "acceptance missing"; the old message only said "invalid fields" and the task died in planning.
+        from masa.agents.protocol import validate_response
+        context = {'purpose': 'project_planner', 'language': 'python'}
+        spec = validate_response(context, {**SPEC, 'acceptance_note': 'why'}, '')
+        self.assertNotIn('acceptance_note', spec)
+        without = {k: v for k, v in SPEC.items() if k != 'acceptance'}
+        with self.assertRaisesRegex(MasaError, r"missing: \['acceptance'\]"):
+            validate_response(context, without, '')
+
+
+class AssertionDiffsTests(unittest.TestCase):
+    def test_only_the_lines_that_differ_are_kept_as_candidate_values(self):
+        # 真实运行：多行输出的断言消息被缩写成 'ok\n[13 chars]...'，断言裁判读不懂；差异块只留下真正不同的行。
+        # Real run: the message of a multi-line comparison is abbreviated to 'ok\n[13 chars]...' which the referee cannot read; the diff hunks keep only the lines that really differ.
+        pack = registry.get('python')
+        block = NL.join(['FAIL: test_gpa (test_parser.T.test_gpa)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_parser.py", line 43, in test_gpa', '    self.assertEqual(out, exp)',
+                         "AssertionError: 'ok\n[13 chars]k\ndave 91.33\n' != 'ok\n[13 chars]k\ndave 91.13\n'", '  ok', '  ok', '- dave 91.33', '?         ^', '+ dave 91.13', '?         ^', '  error: unknown student', '- amy 90.00', '+ amy 90', '', '-' * 70, 'Ran 1 test', '', 'FAILED (failures=1)', ''])
+        diffs = pack.assertion_diffs([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + block, 'stdout': ''})])
+        self.assertEqual([(d['path'], d['line'], d['got'], d['want']) for d in diffs], [('tests/test_parser.py', 43, 'dave 91.33', 'dave 91.13'), ('tests/test_parser.py', 43, 'amy 90.00', 'amy 90')])
+        single = NL.join(['FAIL: test_x (t.T.test_x)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_gpa.py", line 35, in test_x', '    self.assertEqual(f(87.5), "87.50")', "AssertionError: '87.5' != '87.50'", "- 87.5", '+ 87.50', '?     +', ''])
+        self.assertEqual(pack.assertion_diffs([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + single})])[0]['want'], '87.50')
+        self.assertEqual(pack.assertion_diffs([('other', {'stderr': block})]), [])

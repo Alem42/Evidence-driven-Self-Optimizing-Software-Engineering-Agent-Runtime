@@ -27,7 +27,7 @@ RULES = [
      '需要图形界面、网页或硬件。验证只能靠 unittest 与命令行输出，无法检查画面或设备。',
      '改成命令行程序，把界面逻辑拆成可测试的纯函数。'),
     ('library_shape', INFEASIBLE,
-     r'实现\s*(?:python\s*)?函数|只\s*(?:实现|写|需要)\s*函数|不需要\s*(?:命令行|main|入口)|(?:写|实现|提供)一个\s*(?:python\s*)?(?:库|包|模块|sdk)',
+     r'实现\s*(?:python\s*)?函数|只\s*(?:实现|写|需要)\s*函数|不需要\s*(?:命令行|main|入口)|(?:写|实现|提供)一个\s*(?:python\s*)?(?:库|包|模块|sdk)(?:(?![一-鿿\w])|(?=[来用供]))',  # 后面不能紧跟别的汉字：“写一个库存管理程序”“写一个包含三个命令的程序”不是在要一个库（真实运行里 inventory 因此被拦截）/ no other Chinese character may follow: "write an inventory-management program" and "write a program that contains three commands" are not asking for a library (a real run was blocked this way)
      '要的是库/函数包，而 harness 的入口固定为 <模块>/__main__.py 的命令行项目。',
      '改成“命令行程序 + 内部包”：例如“实现命令行 clamp，参数 value min max，核心逻辑放在 <模块>/clamp 包并测试”。'),
 ]

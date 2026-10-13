@@ -136,6 +136,10 @@ def _validate_project_roles(context, action, key):
             return validate_question(action)
         if context.get('examples_required') and 'examples' not in action:
             raise MasaError('the spec must contain "examples": 3 to 8 byte-exact args/stdin -> stdout/exit_code examples')
+        # 多出来的顶层字段（真实运行里的 acceptance_note）从不被使用：丢掉，不为它拒绝整个规格。缺字段是实质错误，照样由校验拒绝并说明缺什么。
+        # Extra top-level fields (a real run had acceptance_note) are never used: drop them instead of rejecting the whole spec. A missing field is a substantive error and is still rejected, naming what is missing.
+        if isinstance(action, dict):
+            action = {k: v for k, v in action.items() if k in ('summary', 'module', 'entrypoint', 'files', 'acceptance', 'examples')}
         return validate_spec(action, context.get('language'))
     if context['purpose'] == 'project_developer':
         from masa.domain.proposals import validate_files, validate_file_proposal

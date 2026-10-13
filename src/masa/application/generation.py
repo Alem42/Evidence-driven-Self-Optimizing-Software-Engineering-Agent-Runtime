@@ -122,6 +122,15 @@ class ProjectGeneration:
         """这次生成 run 的模型调用预算。 The model-call budget of this generation run."""
         return (len(approved['spec']['files']) - 1) * (1 + SYNTAX_RETRIES) if local_files else 2
 
+    def repair_need(self, bundle, evidence):
+        """修复调用的输入规模估计（V1：整套代码 + 失败证据）。 Input size estimate of a repair call (V1: the whole bundle plus the failure evidence)."""
+        return [bundle, evidence[:20000]]
+
+    def admission_need(self, goal, approved, growth):
+        """云端/本地准入用的输入规模估计：整包生成要放得下整个规格。V2 的工人每一步只看一个很小的上下文，由子类给出自己的估计。
+        Input size estimate for model admission: whole-bundle generation must fit the whole spec. A V2 worker sees a small context per step, so the subclass gives its own estimate."""
+        return [goal, approved, growth]
+
     def _generate_workers(self, rid, provider, goal, approved, metadata, retry_feedback=None):
         raise NotImplementedError('worker generation belongs to Runtime V2 (masa.application.v2)')
 
@@ -253,6 +262,27 @@ class ProjectGeneration:
                 raise MasaError(metadata.get('error', 'project generation cancelled'))
         return validate_files(files, spec, self.pack.id)
 
+    def _repair_calls(self, approved):
+        """一次修复 run 的模型调用预算（V1 是一次性的补丁调用）。 Model-call budget of one repair run (V1: a single patch call)."""
+        return 1
+
+    def _propose_repair(self, rid, provider, data, approved, base, evidence, feedback, use_intelligence):
+        """向修复角色要一份改动：返回 (给了模型的文件, {路径: 新内容})。V2 重写这一步（见 application/v2/workers.py）。
+        Ask the repair role for changes: returns (the files the model was given, {path: new content}). V2 overrides this step (see application/v2/workers.py)."""
+        original_files=base['files']
+        context_report=None
+        if use_intelligence and self.pack.supports('index'):  # 语法索引是可选能力，没有它的语言直接用完整上下文 / the syntax index is an optional capability; languages without it use the full context
+            from masa.intelligence.repair_context import build_repair_context
+            original_files,context_report=build_repair_context(self.store,self.executor,rid,base['files'],evidence,feedback)
+        failing_text=json.dumps(evidence,ensure_ascii=False)
+        must={p for p in original_files if p.rsplit('/',1)[-1] in failing_text}
+        original_files,outlines=self._fit_files(provider,rid,original_files,must,'repair')
+        extra={'other_files_outline_readonly':outlines} if outlines else {}
+        changes=self.planning.call(rid,provider,'project_repair',{
+            'goal':data['goal'],**approved,'original_files':original_files,
+            'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report,**extra})
+        return original_files,changes
+
     def repair(self, parent, provider, feedback='', on_created=None, use_intelligence=False):
         """以真实失败证据生成一次修复草稿，不自动批准或循环。 Propose one evidence-backed repair without auto-approval or loops."""
         self._use(parent)
@@ -278,23 +308,12 @@ class ProjectGeneration:
         metadata={'kind':'code','status':'generating','spec_approval_ref':base['spec_approval_ref'],
                   'base_approval_ref':base_ref,'repair_of':parent,'provider':provider.profile}
         rid=Runtime(self.store,self.executor).create(Path(data['workspace']),data['goal'],
-            Budget(model_calls=1,tool_calls=3,deadline_seconds=86400),
+            Budget(model_calls=self._repair_calls(approved),tool_calls=3,deadline_seconds=86400),
             graph=Runtime.compile_project_checks(approved['spec'],approved['checks'],self.pack.id),
             parent_run_id=parent,project_plan=metadata)
         if on_created:on_created(rid)
         try:
-            original_files=base['files']
-            context_report=None
-            if use_intelligence and self.pack.supports('index'):  # 语法索引是可选能力，没有它的语言直接用完整上下文 / the syntax index is an optional capability; languages without it use the full context
-                from masa.intelligence.repair_context import build_repair_context
-                original_files,context_report=build_repair_context(self.store,self.executor,rid,base['files'],evidence,feedback)
-            failing_text=json.dumps(evidence,ensure_ascii=False)
-            must={p for p in original_files if p.rsplit('/',1)[-1] in failing_text}
-            original_files,outlines=self._fit_files(provider,rid,original_files,must,'repair')
-            extra={'other_files_outline_readonly':outlines} if outlines else {}
-            changes=self.planning.call(rid,provider,'project_repair',{
-                'goal':data['goal'],**approved,'original_files':original_files,
-                'failure_evidence':evidence,'feedback':feedback,'context_selection':context_report,**extra})
+            original_files,changes=self._propose_repair(rid,provider,data,approved,base,evidence,feedback,use_intelligence)
             if any(path not in original_files for path in changes):
                 raise MasaError('repair changed a file outside supplied context; request a broader revision')
             self._refuse_leaks(changes,base['files'],self.pack)

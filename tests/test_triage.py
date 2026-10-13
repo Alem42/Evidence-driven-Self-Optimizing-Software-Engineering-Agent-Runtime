@@ -42,6 +42,18 @@ class RuleTests(unittest.TestCase):
                     self.assertIn(rule, rules(goal))
                     self.assertTrue(all(f['suggestion'] for f in result['findings']))  # 每条都有可操作的改写建议
 
+    def test_a_word_that_merely_starts_with_library_or_package_is_not_a_library_request(self):
+        # 真实运行：“写一个库存管理命令行程序”被判成“要的是库”而整个任务被拦截；“写一个包含三个命令的程序”也一样。
+        # Real run: "write an inventory-management CLI" (库存 starts with 库) was judged "wants a library" and the whole task was blocked; "a program that contains three commands" (包含) too.
+        from masa.languages.registry import registry
+        pack = registry.get('python')
+        for goal in ('写一个库存管理命令行程序，按行读取命令', '写一个包含三个命令的命令行程序', '实现一个模块化的命令行记账程序'):
+            with self.subTest(goal=goal):
+                self.assertEqual(assess(goal, pack)['verdict'], OK, assess(goal, pack)['findings'])
+        for goal in ('写一个库，提供加法', '写一个 Python 库来解析 CSV', '实现一个模块，提供排序'):
+            with self.subTest(goal=goal):
+                self.assertEqual(assess(goal, pack)['verdict'], INFEASIBLE)
+
     def test_negations_cancel_a_hit(self):
         for goal in ('只用 Go 标准库，无第三方依赖，写一个整数求和命令行', '不使用 gin 或 cobra，纯标准库实现 CLI',
                      'A Go CLI without third-party libraries, no network and no database', '不需要图形界面，命令行输出结果即可'):

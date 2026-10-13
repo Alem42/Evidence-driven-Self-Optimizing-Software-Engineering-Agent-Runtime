@@ -74,6 +74,10 @@ def main():
     ap.add_argument('--yuan', type=float, default=2.0)
     ap.add_argument('--per-run', type=float, default=0.3)
     ap.add_argument('--round', type=int, default=1)
+    ap.add_argument('--scale', type=int, default=100, help='单次运行的时间/token 上限倍率（%%）；大任务要 300 左右 / percentage of the per-run limits; big tasks need about 300')
+    ap.add_argument('--max-calls', type=int, default=40, help='单次运行的模型调用上限 / model-call limit per run')
+    ap.add_argument('--minutes', type=int, default=30)
+    ap.add_argument('--start-level', type=int, default=0, help='生成阶段从这个等级起步（2 = 直接用 Flash，不先试本地模型）/ start the generation stage at this level (2 = Flash at once, no local model first)')
     ap.add_argument('--source', type=Path, default=ROOT / '.masa/p2eval_final')
     ap.add_argument('--state', type=Path, default=ROOT / '.masa')
     args = ap.parse_args()
@@ -97,8 +101,10 @@ def main():
                 return 0
             spec = ARMS[arm]
             config = resolve_config({'suite': 'custom', 'task_ids': [task], 'repeats': 1, 'model_ids': ids, 'total_cost': left, 'per_run_cost': min(args.per_run, left),
-                                     'total_minutes': 30, 'total_cloud_tokens': 2_000_000, 'language': args.language, 'runtime': spec['runtime']})
-            config['overrides'] = {'policy': spec['policy'], 'drop_edges': []}
+                                     'total_minutes': args.minutes, 'total_cloud_tokens': 5_000_000, 'language': args.language, 'runtime': spec['runtime'],
+                                     'per_run_scale': args.scale, 'max_model_calls': args.max_calls})
+            policy = {**spec['policy'], **({'start_level_by_role': {'project_developer': args.start_level}} if args.start_level else {})}
+            config['overrides'] = {'policy': policy, 'drop_edges': []}
             config['keep_state'] = True
             runner = BenchRunner(folder, ROOT / '.tools/bin/masa-runner.exe', ROOT / '.tools/go/bin/go.exe', ROOT, config)
             print(f'[{task} / {arm}] 开始 …', flush=True)

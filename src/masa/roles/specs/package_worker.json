@@ -34,7 +34,9 @@
     "step",
     "max_steps",
     "language_notes",
-    "spec_examples"
+    "spec_examples",
+    "repair",
+    "allowed_tools"
   ],
   "output_schema": {
     "oneOf": [

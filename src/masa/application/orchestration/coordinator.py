@@ -317,6 +317,8 @@ class WorkflowCoordinator:
         else:
             generation=ProjectGeneration(store,runner)
         generation.context_budget=bool(self._ladder and self.router.policy.get('context_budget'))
+        if getattr(generation,'workers',False) and self._ladder and self.router.policy.get('assertion_referee'):
+            generation.referee_provider=self.router.cheapest('assertion_referee')  # V2 的工人在同一个断言一再失败时请裁判 / V2 workers ask the referee when the same assertion keeps failing
         checkpoint=self.job
         # 从某个失败的验证处继续自动修复（用户在自动流程停下之后点“继续自动修复”）：跳过规划与生成，
         # 失败链历史从版本链重建，路由器因此知道之前哪些模型已经试过。
@@ -513,11 +515,11 @@ class WorkflowCoordinator:
         def ctx_diagnosis():
             return facts.get('diagnosis')
 
-        def run_fix(chain, role, stage, make):
+        def run_fix(chain, role, stage, make, admit=None):
             used={}
             try:
                 draft=self._attempt(chain,role,lambda provider,fb:self._track(used,provider,make(provider,fb)),
-                                    need=need,stage=stage,reject_noop=True)
+                                    need=admit or need,stage=stage,reject_noop=True)
             except NoChange:
                 self._log_fix(stage,None,{})
                 return {'noop':True,'halted':False,'noop_count':int(facts.get('noop_count',0))+1}
@@ -545,7 +547,7 @@ class WorkflowCoordinator:
             phase('repair',verified,attempt+1)
             return run_fix('fix:implementation','project_repair','repair',lambda provider,fb:generation.repair(
                 verified,provider,'\n'.join(x for x in (instructions('implementation'),fb) if x),
-                lambda rid:phase('repair',rid,attempt+1),use_intelligence=True))
+                lambda rid:phase('repair',rid,attempt+1),use_intelligence=True),admit=generation.repair_need(bundle,evidence))
 
         def revise_tests(ctx):
             phase('test_revision',verified,attempt+1)
@@ -1052,7 +1054,7 @@ class WorkflowCoordinator:
                 # 逐文件生成时 previous_files 会随文件数增长：按每个已生成文件约 4000 字符估计（启发式，写在文档里）。
                 # previous_files grows with each file call: roughly 4000 chars per already generated file (a documented heuristic).
                 growth='x'*4000*max(0,len(approved['spec']['files'])-1)
-                draft=self._attempt('generation','project_developer',generate,need=[goal,approved,growth],stage='generation')
+                draft=self._attempt('generation','project_developer',generate,need=generation.admission_need(goal,approved,growth),stage='generation')
             checkpoint['draft_id']=draft
         return draft
 

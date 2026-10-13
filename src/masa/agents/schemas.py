@@ -14,7 +14,15 @@ def response_schema(context):
     # 数据驱动的角色（以及已迁入 JSON 的诊断、预检）：输出契约就在注册表里。 Data-driven roles (and the diagnoser / triage, now in JSON): the contract lives in the registry.
     spec=registry.get(purpose)
     if spec is not None and spec.output_schema is not None:
-        return copy.deepcopy(spec.output_schema)
+        schema = copy.deepcopy(spec.output_schema)
+        allowed = context.get('allowed_tools')
+        if purpose == 'package_worker' and isinstance(allowed, list) and allowed and isinstance(schema.get('oneOf'), list):
+            # 工人这一步只允许这些工具：约束解码下弱模型不再有机会选 finish（真实运行里本地 glm 在第一步连续四次选 finish，两次尝试都如此）。
+            # This step allows only these tools: under constrained decoding a weak model can no longer pick finish (in real runs the local glm chose finish four times in a row at step 1, in two attempts).
+            kept = [o for o in schema['oneOf'] if (o.get('properties', {}).get('tool') or {}).get('const') in allowed]
+            if kept:
+                schema['oneOf'] = kept
+        return schema
     if purpose in {'project_repair','project_test_revision'}:
         # 在传输层就限制修复文件类别，Domain 再独立核对冻结边界。
         # Restrict repair paths in transport; Domain independently enforces frozen boundaries.

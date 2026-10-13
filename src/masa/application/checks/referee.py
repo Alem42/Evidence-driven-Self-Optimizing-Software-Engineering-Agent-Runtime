@@ -42,6 +42,14 @@ def case_for(index, item, files, pack=None):
             'options': {'A': first, 'B': second}, '_a_is': 'want' if swap else 'got'}
 
 
+def case_from_values(index, call, source, got, want):
+    """已经知道两个候选值（例如多行输出里真正不同的两行）时的用例：和 case_for 一样把两个值按文本哈希打乱成 A/B。
+    A case when the two candidate values are already known (e.g. the two lines that really differ in a multi-line output): shuffled into A/B by a text hash exactly like case_for."""
+    swap = int(hashlib.sha1((str(got) + chr(0) + str(want)).encode('utf-8')).hexdigest(), 16) % 2 == 1
+    first, second = (want, got) if swap else (got, want)
+    return {'index': index, 'call': call, 'test_source': source, 'options': {'A': first, 'B': second}, '_a_is': 'want' if swap else 'got'}
+
+
 def public(case):
     return {k: v for k, v in case.items() if not k.startswith('_')}
 

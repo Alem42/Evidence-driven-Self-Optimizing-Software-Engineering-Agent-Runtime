@@ -32,9 +32,11 @@ class RoleRuntime:
                     SELECT run_id,purpose,'initial',1,input_ref,route_ref,status,output_ref,started,finished FROM role_calls""")
                 store.db.execute("INSERT INTO schema_migrations VALUES('role_invocations_v1')")
 
-    def call(self, rid, provider, purpose, values, *, invocation_id="initial", freeze_key="model_snapshot_ref"):
+    def call(self, rid, provider, purpose, values, *, invocation_id="initial", freeze_key="model_snapshot_ref", continue_after_failure=False):
         """完成的调用不再付费重放；未知调用要求显式处理。 Reuse completed calls; never silently replay uncertain requests.
         freeze_key：同一个 run 里由不同模型承担的“职位”（如更强的测试作者）各自冻结自己的配置，互不冲突。
+        continue_after_failure：上一次调用明确失败（已有结论，不是结果不明）时允许继续下一次调用——自主循环里一步写坏了不该让整个循环作废。
+        continue_after_failure: allow the next call after a previous call that definitely failed (a known outcome, not an uncertain one): in an autonomous loop one bad step must not void the loop.
         freeze_key: a distinct role slot in one run (e.g. a stronger test author) freezes its own configuration without clashing."""
         if not isinstance(invocation_id,str) or not invocation_id or len(invocation_id)>100:
             raise MasaError('invalid role invocation id')
@@ -66,7 +68,7 @@ class RoleRuntime:
                 retry_same = True
             previous=self.store.db.execute('SELECT * FROM role_invocations WHERE run_id=? AND purpose=? ORDER BY attempt_no DESC LIMIT 1',(rid,purpose)).fetchone()
             if not retry_same:
-                if previous and previous['status']!='completed':
+                if previous and previous['status']!='completed' and not (continue_after_failure and previous['status']=='failed'):
                     raise MasaError('previous role result unavailable; cannot bypass unresolved invocation')
                 if invocation_id!='initial' and not previous:
                     raise MasaError('role continuation requires an initial invocation')

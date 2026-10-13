@@ -72,6 +72,7 @@ def resolve_config(body):
         'total_minutes': bounded('total_minutes', preset['total_minutes'], 1, 2_000),
         # 单次运行的上限：缺省按任务等级给；这里的数字是“倍率”，100 = 默认。 Per-run limits default by level; the number is a percentage, 100 = default.
         'per_run_scale': bounded('per_run_scale', 100, 20, 400),
+        'max_model_calls': bounded('max_model_calls', 40, 10, 400),  # V2 的工人循环一次要很多小调用 / V2 worker loops make many small calls
         'model_ids': body.get('model_ids') if isinstance(body.get('model_ids'), list) else None,
     }
 
@@ -287,7 +288,7 @@ class BenchRunner:
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
                 **({'language': self.config['language']} if self.config.get('language') else {}),
                 **({'runtime': self.config['runtime']} if self.config.get('runtime') == 'v2' else {}),
-                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40,
+                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': self.config.get('max_model_calls', 40),
                            **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
         if self.overrides and self.overrides['policy']:
             body['policy'] = self.overrides['policy']

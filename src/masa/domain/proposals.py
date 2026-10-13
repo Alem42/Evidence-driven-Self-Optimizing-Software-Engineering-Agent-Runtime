@@ -21,6 +21,11 @@ def validate_spec(spec, language=None):
     layout = pack.layout
     # examples 是可选字段（Planner 示例，策略 planner_examples）：旧规格没有它，照样合法。 `examples` is optional (the Planner's examples, policy planner_examples): old specs without it stay valid.
     if not isinstance(spec, dict) or set(spec) - {'examples'} != {'summary','module','entrypoint','files','acceptance'}:
+        # 说清楚缺哪个、多哪个：模型据此才能在重试时改对（真实运行里三次规划各错一个字段，旧消息只有“字段无效”，规划失败）。
+        # Say which field is missing or extra so the model can correct itself on the retry (in a real run three planning attempts each got one field wrong and the old message only said "invalid fields").
+        if isinstance(spec, dict):
+            missing, extra = {'summary','module','entrypoint','files','acceptance'} - set(spec), set(spec) - {'summary','module','entrypoint','files','acceptance','examples'}
+            raise MasaError('invalid ProjectSpec fields' + (f'; missing: {sorted(missing)}' if missing else '') + (f'; not allowed: {sorted(extra)}' if extra else '') + '. The spec has exactly: summary, module, entrypoint, files, acceptance')
         raise MasaError('invalid ProjectSpec fields')
     if 'examples' in spec:
         from masa.domain.examples import validate_examples

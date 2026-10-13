@@ -56,6 +56,83 @@ def _blocks(text):
     return blocks
 
 
+def details(checks_results, test_op, limit=1400):
+    """前几个失败块里“异常行之后”的部分：unittest 的 assertEqual 失败会在异常行之后逐行列出 - 期望 / + 实际 的差异，而异常行本身常把长字符串缩成 `'erro[21 chars]...'`，看不出差在哪里。
+    For the first failure blocks: everything from the exception line on. unittest lists the `- expected / + actual` line diff after the exception line, while the exception line itself often abbreviates long strings to `'erro[21 chars]...'`, which hides where they differ."""
+    out = []
+    for operation, result in checks_results:
+        if operation != test_op:
+            continue
+        text = str(result.get('stderr', '')) + '\n' + str(result.get('stdout', ''))
+        for block in _blocks(text):
+            lines = [line for line in block if line.strip()]
+            if not lines or not re.match(r'^(FAIL|ERROR): ', lines[0]):
+                continue
+            start = next((n for n, line in enumerate(lines) if _EXCEPTION.match(line.strip())), None)
+            if start is None:
+                continue
+            tail = [line for line in lines[start + 1:] if not re.match(r'^-{20,}$', line.strip()) and not re.match(r'^(Ran \d+ test|FAILED \()', line.strip())]
+            out.append(lines[0] + '\n' + lines[start][:200] + '\n' + '\n'.join(tail)[:600])
+            if len(out) >= 2:
+                break
+    return '\n'.join(out)[:limit]
+
+
+def assertion_diffs(checks_results, test_op, limit=3):
+    """失败断言里“实际 vs 期望”真正不同的那几行（unittest 的逐行差异：`- ` 是第一个参数=实际值，`+ ` 是第二个参数=期望值），每个差异块一对 {got, want}。
+    多行输出的断言消息会被缩写成 'ok\\n[13 chars]...'，断言裁判看不懂；差异块只留下不同的几行，短而完整。单行的值没有差异块，用断言消息本身。
+    The lines that really differ in a failing assertion (unittest's line diff: `- ` is the first argument = the actual value, `+ ` the second = the expected one), one {got, want} pair per hunk. A multi-line comparison is
+    abbreviated to 'ok\\n[13 chars]...' in the message which an assertion referee cannot read; the hunks keep only the differing lines, short and complete. A single-line value has no hunk, so the message itself is used."""
+    out = []
+    for operation, result in checks_results:
+        if operation != test_op:
+            continue
+        text = str(result.get('stderr', '')) + '\n' + str(result.get('stdout', ''))
+        for block in _blocks(text):
+            if not block or not re.match(r'^FAIL: ', block[0]):
+                continue
+            lines = block[1:]
+            frames, exc_index = [], None
+            for index, line in enumerate(lines):
+                frame = _FRAME.match(line)
+                if frame:
+                    rel = relative(frame.group('path'))
+                    if rel is not None and is_test_path(rel):
+                        frames.append((rel, int(frame.group('line'))))
+                elif exc_index is None and _EXCEPTION.match(line) and not line.startswith(' '):
+                    exc_index = index
+            if exc_index is None or not frames or not lines[exc_index].startswith('AssertionError'):
+                continue
+            hunks, minus, plus = [], [], []
+
+            def flush():
+                if minus or plus:
+                    hunks.append(('\n'.join(minus) or '(no line)', '\n'.join(plus) or '(no line)'))
+                minus.clear()
+                plus.clear()
+            for line in lines[exc_index + 1:]:
+                if line.startswith('- '):
+                    minus.append(line[2:])
+                elif line.startswith('+ '):
+                    plus.append(line[2:])
+                elif line.startswith('? '):
+                    continue
+                else:
+                    flush()
+            flush()
+            path, line = frames[-1]
+            if hunks:
+                for got, want in hunks[:2]:
+                    out.append({'path': path, 'line': line, 'got': got[:300], 'want': want[:300]})
+            else:
+                parsed = assertion_of(lines[exc_index])
+                if parsed:
+                    out.append({'path': path, 'line': line, 'got': parsed['got'], 'want': parsed['want']})
+            if len(out) >= limit:
+                return out[:limit]
+    return out
+
+
 def _classify(add, frames, exc_type, message, source):
     """frames：项目内的 (相对路径, 行)，最深的在最后。 Project frames (relative path, line), the deepest last."""
     exc_type = exc_type or ''
