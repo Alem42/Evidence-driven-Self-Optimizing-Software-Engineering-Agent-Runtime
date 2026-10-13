@@ -3,7 +3,7 @@ import time
 from masa.domain.models import MasaError, TransportFailure
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure.llm import ChatProvider
-from masa.runtime import live
+from masa.runtime import live, user_input
 
 
 class RoleRuntime:
@@ -48,6 +48,13 @@ class RoleRuntime:
         language = self.store.run(rid)['data'].get('language')
         if language and 'language' not in values:
             context['language'] = language
+        # 用户在任务运行中追加的提示：只进入“之后才开始”的调用；已存在的调用沿用它当时的提示（否则输入身份对不上）。
+        # User notes added while the task runs: only calls that start later get them; an existing invocation keeps the notes it was created with (or its input identity would change).
+        if 'user_notes' not in values:
+            existing = self.store.db.execute('SELECT input_ref FROM role_invocations WHERE run_id=? AND purpose=? AND invocation_id=?', (rid, purpose, invocation_id)).fetchone()
+            notes = self.store.read(existing['input_ref']).get('user_notes') if existing else user_input.notes_for(self.store, rid)
+            if notes:
+                context['user_notes'] = notes
         context_ref = self.store.put(context)
         route_ref = self.store.put(provider.profile)
         with owner_lock(self.store.root/'role-locks'/f'{rid}.lock'):
@@ -110,6 +117,7 @@ class RoleRuntime:
                 if isinstance(provider,ChatProvider):
                     # 流式：每个数据块之间检查取消标志，并上报实时进度。 Streaming: check the cancel flag between chunks and report live progress.
                     provider.should_cancel=lambda:bool(self.store.run(rid)['cancel_requested'])
+                    live.begin(rid,purpose,invocation_id,(provider.profile or {}).get('model'))
                     provider.on_progress=lambda info:live.update(rid,purpose,(provider.profile or {}).get('model'),info)
                     provider.on_text=lambda text:live.append(rid,text)
                     remaining=run['data']['deadline_at']-time.time()

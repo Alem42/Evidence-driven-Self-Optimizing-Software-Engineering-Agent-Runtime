@@ -214,6 +214,9 @@ class ChatProvider:
             self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
         )
         instruction = instruction_for(context)
+        if context.get('user_notes'):  # 只有用户追加了提示时才出现，默认的提示词逐字节不变 / only when the user added notes, so default prompts stay byte-identical
+            from masa.runtime.user_input import NOTES_INSTRUCTION
+            instruction += NOTES_INSTRUCTION
         if self.config['protocol']=='ollama':
             # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
             instruction+=languages.for_run(context).transport_hint(context)

@@ -661,5 +661,19 @@ class GoWorkerTests(unittest.TestCase):
                 store.close()
 
 
+class PackWorkerContextTests(unittest.TestCase):
+    def test_the_go_pack_tells_the_worker_the_module_and_every_internal_import_path(self):
+        # 工人读不到 go.mod：不告诉它，它就会写出没有模块前缀的导入（Go 下 V2 第一次真实运行卡死的原因）。
+        from masa.languages.registry import registry
+        spec = {'module': 'example.com/task', 'files': [{'path': 'cmd/app/main.go'}, {'path': 'internal/wordcount/wordcount.go'}, {'path': 'internal/wordcount/wordcount_test.go'}]}
+        context = registry.for_run({'language': 'go'}).worker_context(spec)
+        self.assertEqual(context['module_path'], 'example.com/task')
+        self.assertEqual(context['import_paths'], {'internal/wordcount': 'example.com/task/internal/wordcount'})
+
+    def test_other_languages_get_no_extra_fields(self):
+        from masa.languages.registry import registry
+        self.assertEqual(registry.for_run({'language': 'python'}).worker_context({'module': 'x', 'files': []}), {})
+
+
 if __name__ == '__main__':
     unittest.main()

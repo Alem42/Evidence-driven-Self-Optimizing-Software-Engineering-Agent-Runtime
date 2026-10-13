@@ -82,6 +82,18 @@ class FixModuleImportsTests(unittest.TestCase):
         self.assertNotIn('github.com', fixed)
         self.assertEqual(changes[0][0], 'module')
 
+    def test_an_internal_import_that_lost_its_module_prefix_is_repaired(self):
+        # Go 下 V2 的第一次真实运行：工人写了 "wordcount/internal/wordcount"（没有模块前缀、第一段没有点），检查报“不在标准库里”，它却改不对。
+        source = src('package main', '', 'import (', '	"os"', '	"wordcount/internal/wordcount"', ')', '', 'func main() { os.Exit(wordcount.Run(nil, nil, nil, nil)) }')
+        fixed, changes = fix_module_imports(source, 'example.com/task', ['internal/wordcount'])
+        self.assertIn('"example.com/task/internal/wordcount"', fixed)
+        self.assertEqual(changes[0][0], 'module')
+
+    def test_standard_library_paths_are_never_taken_for_internal_packages(self):
+        # 目录叫 json/strings 之类也不能把 encoding/json、strings 改走；只有“多级目录”才按后缀匹配。
+        source = src('package a', '', 'import (', '	"encoding/json"', '	"strings"', '	"os"', ')')
+        self.assertEqual(fix_module_imports(source, 'example.com/task', ['json', 'strings', 'internal/json']), (source, []))
+
     def test_correct_standard_unrelated_and_ambiguous_imports_are_left_alone(self):
         ok = src('package a', '', 'import (', '	"fmt"', '	"example.com/task/internal/expense"', '	"github.com/other/lib"', ')')
         self.assertEqual(fix_module_imports(ok, 'example.com/task', self.DIRS), (ok, []))

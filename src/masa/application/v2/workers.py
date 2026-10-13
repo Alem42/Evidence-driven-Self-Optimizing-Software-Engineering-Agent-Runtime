@@ -533,6 +533,7 @@ class V2Generation(ProjectGeneration):
                    'interfaces': workspace.interfaces(), 'last_results': results[-KEPT_RESULTS:], 'notes': workspace.notes,
                    'step': step, 'max_steps': max_steps, 'language_notes': self.pack.worker_notes(),
                    **({'spec_examples': spec['examples']} if spec.get('examples') else {})}
+        context.update(self.pack.worker_context(spec))  # 语言包给的额外字段（例如模块路径与内部包导入路径） / extra fields from the language pack (e.g. module path and internal import paths)
         context.update(extra or {})
         allowed = workspace.allowed_tools()
         if len(allowed) < 6:
@@ -544,6 +545,9 @@ class V2Generation(ProjectGeneration):
         One worker's loop: returns (outcome, results) where outcome is 'sealed', 'deferred' or 'open' (the steps ran out); a stuck worker raises Stuck."""
         results, refused, silent = list(seed_results or []), 0, 0
         for step in range(1, max_steps + 1):
+            gate = getattr(self, 'pause_gate', None)
+            if gate is not None:
+                gate()  # 用户暂停：停在这一步之前 / the user paused: hold before this step
             context = self._context(workspace, goal, spec, approved, directory, purposes, results, step, max_steps, extra)
             if retry_feedback and step == 1 and round_no == 1:
                 context['previous_attempt_error'] = str(retry_feedback)[:1000]

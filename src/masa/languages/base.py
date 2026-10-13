@@ -334,6 +334,10 @@ class LanguagePack:
         """给 V2 包工人的语言约定（布局、导入、测试写法）。 The language conventions for a V2 package worker (layout, imports, test style)."""
         return ''
 
+    def worker_context(self, spec):
+        """给 V2 包工人的额外上下文字段（例如内部包的导入路径）。默认没有。 Extra context fields for a V2 package worker (for example the import path of internal packages); none by default."""
+        return {}
+
     def outline(self, source):
         """签名摘要。 A signature digest."""
         return source

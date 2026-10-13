@@ -78,8 +78,25 @@ class WorkflowCoordinator:
             if kind=='task_budget':self.job['budget_emitted']=True
         self._deferred=remaining
 
+    def _pause_gate(self):
+        """用户点了“暂停”：在节点边界（下一次模型调用之前）停住，直到“继续”或“停止”。不会打断正在进行的调用。
+        The user pressed pause: hold at a node boundary (before the next model call) until resume or stop. A call in flight is never interrupted."""
+        if not self.job.get('paused'):
+            return
+        self._emit('task_paused',{},always=True)
+        while self.job.get('paused'):
+            rid=self.job.get('run_id')
+            try:
+                if rid and self.store.run(rid)['cancel_requested']:
+                    break  # 停止优先：交给后面的调用去报告取消 / stop wins: the next call reports the cancellation
+            except Exception:
+                break
+            time.sleep(0.5)
+        self._emit('task_resumed',{},always=True)
+
     def _phase(self, name, rid=None, attempt=None):
         """阶段检查点；顺带写出缓存的路由事件。 Checkpoint the phase and flush buffered routing events."""
+        self._pause_gate()
         self.checkpoint.phase(name,rid,attempt)
         self._flush()
 
@@ -95,6 +112,7 @@ class WorkflowCoordinator:
 
     def _pick(self, role, chain, *, need=None, anchor=None, stage=None, release=True):
         """向路由器要下一次尝试的模型；stop 时抛 RoutingStop。 Ask the router for the next attempt; stop raises RoutingStop."""
+        self._pause_gate()
         decision,provider,spend=self.router.decide(role,chain,self._history(chain),
                                                     anchor_run=anchor or self.job.get('run_id'),need=need)
         self._emit('route_decided',self.router.event_for(decision,role,chain,stage or role,spend),anchor)
@@ -320,6 +338,7 @@ class WorkflowCoordinator:
         else:
             generation=ProjectGeneration(store,runner)
         generation.context_budget=bool(self._ladder and self.router.policy.get('context_budget'))
+        generation.pause_gate=self._pause_gate  # V2 工人的每一步之前也检查暂停 / V2 workers check for a pause before every step
         if getattr(generation,'workers',False) and self._ladder and self.router.policy.get('assertion_referee'):
             generation.referee_provider=self.router.cheapest('assertion_referee')  # V2 的工人在同一个断言一再失败时请裁判 / V2 workers ask the referee when the same assertion keeps failing
         checkpoint=self.job

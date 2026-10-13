@@ -145,7 +145,13 @@ class GoPack(LanguagePack):
     def worker_notes(self):
         return ('Go project; go.mod is fixed by the harness. cmd/app/main.go is the only package main and a thin wrapper: func main() { os.Exit(<pkg>.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }; '
                 'never read stdin or parse input in main.go. Logic lives in internal/<name>/<name>.go with its tests next to it in <name>_test.go (same package). Use only the standard library; '
-                'import the project own packages with the module path from go.mod. Tests: table-driven, t.Fatalf on a mismatch, never skip; call Run with strings.NewReader and bytes.Buffer. gofmt and imports are fixed automatically.')
+                'import the project own packages with their full path: module_path and import_paths in your input give it exactly (go.mod is not readable). Tests: table-driven, t.Fatalf on a mismatch, never skip; call Run with strings.NewReader and bytes.Buffer. gofmt and imports are fixed automatically.')
+
+    def worker_context(self, spec):
+        """工人读不到 go.mod，所以把模块路径和每个内部包的完整导入路径直接给它——否则它会写出 `import "wordcount/internal/wordcount"` 这样没有模块前缀的路径，检查报“不在标准库里”，它又不知道该怎么改（Go 下 V2 的第一次真实运行就卡死在这里）。
+        The worker cannot read go.mod, so it is told the module path and the full import path of every internal package; without it the first real Go run of V2 wrote `import "wordcount/internal/wordcount"`, got "not in std" and never learned the fix."""
+        module = str(spec.get('module') or '')
+        return {'module_path': module, 'import_paths': {d: module + '/' + d for d in self.internal_dirs(spec)}} if module else {}
 
     def outline(self, source):
         return outline_go(source)

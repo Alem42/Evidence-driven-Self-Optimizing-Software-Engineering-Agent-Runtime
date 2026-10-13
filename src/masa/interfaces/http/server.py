@@ -264,6 +264,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                         result = {"artifact": console.artifact(rid, parts[4])}
                     elif len(parts) == 4 and parts[3] == "report" and not write:
                         result = {"markdown": console.report(rid)}
+                    elif len(parts) == 4 and parts[3] == 'live' and not write:
+                        result = console.live_view(rid)
                     elif len(parts) == 4 and parts[3] == 'results' and not write:
                         result = console.results(rid)
                     elif len(parts) == 4 and parts[3] == 'logs' and not write:
@@ -274,6 +276,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                             result = console.resume(rid, body.get('pause_after'))
                         elif action == 'auto-fix':
                             result = console.auto_fix(rid, body)
+                        elif action == 'input':
+                            result = console.user_input(rid, body)
                         elif action == 'rerun':
                             result = console.rerun(rid)
                         elif action == 'approve-project':

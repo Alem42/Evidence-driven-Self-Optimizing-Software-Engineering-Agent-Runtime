@@ -8,7 +8,15 @@ _LOCK = threading.Lock()
 _LIVE = {}
 
 
+MAX_TEXT = 262144  # 一次调用保留的完整文本上限 / full text kept for one call
 TAIL_CHARS = 2400  # 只保留最近这么多字符：够人看“它在写什么”，又不会把内存和网络占满 / enough to see what it is writing without filling memory or the network
+
+
+def begin(run_id, step, invocation_id, model):
+    """一次新的模型调用开始：清掉上一次调用的文本，记下是哪个角色的哪次调用。前端据此知道“现在这一段输出属于哪次调用”。
+    A new model call starts: drop the previous call's text and remember which call this is, so the UI knows what the text belongs to."""
+    with _LOCK:
+        _LIVE[run_id] = {'step': step, 'invocation': invocation_id, 'model': model, 'chars': 0, 'seconds': 0, 'updated': time.time(), 'tail': '', 'text': '', 'seq': 0, 'truncated': False}
 
 
 def update(run_id, step, model, info):
@@ -16,7 +24,7 @@ def update(run_id, step, model, info):
     with _LOCK:
         old = _LIVE.get(run_id) or {}
         tail = old.get('tail', '') if old.get('step') in (None, step) else ''  # 同一步骤（或还没记步骤）保留尾巴 / keep the tail within the same step
-        _LIVE[run_id] = {'step': step, 'model': model, 'chars': info.get('chars', 0), 'seconds': info.get('seconds', 0), 'updated': time.time(), 'tail': tail}
+        _LIVE[run_id] = {**old, 'step': step, 'model': model, 'chars': info.get('chars', 0), 'seconds': info.get('seconds', 0), 'updated': time.time(), 'tail': tail}
 
 
 def append(run_id, text):
@@ -24,6 +32,15 @@ def append(run_id, text):
     with _LOCK:
         entry = _LIVE.setdefault(run_id, {'step': None, 'model': None, 'chars': 0, 'seconds': 0, 'updated': time.time(), 'tail': ''})
         entry['tail'] = (entry.get('tail', '') + text)[-TAIL_CHARS:]
+        # 完整文本（上限 256 KB）：前端要从里面解出正在写的文件。超限后停止追加并标记，宁可显示不全也不显示错位的内容。
+        # The full text (256 KB cap) from which the UI decodes the file being written. Past the cap we stop appending and flag it: incomplete beats misaligned.
+        if not entry.get('truncated'):
+            joined = entry.get('text', '') + text
+            if len(joined) > MAX_TEXT:
+                entry['truncated'] = True
+            else:
+                entry['text'] = joined
+        entry['seq'] = entry.get('seq', 0) + 1
         entry['updated'] = time.time()
 
 

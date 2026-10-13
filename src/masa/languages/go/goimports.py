@@ -161,9 +161,14 @@ def fix_module_imports(source, module, dirs):
             if not match:
                 continue
             path = match.group(1)
-            if path == module or path.startswith(module + '/') or '.' not in path.split('/')[0]:
+            if path == module or path.startswith(module + '/'):
                 continue
-            hits = [d for d in dirs if path == d or path.endswith('/' + d)]
+            if '.' not in path.split('/')[0]:
+                # 没有点的第一段通常是标准库（fmt、os、encoding/json）；但以“本项目的多级包目录”结尾的（wordcount/internal/wordcount）是漏了模块前缀的内部导入。
+                # A first segment without a dot is normally the standard library; a path ending with one of THIS project's multi-level package directories is an internal import that lost its module prefix.
+                hits = [d for d in dirs if '/' in d and path.endswith('/' + d)]
+            else:
+                hits = [d for d in dirs if path == d or path.endswith('/' + d)]
             if len(hits) == 1:
                 lines[k] = text.replace('"' + path + '"', '"' + module + '/' + hits[0] + '"', 1)
                 changes.append(('module', path + ' -> ' + module + '/' + hits[0]))

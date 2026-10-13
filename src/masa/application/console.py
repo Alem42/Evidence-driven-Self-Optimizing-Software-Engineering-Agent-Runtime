@@ -784,6 +784,66 @@ class Console:
         os.startfile(str(path))
         return {'path':str(path)}
 
+    def user_input(self, rid, body):
+        """人在回路：任务运行中追加提示（第 1 级）或控制（第 2 级：暂停/继续/停止）。都先写账本，再生效；只在节点边界生效，不打断正在进行的调用。
+        Human in the loop: add a note (level 1) or a control (level 2: pause / resume / stop) while a task runs. Ledger first, then effect; only at node boundaries, never interrupting a call in flight."""
+        from masa.runtime import user_input
+        body=body or {}
+        kind=body.get('kind')
+        store=Store(self.root)
+        try:
+            store.run(rid)  # 不存在就抛错 / raises when the run does not exist
+            if kind=='note':
+                text=user_input.clean_note(body.get('text'))
+                user_input.record(store,rid,'note',text=text)
+                return {'ok':True,'kind':'note','applies':'the next model call that starts'}
+            action=body.get('action')
+            if kind!='control' or action not in {'pause','resume','stop'}:
+                raise MasaError('input needs kind=note with text, or kind=control with action pause/resume/stop')
+            job=self._job_for(store,rid)
+            if action=='stop':
+                user_input.record(store,rid,'control',action='stop')
+            elif job is None:
+                raise MasaError('there is no running automatic task to '+action)
+            else:
+                job['paused']=(action=='pause')
+                user_input.record(store,rid,'control',action=action)
+        finally:
+            store.close()
+        if action=='stop':
+            return self.control(rid,'cancel')
+        return {'ok':True,'kind':'control','action':action}
+
+    def _job_for(self, store, rid):
+        """这个 run 所在任务（同一条版本链）当前正在运行的自动任务；没有返回 None。 The running automatic job of the task (same version chain) this run belongs to, or None."""
+        def root(run_id):
+            seen=set()
+            while run_id and run_id not in seen:
+                seen.add(run_id)
+                try:parent=store.run(run_id)['data'].get('parent_run_id')
+                except Exception:return run_id
+                if not parent:return run_id
+                run_id=parent
+            return run_id
+        target=root(rid)
+        for job in self.jobs.values():
+            if job.get('status')=='running' and job.get('mode')=='auto' and job.get('run_id') and root(job['run_id'])==target:
+                return job
+        return None
+
+    def live_view(self, rid):
+        """这个 run 此刻正在进行的模型调用：哪个角色、哪个模型、写了多少，以及正在写的文件内容（从还没写完的 JSON 里解出）。只在内存里，没有调用时返回 None。
+        The model call in flight for this run: role, model, progress, and the file content being written (decoded from the unfinished JSON). Memory only; None when idle."""
+        from masa.runtime import live as live_calls
+        from masa.runtime.streamfiles import extract_files
+        entry=live_calls.get(rid)
+        if not entry or not entry.get('step'):
+            return {'live':None}
+        text=entry.get('text','')
+        return {'live':{'step':entry['step'],'invocation':entry.get('invocation'),'model':entry.get('model'),'chars':entry.get('chars',0),'seconds':entry.get('seconds',0),
+                        'seq':entry.get('seq',0),'truncated':bool(entry.get('truncated')),'files':extract_files(text),'tail':entry.get('tail','')[-600:],
+                        'idle_seconds':round(time.time()-entry.get('updated',time.time()),1)}}
+
     def project_logs(self, rid):
         """汇总来源链的角色事件与工具输出，便于复制。 Collect lineage events and tool outputs for copying."""
         lines=[];seen=set()
