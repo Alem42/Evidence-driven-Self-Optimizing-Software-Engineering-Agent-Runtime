@@ -550,12 +550,27 @@ class Console:
             return {**policy,'assertion_referee':True}  # 工人的测试期望常常算错，断言裁判便宜且实测有效 / worker-written test expectations are often wrong; the referee is cheap and measured to work
         return policy
 
+    def _runtime_policy(self, body):
+        """V2 与“V1 生成 + V2 修复”的工人从最低的云端等级起步：本地 glm-4.7-flash 在真实运行里当不了包工人（7 次本地先试只封过 1 个很小的包，一次失败的尝试 1–12 分钟）。用户显式给的 start_level_by_role 不改；没有云端模型时不加。
+        Workers of V2 and of "V1 generation + V2 repair" start at the lowest cloud level: the local glm-4.7-flash could not be a package worker in real runs (7 local-first tries sealed one tiny package, a failed try took 1-12 minutes). An explicit start_level_by_role is left alone; nothing is added without a cloud model."""
+        policy=self._v2_policy(body)
+        runtime=body.get('runtime')
+        if runtime in ('v2','v2repair'):
+            wanted=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None
+            levels=[p['level'] for i,p in self.settings.ready_profiles() if p['model_type']=='cloud' and (wanted is None or i in wanted)]
+            if levels:
+                start=dict((policy or {}).get('start_level_by_role') or {})
+                for role in ('project_repair',)+(('project_developer',) if runtime=='v2' else ()):
+                    start.setdefault(role,min(levels))
+                policy={**(policy or {}),'start_level_by_role':start}
+        return policy
+
     @staticmethod
     def _v2_budget(body):
         """V2 的工人循环每一步都是一次模型调用（10 文件的项目一次运行要 80–150 次，而默认的 40 次上限会在中途把任务停掉）：V2 默认放宽到 150，用户显式给的预算不改。
         Every step of a V2 worker loop is a model call (a 10-file project takes 80-150 per run and the default limit of 40 would stop it half way): V2 defaults to 150, an explicit user budget is left alone."""
         budget=body.get('budget')
-        if body.get('runtime')=='v2' and not (isinstance(budget,dict) and 'max_model_calls' in budget):
+        if body.get('runtime') in ('v2','v2repair') and not (isinstance(budget,dict) and 'max_model_calls' in budget):
             return {**(budget if isinstance(budget,dict) else {}),'max_model_calls':150}
         return budget
 
@@ -593,7 +608,7 @@ class Console:
             # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
             routing=previous.get('routing') if resume_job else None
             if not resume_job and body.get('routing')=='ladder':
-                routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._v2_policy(body),
+                routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._runtime_policy(body),
                                        profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
             if routing:
@@ -614,7 +629,7 @@ class Console:
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':'v2'} if body.get('runtime')=='v2' else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':body['runtime']} if body.get('runtime') in ('v2','v2repair') else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
             from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():

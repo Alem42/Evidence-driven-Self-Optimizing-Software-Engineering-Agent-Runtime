@@ -47,6 +47,9 @@ export function NewTask() {
   const chosen = language || bootstrap?.language || 'go';
   const chosenInfo = languages.find((l) => l.id === chosen);
   const [model, setModel] = useState('');
+  // 运行方式：v2repair = 生成沿用标准流程，验证失败后只重开出问题的包（真实样本上最稳最便宜，默认）；v1 = 标准流程；v2 = 全程按包推进的工人循环（实验）。只在“自动执行”下生效。
+  // Runtime: v2repair = standard generation, then only the failing package is reopened after a failed verification (the steadiest and cheapest on real samples, the default); v1 = the standard flow; v2 = per-package worker loops all the way (experimental). Only in automatic mode.
+  const [runtime, setRuntime] = useState<'v1' | 'v2repair' | 'v2'>('v2repair');
   // 默认：自动执行 + 本地优先有界升级。需要逐步确认或固定模型时再手动切换。
   // Defaults: automatic execution + local-first bounded escalation; switch manually for step-by-step review or a fixed model.
   const [auto, setAuto] = useState<'review' | 'automatic'>('automatic');
@@ -83,7 +86,7 @@ export function NewTask() {
       const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
         '/projects/plan',
-        { goal, language: chosen, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
+        { goal, language: chosen, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', ...(runtime !== 'v1' ? { runtime } : {}), budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
         { label: '项目规划' },
       );
       push({ tone: 'info', text: '任务已启动，正在规划…' });
@@ -135,6 +138,13 @@ export function NewTask() {
                 </select>
               )}
               <Segmented value={auto} onChange={setAuto} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
+              {auto === 'automatic' && strategy === 'ladder' && (
+                <select aria-label="运行方式" value={runtime} onChange={(e) => setRuntime(e.target.value as 'v1' | 'v2repair' | 'v2')} title="验证失败后怎么修：只重开出问题的包（推荐），还是沿用整包补丁；v2 = 全程按包推进（实验）">
+                  <option value="v2repair">修复时只重开出问题的包（推荐）</option>
+                  <option value="v1">标准流程</option>
+                  <option value="v2">全程按包推进（实验）</option>
+                </select>
+              )}
             </div>
             <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage} onClick={start}>
               {starting ? '正在启动…' : '开始任务 ⌘↵'}

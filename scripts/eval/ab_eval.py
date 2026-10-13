@@ -20,7 +20,7 @@ from masa.bench.runner import BenchRunner, resolve_config  # noqa: E402
 from masa.infrastructure.store import Store  # noqa: E402
 
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
-ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}},
+ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}}, 'v2r': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}}},  # 修复的工人直接用 Flash（本地 glm 当不了工人）/ the repair workers start at Flash (the local glm cannot be a worker)
         'v1x': {'runtime': 'v1', 'policy': {'planner_examples': True}}, 'v2x': {'runtime': 'v2', 'policy': {'planner_examples': True}},
         'v1y': {'runtime': 'v1', 'policy': {'planner_examples': True, 'examples_as_tests': False}}, 'v2y': {'runtime': 'v2', 'policy': {'planner_examples': True, 'examples_as_tests': False}}}
 
@@ -103,7 +103,7 @@ def main():
             config = resolve_config({'suite': 'custom', 'task_ids': [task], 'repeats': 1, 'model_ids': ids, 'total_cost': left, 'per_run_cost': min(args.per_run, left),
                                      'total_minutes': args.minutes, 'total_cloud_tokens': 5_000_000, 'language': args.language, 'runtime': spec['runtime'],
                                      'per_run_scale': args.scale, 'max_model_calls': args.max_calls})
-            policy = {**spec['policy'], **({'start_level_by_role': {'project_developer': args.start_level}} if args.start_level else {})}
+            policy = {**spec['policy'], **({'start_level_by_role': {**spec['policy'].get('start_level_by_role', {}), 'project_developer': args.start_level}} if args.start_level else {})}
             config['overrides'] = {'policy': policy, 'drop_edges': []}
             config['keep_state'] = True
             runner = BenchRunner(folder, ROOT / '.tools/bin/masa-runner.exe', ROOT / '.tools/go/bin/go.exe', ROOT, config)

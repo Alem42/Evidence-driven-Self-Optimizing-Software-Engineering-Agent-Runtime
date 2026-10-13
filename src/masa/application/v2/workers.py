@@ -171,8 +171,10 @@ class WorkerWorkspace:
         Read-only view of other packages' written files: the packages this one directly depends on in full (return values, exceptions and side effects are visible; in a real run the app worker saw signatures only, guessed the store's return type wrong and could not fix it in 16 steps), everything else as public signatures."""
         budget, out = FULL_INTERFACE_CHARS, {}
         for path, text in sorted(self.files.items()):
-            if path in self.own_paths or not self.pack.is_source(path) or not isinstance(text, str) or not text.strip():
+            if path in self.own_paths or not isinstance(text, str) or not text.strip():
                 continue
+            if not self.pack.is_source(path) and not (self.repair and path in self.shown and self.pack.is_test(path)):
+                continue  # 测试只在修复模式里、被读过之后才出现（修复工人必须看得到冻结的失败测试）/ tests appear only in repair mode and only after being read (a repair worker must be able to see the frozen failing test)
             if (path in self.shown or (self.dependencies and self.pack.package_of(path, self.spec) in self.dependencies)) and len(text) <= budget:
                 out[path] = text
                 budget -= len(text)
@@ -202,7 +204,7 @@ class WorkerWorkspace:
             if path not in self.files:
                 return {'ok': True, 'text': f'{path} is not written yet: write it with write_file'}
             return {'ok': False, 'text': 'your own files are always in your context (files): reading them again gains nothing. Next: edit_file or write_file to change something, or run_check.'}
-        if path in self.files and self.pack.is_source(path):
+        if path in self.files and (self.pack.is_source(path) or (self.repair and self.pack.is_test(path))):
             if path in self.shown:
                 return {'ok': False, 'text': f'you already read {path} (its full source is in interfaces): reading again gains nothing. Next: write_file or run_check.'}
             self.shown.add(path)
@@ -723,9 +725,8 @@ class V2Generation(ProjectGeneration):
                 outcome, results = self._worker_steps(rid, provider, RoleRuntime(self.store), workspace, data['goal'], spec, approved, '(repair)', purposes,
                                                       max_steps=MAX_REPAIR_STEPS, round_no=1, prefix='r', extra=extra, seed_results=seed)
             except Stuck:
-                outcome = 'stuck'  # 原地打转：已有改善就把改善交出去，没有才让上层升级 / going in circles: hand over what improved, escalate only when nothing did
-                if not (workspace.best and baseline is not None and workspace.best[0] < baseline):
-                    raise
+                outcome = 'stuck'  # 原地打转：已有改善就把改善交出去；没有改善就“原样返回”（下面），由协调器当作“没有改动”：记一次失败、能升级就升级，到顶了就走诊断/改测试/停止，而不是让整个任务以异常失败（真实运行里 bank 的修复在最高等级卡住后任务直接失败）。
+                # going in circles: hand over what improved; with no improvement return unchanged (below) and let the coordinator treat it as "no change": a recorded failure, escalation if possible, otherwise diagnosis / test revision / stop, instead of failing the whole task with an exception (in a real run a stuck repair at the top level failed the bank task outright).
         finally:
             workspace.close()
             shutil.rmtree(Path(self.store.root) / 'v2-scratch', ignore_errors=True)
@@ -735,8 +736,6 @@ class V2Generation(ProjectGeneration):
         self.store.event(rid, 'repair_worker_done', {'outcome': outcome, 'steps': len(results), 'baseline_problems': baseline, 'best_problems': best[0] if best else None,
                                                      'improved': improved, 'changed': sorted(changes)})
         if not changes:
-            if outcome == 'open' and not workspace.changed:
-                raise MasaError('repair worker made no change in ' + str(MAX_REPAIR_STEPS) + ' steps; last result: ' + (results[-1]['result'][:400] if results else ''))
             # 改了但没有哪个状态比起点好（或工人认为不用改）：原样返回，协调器按“没有改动”处理，而不是把变糟的版本交去验证。
             # Changed things but no state beat the starting point (or the worker saw nothing to change): return it unchanged, the coordinator handles it as a no-op instead of verifying a worse version.
             return base['files'], {own[0]: base['files'][own[0]]}
@@ -753,3 +752,12 @@ class V2Generation(ProjectGeneration):
         last = results[-1]['result'] if results else ''
         self.store.event(rid, 'worker_stuck', {'package': directory, 'step': step, 'why': why})
         raise Stuck(f'package {directory or "."} is stuck after {step} steps ({why}); last result: {last[:500]}')
+
+
+class V2RepairOnly(V2Generation):
+    """V1 的生成（一次便宜的整包草稿，或本地逐文件）+ V2 的修复（只重开出问题的包）。真实对照里 V1 生成在 grades 上只花 ¥0.05，但验证失败后用本地模型整包补丁既慢又弱；V2 的修复探针只花 ¥0.006–0.026。
+    V1 generation (one cheap whole-bundle draft, or local file by file) plus V2 repair (reopen only the failing package). In real comparisons V1 generation cost only ¥0.05 on grades, but repairing a failed verification with whole-bundle patches from a local model was slow and weak, while the V2 repair probes cost ¥0.006-0.026."""
+    workers = False
+
+    def admission_need(self, goal, approved, growth):
+        return ProjectGeneration.admission_need(self, goal, approved, growth)

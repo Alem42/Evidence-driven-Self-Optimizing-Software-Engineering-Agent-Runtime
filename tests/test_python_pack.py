@@ -454,3 +454,14 @@ class AssertionDiffsTests(unittest.TestCase):
         single = NL.join(['FAIL: test_x (t.T.test_x)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_gpa.py", line 35, in test_x', '    self.assertEqual(f(87.5), "87.50")', "AssertionError: '87.5' != '87.50'", "- 87.5", '+ 87.50', '?     +', ''])
         self.assertEqual(pack.assertion_diffs([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + single})])[0]['want'], '87.50')
         self.assertEqual(pack.assertion_diffs([('other', {'stderr': block})]), [])
+
+
+class RevisionShapeTests(unittest.TestCase):
+    def test_a_file_beside_files_is_merged_and_other_extra_fields_are_dropped(self):
+        from masa.agents.protocol import validate_response
+        original = {'tests/test_a.py': 'x = 1' + NL, 'tests/test_b.py': 'y = 2' + NL, 'pyproject.toml': '[project]' + NL}
+        context = {'purpose': 'project_test_revision', 'language': 'python', 'original_files': original}
+        got = validate_response(context, {'files': {'tests/test_a.py': 'x = 3' + NL}, 'tests/test_b.py': 'y = 4' + NL, 'note': 'why'}, '')
+        self.assertEqual(got, {'tests/test_a.py': 'x = 3' + NL, 'tests/test_b.py': 'y = 4' + NL})
+        with self.assertRaises(MasaError):  # 没有 files：仍然拒绝 / no `files`: still rejected
+            validate_response(context, {'tests/test_b.py': 'y = 4' + NL}, '')

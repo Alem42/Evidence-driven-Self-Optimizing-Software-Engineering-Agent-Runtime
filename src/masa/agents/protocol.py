@@ -118,6 +118,11 @@ def _validate_project_roles(context, action, key):
             return {k: redact(v) for k,v in value.items()}
         return value
     action = redact(action)
+    if context['purpose'] in ('project_repair','project_test_revision') and isinstance(action,dict) and isinstance(action.get('files'),dict) and set(action)!={'files'}:
+        # 模型常把一个文件放在 files 旁边的顶层（真实运行里 project_test_revision 三次都是 {"files":…, "tests/test_gpa.py":…}，整个任务因此失败）：本来就是已有文件路径的顶层字符串并进 files，其它多余的字段丢掉。
+        # Models often put a file beside `files` at the top level (in a real run project_test_revision answered {"files":…, "tests/test_gpa.py":…} three times and the whole task failed): top-level strings keyed by an existing file path are merged into `files`, other extra fields are dropped.
+        known = context.get('original_files') or {}
+        action = {'files': {**action['files'], **{k: v for k, v in action.items() if k != 'files' and k in known and isinstance(v, str)}}}
     if context['purpose']=='project_repair':
         from masa.domain.proposals import validate_repair
         if set(action)!={'files'}:

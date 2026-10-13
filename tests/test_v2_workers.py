@@ -458,6 +458,29 @@ class SeveralPackagesTests(unittest.TestCase):
         done = self.events(repair, 'repair_worker_done')[0]
         self.assertEqual((done['improved'], done['changed']), (False, []))
 
+    def test_a_repair_worker_can_read_the_frozen_failing_test(self):
+        # 真实运行（grades，V1 生成 + V2 修复）：修复工人反复想读失败的测试文件，每次都被拒绝，最后卡住。
+        # Real run (grades, V1 generation + V2 repair): the repair worker kept asking to read the failing test file, was refused every time and got stuck.
+        verified, files = self.failed_verification()
+        worker = ScriptedWorker([{'tool': 'read_file', 'path': 'tests/test_app.py'}, {'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}])
+        repair = self.service.repair(verified, worker)
+        steps = [e['payload'] for e in self.store.events(repair) if e['type'] == 'worker_step']
+        self.assertTrue(steps[0]['ok'])
+        self.assertIn('class AppTests', steps[0]['summary'] + files['tests/test_app.py'])
+        self.assertIn('tests/test_app.py', worker.contexts[1]['interfaces'])  # 读过之后一直留在 interfaces 里 / it stays in interfaces afterwards
+        self.assertNotIn('tests/test_app.py', worker.contexts[0]['interfaces'])
+
+    def test_a_repair_worker_that_is_stuck_without_improvement_returns_unchanged_instead_of_failing(self):
+        # 真实运行（bank，V1 生成 + V2 修复）：最高等级的修复工人卡住后，整个任务以异常失败。现在原样返回，由协调器按“没有改动”处理（诊断、改测试或停止）。
+        # Real run (bank, V1 generation + V2 repair): a repair worker stuck at the top level failed the whole task with an exception. Now it returns unchanged and the coordinator handles it as "no change" (diagnosis, test revision or stop).
+        verified, files = self.failed_verification()
+        worker = ScriptedWorker([comment('return 0', 'return 0  # a'), comment('# a', '# b'), comment('# b', '# c'), *[{'tool': 'note', 'text': 'x'}] * 3])
+        repair = self.service.repair(verified, worker)
+        self.assertEqual(self.store.run(repair)['data']['project_plan']['changed_files'], [])
+        done = self.events(repair, 'repair_worker_done')[0]
+        self.assertEqual((done['outcome'], done['improved']), ('stuck', False))
+        self.assertEqual(len(self.events(repair, 'worker_stuck')), 1)
+
     def test_a_repair_hands_over_the_best_state_even_when_the_worker_keeps_editing(self):
         verified, files = self.failed_verification()
         fixed = [{'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}]
@@ -533,6 +556,31 @@ class EdgeTests(unittest.TestCase):
         self.assertEqual(Console._v2_budget({'runtime': 'v2', 'budget': {'max_model_calls': 20}}), {'max_model_calls': 20})
         self.assertIsNone(Console._v2_budget({}))
         self.assertEqual(Console._v2_budget({'budget': {'max_cost': 1.0}}), {'max_cost': 1.0})
+
+    def test_v2_repair_only_keeps_the_v1_generation_and_the_v2_repair(self):
+        from masa.application.generation import ProjectGeneration
+        from masa.application.v2.workers import V2RepairOnly
+        generation = V2RepairOnly.__new__(V2RepairOnly)
+        generation.pack = pack
+        self.assertFalse(V2RepairOnly.workers)  # 生成走 V1 的路径 / generation takes V1's path
+        self.assertEqual(generation.admission_need('goal', {'spec': {'acceptance': []}}, 'g'), ['goal', {'spec': {'acceptance': []}}, 'g'])
+        self.assertIs(V2RepairOnly._propose_repair, V2Generation._propose_repair)  # 修复走 V2 工人 / repair uses the V2 worker
+        self.assertGreater(generation._repair_calls({}), ProjectGeneration._repair_calls(generation, {}))
+
+    def test_v2_workers_start_at_the_lowest_cloud_level_unless_the_user_chose(self):
+        # 真实运行：本地 glm 当不了包工人；V2 与“V1 生成 + V2 修复”的工人从最低云端等级起步。 Real runs: the local glm cannot be a package worker; V2 and "V1 generation + V2 repair" workers start at the lowest cloud level.
+        import types
+        from masa.application.console import Console
+        profiles = [('a', {'level': 1, 'model_type': 'local'}), ('b', {'level': 2, 'model_type': 'cloud'}), ('c', {'level': 3, 'model_type': 'cloud'})]
+        console = types.SimpleNamespace(settings=types.SimpleNamespace(ready_profiles=lambda: profiles), _v2_policy=Console._v2_policy)
+        run = lambda body: Console._runtime_policy(console, body)
+        self.assertEqual(run({'runtime': 'v2repair'})['start_level_by_role'], {'project_repair': 2})
+        self.assertEqual(run({'runtime': 'v2'})['start_level_by_role'], {'project_repair': 2, 'project_developer': 2})
+        self.assertEqual(run({'runtime': 'v2', 'policy': {'start_level_by_role': {'project_developer': 3}}})['start_level_by_role'], {'project_developer': 3, 'project_repair': 2})
+        self.assertEqual(run({'runtime': 'v2', 'model_ids': ['a', 'c']})['start_level_by_role'], {'project_repair': 3, 'project_developer': 3})
+        self.assertIsNone(run({}))  # 标准流程完全不变 / the standard flow is untouched
+        console.settings.ready_profiles = lambda: [('a', {'level': 1, 'model_type': 'local'})]
+        self.assertNotIn('start_level_by_role', run({'runtime': 'v2'}) or {})  # 没有云端模型就不加 / nothing is added without a cloud model
 
     def test_a_v2_generation_tries_each_level_once_unless_the_user_chose(self):
         from masa.application.console import Console

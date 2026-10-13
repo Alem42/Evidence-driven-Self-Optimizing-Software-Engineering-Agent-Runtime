@@ -311,7 +311,10 @@ class WorkflowCoordinator:
         if self._ladder and not self.job.get('budget_emitted'):
             self._emit('task_budget',self.router.describe())
         planning=ProjectPlanning(store,runner)
-        if self.job['request'].get('runtime')=='v2':  # 实验：按包推进的工人循环（与 V1 并存，默认关闭）/ experimental per-package worker loops (coexists with V1, off by default)
+        if self.job['request'].get('runtime')=='v2repair':  # 实验：生成沿用 V1，验证失败后的实现修复由 V2 工人只重开出问题的包 / experimental: V1 generation, V2 workers reopen only the failing package when a repair is needed
+            from masa.application.v2.workers import V2RepairOnly
+            generation=V2RepairOnly(store,runner)
+        elif self.job['request'].get('runtime')=='v2':  # 实验：按包推进的工人循环（与 V1 并存，默认关闭）/ experimental per-package worker loops (coexists with V1, off by default)
             from masa.application.v2.workers import V2Generation
             generation=V2Generation(store,runner)
         else:

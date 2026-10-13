@@ -40,6 +40,10 @@
 | 18 | grades r3 | 本地模型连续 `finish` 好几次，每次同样失败，十分钟过去 | 没改任何东西就重跑同一个失败的检查 | 上次失败后没改过文件：run_check/finish 被拒，并且 schema 里也不再有它们 | `test_the_same_failing_check_is_not_run_again…` |
 | 19 | bank r7 | 28 次调用里一次“服务没有回答”，整个任务失败 | 付费云调用不自动重放的原则对“每步只值几分钱的循环”代价太高 | **有意的例外**：这一步算失败，稍等后继续，连续 3 次才放弃 | `test_one_silent_model_call_does_not_fail_the_whole_task` |
 | 20 | 真实探针 | 修复工人连改 12 次文件一次也没跑检查 | 没有反馈的盲改 | 修复模式里每次改完工具自己跑检查并接在结果后面，顺便记下最好的状态 | （修复测试已改成“改完即封包”） |
+| 21 | bank/grades v2repair | 修复工人反复 `read_file tests/test_app.py` 被拒绝，最后卡住 | 修复要看失败的测试，我却把测试当成“别的包的非源文件” | 修复模式可以读冻结的测试，读过后留在 interfaces | `test_a_repair_worker_can_read_the_frozen_failing_test` |
+| 22 | bank v2repair | 最高等级的修复工人卡住 → 整个任务以异常失败 | 卡住当成了错误而不是“没有改动” | 没有改善就原样返回，由协调器走诊断/改测试/停止 | `test_a_repair_worker_that_is_stuck_without_improvement_returns_unchanged…` |
+| 23 | grades v2repair | `project_test_revision` 三次都是 `{"files":…, "tests/test_gpa.py":…}`，整个任务失败（同一校验器在 ab1 让 roman 失败过） | 顶层多一个文件被整体拒绝 | 已有文件路径的顶层字符串并进 `files`，其它多余字段丢掉 | `RevisionShapeTests` |
+| 24 | 全部 | 本地 glm 当工人只会卡住 | 见 §4 | `Console._runtime_policy`：`v2`/`v2repair` 的工人从最低云端等级起步 | `test_v2_workers_start_at_the_lowest_cloud_level…` |
 
 ## 3. 只重开失败的包（本次的主要功能）/ Reopening only the failing package
 
@@ -66,17 +70,34 @@
 - 结论：**在这套工具协议下，glm-4.7-flash 不是可用的包工人。** 评测里用 `--start-level 2`（生成直接从 Flash 起步）；本地模型仍适合 Triage 之类的窄角色。是否换别的本地模型（qwen3.6、qwen3.8 等）做工人，**没有测**。
 - Flash 起步后，三个样本的通过运行都只用 700–800 个本地 token（只有 Triage）。
 
-## 5. 与 V1 的对照（同样三个样本、同样模型、Flash+glm 默认 V1 流程）
-V1 对照还在跑（本地 glm 的修复很慢），结果见本文末尾的“V1 对照”小节；目前已有：bank **通过**，¥0.073、558 秒、7 次调用、2 次验证（Flash 写整包 24 秒，之后是本地 glm 修复）。
+## 5. 与 V1 的对照，以及“V1 生成 + V2 修复”（`runtime=v2repair`）
+同样三个样本、同样模型（云端 Flash + 本地 glm）、同样的评测上限（`--scale 400`，单次 ≤ ¥0.7–1.2）。**每格只有 1–4 次，只能看趋势。**
+
+| 流程 | bank | inventory | grades |
+|---|---|---|---|
+| V1（标准：Flash 写整包 → 验证 → 本地 glm 整包补丁修复） | 通过 ¥0.07 / 558 s | **失败** ¥0.24 / 634 s（6 次验证） | 通过 ¥0.05 / 78 s |
+| V2（全程按包推进，Flash 起步，最终代码） | r7 被网络抖动打断（已修）；r6 通过 ¥0.40 / 175 s | 通过 ¥0.13 / 92 s | 通过 ¥0.21 / 107 s |
+| **v2repair**（V1 生成 + V2 修复，修复工人 Flash 起步） | 通过 ¥0.10 / 90 s、通过 ¥0.14 / 123 s | 通过 ¥0.06 / 64 s、通过 ¥0.19 / 275 s | 通过 ¥0.06 / 72 s、通过 ¥0.48 / 321 s |
+
+v2repair 也失败过 3 次（bank r1、grades r1/r2），每次都暴露了一个真问题并修掉：①修复工人想读失败的测试却被拒绝（#21）；②修复工人在最高等级卡住后任务以异常失败，应当当作“没有改动”交给诊断/改测试流程（#22）；③测试修订的回答把一个文件放在 `files` 旁边，被整个拒绝（#23，同一个校验器在 ab1 里也让 roman 失败过一次）。修完之后的 4 轮（bank r2、r4，inventory r4，grades r3、r4）**全部通过**；inventory r1 的通过发生在 #21–#23 之前。
+
+**怎么读这张表**：
+- V1 在“一次就写对”时最便宜最快（grades ¥0.05、78 s），但验证失败后靠本地 glm 做整包补丁又慢又弱（bank 558 s、inventory 失败）。
+- 全程 V2 稳，但每个包一轮循环要几十次小调用，bank ¥0.40。
+- **v2repair 取两者之长**：第一版仍是 V1 的一次便宜整包草稿，出问题才让 Flash 工人只重开出问题的包——验证失败的那几次修复只花 ¥0.006–0.1。这是目前唯一在这三个样本上连续多次都通过的配置，所以 UI 的默认运行方式设为它（`v2repair`），标准流程和全程 V2 仍可在新任务页选。**但这是 3 个样本、每个 ≤ 4 次的证据，不是通过率。**
+
+#22/#23 的细节：#21 `read_file` 在修复模式里可以读冻结的测试（读过之后一直留在 interfaces）；#22 修复工人卡住且没有改善时 `_propose_repair` 原样返回（不抛异常），协调器按“没有改动”记失败、能升级就升级，否则走诊断/改测试/停止；#23 `project_repair`/`project_test_revision` 的回答里，顶层多出来的“已有文件路径”字符串并进 `files`，其它多余字段丢掉。
+
+**默认值与等价性**：后端默认仍是 V1（请求不带 `runtime` 就是标准流程；等价性检查 IDENTICAL、黄金提示词不变）；只有新任务页会发送 `runtime=v2repair`。工人（`v2`/`v2repair`）从最低的云端等级起步（`Console._runtime_policy`），因为本地 glm 当不了工人（§4）。
 
 ## 6. 花费与测试
-- ab2 评测（bank/inventory/grades 的所有轮次 + V1 对照）合计见 `.masa/ab2/summary.json`；探针 4 次约 ¥0.1；本阶段总计 ≤ ¥10。
-- 测试：新增约 25 个零 token 测试（`tests/test_v2_workers.py` 38 个、`test_python_pack.py`、`test_triage.py`）。
+- ab2 评测（30 次运行，含 V1、V2、v2repair 全部轮次）合计 **¥8.70**，探针 4 次约 ¥0.1；本阶段总计 ≈ ¥8.8（预算 ¥10，没有用 Pro）。
+- 测试：后端 664 通过 / 5 跳过 / 4 个既有收集错误（pytest 把导入的 `test_*` 函数当用例），新增约 30 个零 token 测试（`tests/test_v2_workers.py` 42 个、`test_python_pack.py`、`test_triage.py`）；前端 43 通过；默认流程等价检查 IDENTICAL。
 
 ## 7. 仍未验证 / Still unverified
 - 更多样本（本次只有 3 个 10 文件任务；mid 级单文件任务没有重跑）。
-- 真正的“生成后验证失败 → V2 修复 → 通过”只在探针里（埋 bug）验证过；还没有在一次真实生成里自然发生过。
+- “生成后验证失败 → V2 修复 → 通过”：探针（埋 bug）3/3，v2repair 的真实运行里也自然发生过多次（bank r2/r4、inventory、grades 的 2–4 次验证后通过），但样本很小。
 - 断言裁判在工人里的效果：触发过几次，结论多数合理（grades r6 的运行里它对一个断言投了 implementation_wrong），但**没有单独的 A/B**。
 - 包的依赖顺序仍是启发式；规划者输出显式依赖（`depends_on`）没有做。
-- 其它本地模型当工人没有测。
+- 其它本地模型当工人没有测；全程 V2 在最终代码上只重跑了一轮（第二轮被中止，用户要求尽快收尾）。
 - Go 语言包下的 V2 在真实任务上没有重跑。
