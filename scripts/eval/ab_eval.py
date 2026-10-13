@@ -9,6 +9,7 @@ Same-budget paired comparison of V1 vs V2 (and Planner examples on/off): the sam
 """
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -22,6 +23,7 @@ from masa.infrastructure.store import Store  # noqa: E402
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
 ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}}, 'v2r': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}}},  # 修复的工人直接用 Flash（本地 glm 当不了工人）/ the repair workers start at Flash (the local glm cannot be a worker)
         'v1x': {'runtime': 'v1', 'policy': {'planner_examples': True}}, 'v2x': {'runtime': 'v2', 'policy': {'planner_examples': True}},
+        'v2s': {'runtime': 'v2', 'policy': {}, 'layout': 'sorted'},  # 与 v2 相同，只是提示用旧的字母序排布（缓存命中率对照）/ same as v2 but with the old alphabetical prompt layout (cache hit-rate comparison)
         'v1y': {'runtime': 'v1', 'policy': {'planner_examples': True, 'examples_as_tests': False}}, 'v2y': {'runtime': 'v2', 'policy': {'planner_examples': True, 'examples_as_tests': False}}}
 
 
@@ -64,6 +66,11 @@ def events_of(state_dir, bench_id):
         store.close()
 
 
+def cache_text(row):
+    hit, miss = row.get('cache_hit_tokens'), row.get('cache_miss_tokens')
+    return f'{hit / (hit + miss):.0%}（{hit}/{hit + miss}）' if hit is not None and miss is not None and hit + miss else '未报告'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--name', required=True)
@@ -100,6 +107,7 @@ def main():
                 path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding='utf-8')
                 return 0
             spec = ARMS[arm]
+            os.environ['MASA_PROMPT_LAYOUT'] = spec.get('layout', 'stable_first')  # 同一进程里按臂切换提示排布 / switch the prompt layout per arm within one process
             config = resolve_config({'suite': 'custom', 'task_ids': [task], 'repeats': 1, 'model_ids': ids, 'total_cost': left, 'per_run_cost': min(args.per_run, left),
                                      'total_minutes': args.minutes, 'total_cloud_tokens': 5_000_000, 'language': args.language, 'runtime': spec['runtime'],
                                      'per_run_scale': args.scale, 'max_model_calls': args.max_calls})
@@ -116,14 +124,14 @@ def main():
             row = {'task': task, 'arm': arm, 'runtime': spec['runtime'], 'examples': bool(spec['policy']), 'round': args.round, 'language': args.language, 'models': args.models,
                    'level': record['level'], 'status': record['status'], 'cost': record.get('cost') or 0, 'cloud_tokens': record['cloud_tokens'], 'local_tokens': record.get('local_tokens', 0),
                    'seconds': record['seconds'], 'rounds': record['rounds'], 'verifications': verifications, 'calls': record['calls'], 'failed_calls': record.get('failed_calls', 0),
-                   'escalations': record['escalations'], 'stuck': len(events.get('worker_stuck', [])), 'deferred': len(events.get('package_deferred', [])),
+                   'escalations': record['escalations'], 'cache_hit_tokens': record.get('cache_hit_tokens'), 'cache_miss_tokens': record.get('cache_miss_tokens'), 'stuck': len(events.get('worker_stuck', [])), 'deferred': len(events.get('package_deferred', [])),
                    'worker_steps': len(events.get('worker_step', [])), 'examples_total': checked.get('total'), 'examples_passed': checked.get('passed'),
                    'mechanisms': record['mechanisms'], 'oracle_reason': record.get('oracle_reason'), 'note': record.get('note'), 'stop_reason': record.get('stop_reason'),
                    'run_id': record.get('run_id'), 'bench_id': runner.id}
             summary['runs'].append(row)
             path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding='utf-8')
             print(f"[{task} / {arm}] {row['status']}  {row['cost']} 元  云 {row['cloud_tokens']} / 本地 {row['local_tokens']} tok  {row['seconds']} 秒  验证 {verifications} 次  调用 {row['calls']}"
-                  f"  示例 {row['examples_passed']}/{row['examples_total']}  判官: {row['oracle_reason'] or '通过'}  累计 {spent} 元", flush=True)
+                  f"  缓存命中 {cache_text(row)}  示例 {row['examples_passed']}/{row['examples_total']}  判官: {row['oracle_reason'] or '通过'}  累计 {spent} 元", flush=True)
     path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding='utf-8')
     print(f'完成，累计 {spent} 元')
     return 0

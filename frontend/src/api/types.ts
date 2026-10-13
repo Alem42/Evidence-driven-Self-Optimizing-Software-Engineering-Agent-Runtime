@@ -15,6 +15,8 @@ export interface ProjectPlan {
   spec_ref?: string;
   checks_ref?: string;
   files_ref?: string;
+  /** 逐个文件生成时，已完成部分文件的快照；生成中就能在文件树里看到。 Snapshot of the files finished so far while generating one by one. */
+  partial_files_ref?: string;
   approval_ref?: string;
   base_approval_ref?: string;
   repair_of?: string;
@@ -127,6 +129,8 @@ export interface Job {
   current_kind?: 'local' | 'cloud' | null;
   /** 流式传输的实时进度：此刻这次模型调用已生成的字符数与用时。 Live streaming progress of the in-flight model call. */
   live?: { step: string; model: string | null; chars: number; seconds: number; tail?: string } | null;
+  /** 用户点了暂停：在下一个节点边界停住。 The user paused: holds at the next node boundary. */
+  paused?: boolean;
   error?: string;
   result?: any;
   run_status?: string;
@@ -262,6 +266,9 @@ export interface ModelCall {
   completion_tokens: number | null;
   total_tokens: number | null;
   tokens_per_second?: number | null;
+  /** 服务端报告的提示缓存命中/未命中 token；没有报告就是 null（未知不是 0）。 Server-reported prompt-cache hit/miss tokens; null when not reported. */
+  cache_hit_tokens?: number | null;
+  cache_miss_tokens?: number | null;
   error?: string | null;
 }
 
@@ -306,6 +313,10 @@ export interface TaskReport {
     local_tokens: number;
     cloud_tokens: number;
     model_ms: number;
+    cache_hit_tokens?: number;
+    cache_miss_tokens?: number;
+    /** 命中 / (命中 + 未命中)；没有任何缓存数据时为 null。 hit / (hit + miss); null when nothing was reported. */
+    cache_hit_rate?: number | null;
   };
   by_model: (UsageRow & { model: string; kind: 'local' | 'cloud' | 'unknown' })[];
   by_step: (UsageRow & { step_id: string | null })[];
@@ -421,4 +432,82 @@ export interface Triage {
   findings: TriageFinding[];
   /** 本地模型的复核意见：只能告警，不拦截。 Local-model review: warns only. */
   model?: { verdict: 'ok' | 'risky' | 'skipped'; reasons: string[]; suggestions: string[]; by?: string };
+}
+
+// ───────── 工作台：实时文件流、用户输入、调用检视 Workbench: live files, user input, call inspection ─────────
+export interface LiveFile {
+  path: string;
+  content: string;
+  /** 这个字符串已经写完（JSON 里闭合了）。 The string is closed in the JSON. */
+  complete: boolean;
+  /** write = 整份文件；edit = 只是新片段（V2 工人的 edit_file）。 write = the whole file; edit = just the new fragment. */
+  kind: 'write' | 'edit';
+}
+
+export interface LiveCall {
+  step: string;
+  invocation?: string | null;
+  model?: string | null;
+  chars: number;
+  seconds: number;
+  seq: number;
+  truncated: boolean;
+  files: LiveFile[];
+  tail: string;
+}
+
+export interface LiveView {
+  live: LiveCall | null;
+}
+
+export type InputBody = { kind: 'note'; text: string } | { kind: 'control'; action: 'pause' | 'resume' | 'stop' };
+
+export interface CallRow {
+  run_id: string;
+  step: string;
+  invocation: string;
+  attempt: number | null;
+  status: 'completed' | 'failed' | 'pending' | 'abandoned';
+  model: string;
+  kind: 'local' | 'cloud' | 'unknown';
+  started: number | null;
+  duration_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cache_hit_tokens: number | null;
+  cache_miss_tokens: number | null;
+  notes: number;
+  error: string | null;
+}
+
+export interface CallSection {
+  name: string;
+  kind: string;
+  chars: number;
+  est_tokens: number;
+  share: number;
+  preview: string;
+  entries: { name: string; chars: number; est_tokens: number }[];
+}
+
+export interface CallDetail {
+  run_id: string;
+  step: string;
+  invocation: string;
+  attempt: number;
+  status: string;
+  model: string | null;
+  provider: string | null;
+  duration_ms: number | null;
+  layout: 'stable_first' | 'sorted';
+  instruction: { chars: number; est_tokens: number };
+  sections: CallSection[];
+  est_total_tokens: number;
+  usage: { prompt_tokens: number | null; completion_tokens: number | null; cache_hit_tokens: number | null; cache_miss_tokens: number | null };
+  omitted: { section: string; id: string; reason: string }[];
+  context_plans: { where: string; window: number; total: number; kept_tokens: number; outlined: string[]; dropped: string[]; over_budget: boolean }[];
+  user_notes: string[];
+  prefix_with_previous: { against: { step: string; invocation: string }; common_chars: number; of_chars: number; share: number | null } | null;
+  response: { chars: number; keys: string[] | null; preview: string } | null;
+  error: string | null;
 }

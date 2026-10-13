@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './app/App';
 import './styles/app.css';
 import './styles/bench.css';
+import './styles/workbench.css';
 
 const client = new QueryClient({
   defaultOptions: { queries: { staleTime: 800, retry: 1, refetchOnWindowFocus: true } },

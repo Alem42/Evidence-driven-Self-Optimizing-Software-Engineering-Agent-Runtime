@@ -687,7 +687,7 @@ class Console:
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
             # 流式传输的实时进度：正在生成的字符数与用时（只在内存里）。 Live streaming progress: characters generated so far and elapsed time (memory only).
             from masa.runtime import live as live_calls
-            job['live']=live_calls.get(job['run_id'])
+            job['live']={k:v for k,v in (live_calls.get(job['run_id']) or {}).items() if k!='text'} or None  # 完整文本只走 /live，不放进每秒一次的任务轮询 / the full text travels only via /live, not in the per-second job poll
             # 顶栏显示“此刻真正在用的模型”，而不是选择框里的默认模型。 Show the model actually in use, not the default in a selector.
             if requested:
                 route=requested[-1]['payload'].get('route') or {}
@@ -830,6 +830,20 @@ class Console:
             if job.get('status')=='running' and job.get('mode')=='auto' and job.get('run_id') and root(job['run_id'])==target:
                 return job
         return None
+
+    def call_list(self, rid):
+        """这个任务（整条版本链）的每一次模型调用。 Every model call of the task (the whole version chain)."""
+        from masa.application import call_inspector
+        store=Store(self.root)
+        try:return call_inspector.call_list(store,rid)
+        finally:store.close()
+
+    def call_detail(self, rid, step, invocation):
+        """一次调用的检视：模型看到了什么、各部分大小、省略项、缓存命中、响应摘要。 Inspect one call: what the model saw, section sizes, omissions, cache hits, response summary."""
+        from masa.application import call_inspector
+        store=Store(self.root)
+        try:return call_inspector.call_detail(store,rid,step,invocation)
+        finally:store.close()
 
     def live_view(self, rid):
         """这个 run 此刻正在进行的模型调用：哪个角色、哪个模型、写了多少，以及正在写的文件内容（从还没写完的 JSON 里解出）。只在内存里，没有调用时返回 None。

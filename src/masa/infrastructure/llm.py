@@ -12,6 +12,7 @@ from masa.languages.registry import registry as languages
 from masa.domain.models import CallCancelled, MasaError, TransportFailure, canonical, ContextOverflow
 from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, StreamError, StreamStalled, StreamTimeout, StreamTooLarge,
                                            abandon, read_stream)
+from masa.domain.prompt_layout import render as render_prompt
 from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
 from masa.roles import registry
@@ -127,6 +128,20 @@ def decode_action(content, purpose=None):
         raise
 
 
+def cache_usage(usage):
+    """服务端报告的提示缓存命中情况（DeepSeek：prompt_cache_hit/miss_tokens；OpenAI 兼容：prompt_tokens_details.cached_tokens）。没有报告就返回空：旧账本与默认用量一字不变，未知不是零。
+    Prompt-cache hits as reported by the server; empty when not reported, so existing usage records stay identical and unknown never becomes zero."""
+    valid = lambda n: type(n) is int and n >= 0
+    hit, miss = usage.get('prompt_cache_hit_tokens'), usage.get('prompt_cache_miss_tokens')
+    if valid(hit) and valid(miss):
+        return {'prompt_cache_hit_tokens': hit, 'prompt_cache_miss_tokens': miss}
+    details = usage.get('prompt_tokens_details')
+    cached, prompt = (details.get('cached_tokens') if isinstance(details, dict) else None), usage.get('prompt_tokens')
+    if valid(cached) and valid(prompt) and cached <= prompt:
+        return {'prompt_cache_hit_tokens': cached, 'prompt_cache_miss_tokens': prompt - cached}
+    return {}
+
+
 class ChatProvider:
     def __init__(self, config, key=''):
         """固定本次运行配置，密钥不进入 profile。 Freeze run configuration without exposing credentials."""
@@ -227,7 +242,7 @@ class ChatProvider:
             "model": self.config["model"],
             "messages": [
                 {"role": "system", "content": instruction},
-                {"role": "user", "content": canonical(context)},
+                {"role": "user", "content": render_prompt(context)},  # 稳定内容在前，利于服务端前缀缓存（见 domain/prompt_layout.py）/ stable content first for the server's prefix cache
             ],
             "response_format": {"type": "json_object"},
             self.config["token_parameter"]: self.config["max_output_tokens"],
@@ -353,6 +368,7 @@ class ChatProvider:
                     else None
                     for k in ("prompt_tokens", "completion_tokens", "total_tokens")
                 }
+                self.usage.update(cache_usage(usage))
             choice = decoded["choices"][0]
             if choice.get("finish_reason") != "stop" or choice["message"].get(
                 "refusal"

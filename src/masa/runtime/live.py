@@ -16,7 +16,7 @@ def begin(run_id, step, invocation_id, model):
     """一次新的模型调用开始：清掉上一次调用的文本，记下是哪个角色的哪次调用。前端据此知道“现在这一段输出属于哪次调用”。
     A new model call starts: drop the previous call's text and remember which call this is, so the UI knows what the text belongs to."""
     with _LOCK:
-        _LIVE[run_id] = {'step': step, 'invocation': invocation_id, 'model': model, 'chars': 0, 'seconds': 0, 'updated': time.time(), 'tail': '', 'text': '', 'seq': 0, 'truncated': False}
+        _LIVE[run_id] = {'step': step, 'invocation': invocation_id, 'model': model, 'chars': 0, 'seconds': 0, 'updated': time.time(), 'tail': '', 'parts': [], 'size': 0, 'seq': 0, 'truncated': False}
 
 
 def update(run_id, step, model, info):
@@ -35,11 +35,11 @@ def append(run_id, text):
         # 完整文本（上限 256 KB）：前端要从里面解出正在写的文件。超限后停止追加并标记，宁可显示不全也不显示错位的内容。
         # The full text (256 KB cap) from which the UI decodes the file being written. Past the cap we stop appending and flag it: incomplete beats misaligned.
         if not entry.get('truncated'):
-            joined = entry.get('text', '') + text
-            if len(joined) > MAX_TEXT:
+            if entry.get('size', 0) + len(text) > MAX_TEXT:
                 entry['truncated'] = True
             else:
-                entry['text'] = joined
+                entry.setdefault('parts', []).append(text)  # 追加到列表，读取时才拼接：不会每个数据块都复制整段文本 / appended to a list and joined on read, never re-copying the whole text per chunk
+                entry['size'] = entry.get('size', 0) + len(text)
         entry['seq'] = entry.get('seq', 0) + 1
         entry['updated'] = time.time()
 
@@ -47,7 +47,11 @@ def append(run_id, text):
 def get(run_id):
     with _LOCK:
         entry = _LIVE.get(run_id)
-        return dict(entry) if entry else None
+        if not entry:
+            return None
+        copy = {k: v for k, v in entry.items() if k not in ('parts', 'size')}
+        copy['text'] = ''.join(entry.get('parts', ()))
+        return copy
 
 
 def clear(run_id):

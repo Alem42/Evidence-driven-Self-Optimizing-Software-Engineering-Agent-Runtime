@@ -327,6 +327,7 @@ class BenchRunner:
             routing = report.get('routing') or {}
             versions = report.get('versions') or []
             record.update(cost=round((routing.get('spend') or {}).get('cost') or 0, 4), calls=totals['calls'], failed_calls=totals['failed_calls'], local_tokens=totals['local_tokens'], cloud_tokens=totals['cloud_tokens'],
+                          cache_hit_tokens=totals['cache_hit_tokens'], cache_miss_tokens=totals['cache_miss_tokens'],
                           escalations=routing.get('escalations', 0), rounds=sum(1 for v in versions if v['kind'] == 'verification'),
                           mechanisms=count_mechanisms(report, store, [v['run_id'] for v in versions]),
                           stop_reason=(routing.get('stopped') or {}).get('reason'))

@@ -13,19 +13,24 @@ import { ExperimentsSection } from './ExperimentsSection';
 import { RolesSection } from './RolesSection';
 import { RoutingSection } from './RoutingSection';
 
-const SECTIONS = [
+// 常用的分区常驻；偏内部或实验性的收进“高级”，不占主导航。
+// Everyday sections stay in the nav; internal or experimental ones sit under "Advanced".
+const MAIN = [
   ['models', '模型配置', '本地与云端模型、等级、角色权限'],
   ['order', '模型与次序', '拖动调整尝试顺序；选择本任务用哪些'],
   ['accounts', 'API 账户', '一把 key 的可用模型、余额，一键添加'],
   ['local', '本地运行时', 'Ollama 模型、加载与硬件'],
   ['routing', '路由与预算', '默认预算与策略（可编辑）'],
+  ['languages', '语言', '语言包：默认语言、工具链与解释器配置'],
+  ['bench', '评测', '一键跑固定任务集，看通过率与成本'],
+] as const;
+const ADVANCED = [
   ['roles', '动态角色', '角色清单、指挥者状态与触发条件'],
   ['experiments', '实验结果', '不同设置的影响：测试可靠性、A/B、上下文（表与图）'],
-  ['bench', '评测', '一键跑固定任务集，看通过率与成本'],
-  ['languages', '语言', '语言包：默认语言、工具链与解释器配置'],
   ['harness', 'Harness', 'runner 与后端能力'],
   ['diagnostics', '诊断', '后台异常记录'],
 ] as const;
+const SECTIONS = [...MAIN, ...ADVANCED];
 
 // 设置中心：独立页面而非弹窗，每个二级入口一个分区；新能力在此新增分区即可。
 // Settings hub: one section per secondary entry; add a section here for new backend features.
@@ -51,12 +56,21 @@ export function SettingsPage() {
           <Button size="sm" variant="ghost" onClick={() => navigate('/')} title="回到主页面">⌂ 主页</Button>
         </div>
         <h2>设置</h2>
-        {SECTIONS.map(([id, label, desc]) => (
+        {MAIN.map(([id, label, desc]) => (
           <NavLink key={id} to={'/settings/' + id} className={({ isActive }) => (isActive ? 'on' : '')}>
             <strong>{label}</strong>
             <small>{desc}</small>
           </NavLink>
         ))}
+        <details className="nav-advanced" open={ADVANCED.some(([id]) => id === section)}>
+          <summary>高级</summary>
+          {ADVANCED.map(([id, label, desc]) => (
+            <NavLink key={id} to={'/settings/' + id} className={({ isActive }) => (isActive ? 'on' : '')}>
+              <strong>{label}</strong>
+              <small>{desc}</small>
+            </NavLink>
+          ))}
+        </details>
       </nav>
       <div className="settings-body">
         <div className="settings-close">

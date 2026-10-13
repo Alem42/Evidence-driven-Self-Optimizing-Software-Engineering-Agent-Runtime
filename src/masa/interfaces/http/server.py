@@ -266,6 +266,10 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                         result = {"markdown": console.report(rid)}
                     elif len(parts) == 4 and parts[3] == 'live' and not write:
                         result = console.live_view(rid)
+                    elif len(parts) == 4 and parts[3] == 'calls' and not write:
+                        result = console.call_list(rid)
+                    elif len(parts) == 6 and parts[3] == 'calls' and not write:
+                        result = console.call_detail(rid, unquote(parts[4]), unquote(parts[5]))
                     elif len(parts) == 4 and parts[3] == 'results' and not write:
                         result = console.results(rid)
                     elif len(parts) == 4 and parts[3] == 'logs' and not write:

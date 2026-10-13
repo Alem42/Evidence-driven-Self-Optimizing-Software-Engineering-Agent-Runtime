@@ -7,7 +7,7 @@ import { languageTitle } from '../../entities/languages';
 import { pickExamples } from '../../entities/examples';
 import { api } from '../../api/client';
 import type { Triage } from '../../api/types';
-import { TriageView } from '../thread/TriageView';
+import { TriageView } from '../decisions/TriageView';
 import { byRouting, profileLevel } from '../../entities/profiles';
 import { Link } from 'react-router-dom';
 import { profileLabel, profileReady } from '../../entities/profiles';
@@ -97,13 +97,15 @@ export function NewTask() {
     }
   }
 
+  const summary = [auto === 'automatic' ? '自动执行' : '逐步确认', strategy === 'ladder' && auto === 'automatic' ? '本地优先 · 有界升级' : '固定模型', languageTitle(languages, chosen)].join(' · ');
+
   return (
     <div className="newtask">
       <div className="newtask-inner">
         <span className="eyebrow">NEW TASK</span>
         <h1>描述需求，得到经过验证的代码</h1>
         <p className="muted">
-          目前支持 {languages.length ? languages.map((l) => l.title ?? l.id).join(' / ') : 'Go'} 标准库命令行项目。Planner 规划 → Tester 设计测试 → Developer 生成 → Executor 真实运行检查 → Gate 独立核对。
+          支持 {languages.length ? languages.map((l) => l.title ?? l.id).join(' / ') : 'Go'} 命令行项目：规划 → 设计测试 → 逐文件生成 → 真实运行检查 → 独立核对。运行中你可以随时追加提示、暂停或停止。
         </p>
         <div className="composer-box">
           <textarea
@@ -118,36 +120,9 @@ export function NewTask() {
             placeholder="例如：生成一个随机整数 CLI，支持范围、数量和可选种子；无效参数返回错误，不输出结果。"
           />
           <div className="composer-bar">
-            <div className="row wrap">
-              {/* 有界升级下模型由设置里的次序决定，不需要在这里选；只有「固定模型」或「逐步确认」才需要选一个。 */}
-              {(strategy === 'fixed' || auto !== 'automatic') && (
-                <select aria-label="使用模型" value={profile} onChange={(e) => setModel(e.target.value)}>
-                  {!ready.length && <option value="">没有可用模型</option>}
-                  {ready.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {profileLabel(p)}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {languages.length > 1 && (
-                <select aria-label="语言" value={chosen} onChange={(e) => setLanguage(e.target.value)} title="生成项目使用的语言（设置 → 语言 可配置）">
-                  {languages.map((l) => (
-                    <option key={l.id} value={l.id}>{(l.title ?? l.id) + (l.ready ? '' : '（未就绪）')}</option>
-                  ))}
-                </select>
-              )}
-              <Segmented value={auto} onChange={setAuto} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
-              {auto === 'automatic' && strategy === 'ladder' && (
-                <select aria-label="运行方式" value={runtime} onChange={(e) => setRuntime(e.target.value as 'v1' | 'v2repair' | 'v2')} title="验证失败后怎么修：只重开出问题的包（推荐），还是沿用整包补丁；v2 = 全程按包推进（实验）">
-                  <option value="v2repair">修复时只重开出问题的包（推荐）</option>
-                  <option value="v1">标准流程</option>
-                  <option value="v2">全程按包推进（实验）</option>
-                </select>
-              )}
-            </div>
+            <span className="hint">⌘/Ctrl + Enter 开始</span>
             <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage} onClick={start}>
-              {starting ? '正在启动…' : '开始任务 ⌘↵'}
+              {starting ? '正在启动…' : '开始任务'}
             </Button>
           </div>
         </div>
@@ -159,28 +134,59 @@ export function NewTask() {
             )}
           </div>
         )}
-        <div className="strategy">
-          <Segmented value={strategy} onChange={setStrategy} options={[['fixed', '固定模型'], ['ladder', '本地优先 · 有界升级']]} />
-          {strategy === 'ladder' && auto !== 'automatic' && <span className="hint">升级策略只在「自动执行」下生效；逐步确认时用上面选的模型。</span>}
-          {strategy === 'ladder' && auto === 'automatic' && (
-            <div className="strategy-body">
-              <p className="muted">
-                本任务使用的模型与次序：{[...ready].filter((p) => !selectedModels || selectedModels.includes(p.id)).sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。规格、测试方案、测试修订与诊断由最高等级模型负责（token 少、决定一切）；代码实现与修复从本地模型起步，失败后逐级上推；预算耗尽会停止并保留证据。模型按上面的次序执行，无需在这里选。
-              </p>
-              <div className="row wrap">
-                <Link to="/settings/order?from=new" className="btn btn-default btn-sm">模型与次序 · 调整 / 勾选</Link>
-                <Link to="/settings/accounts" className="btn btn-ghost btn-sm">API 账户</Link>
-              </div>
-              <label className="field inline">
-                <span className="field-label">API token 上限</span>
-                <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => setApiTokens(e.target.value)} />
-              </label>
+        <details className="advanced">
+          <summary>高级设置 <span className="muted">· {summary}</span></summary>
+          <div className="advanced-body">
+            <div className="row wrap">
+              <Segmented value={auto} onChange={setAuto} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
+              <Segmented value={strategy} onChange={setStrategy} options={[['fixed', '固定模型'], ['ladder', '本地优先 · 有界升级']]} />
+              {languages.length > 1 && (
+                <select aria-label="语言" value={chosen} onChange={(e) => setLanguage(e.target.value)} title="生成项目使用的语言（设置 → 语言 可配置）">
+                  {languages.map((l) => (
+                    <option key={l.id} value={l.id}>{(l.title ?? l.id) + (l.ready ? '' : '（未就绪）')}</option>
+                  ))}
+                </select>
+              )}
+              {auto === 'automatic' && strategy === 'ladder' && (
+                <select aria-label="运行方式" value={runtime} onChange={(e) => setRuntime(e.target.value as 'v1' | 'v2repair' | 'v2')} title="验证失败后怎么修：只重开出问题的包（推荐），还是沿用整包补丁；v2 = 全程按包推进（实验）">
+                  <option value="v2repair">修复时只重开出问题的包（推荐）</option>
+                  <option value="v1">标准流程</option>
+                  <option value="v2">全程按包推进（实验）</option>
+                </select>
+              )}
+              {/* 有界升级下模型由设置里的次序决定，不需要在这里选；只有「固定模型」或「逐步确认」才需要选一个。 */}
+              {(strategy === 'fixed' || auto !== 'automatic') && (
+                <select aria-label="使用模型" value={profile} onChange={(e) => setModel(e.target.value)}>
+                  {!ready.length && <option value="">没有可用模型</option>}
+                  {ready.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {profileLabel(p)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-          )}
-        </div>
-        <p className="hint">
-          {auto === 'automatic' ? '自动采用有效草稿，真实检查失败最多修复四轮。' : '方案与代码都会停下来等你确认，可编辑后再批准。'} 会调用所选模型。
-        </p>
+            {strategy === 'ladder' && auto !== 'automatic' && <span className="hint">升级策略只在「自动执行」下生效；逐步确认时用上面选的模型。</span>}
+            {strategy === 'ladder' && auto === 'automatic' && (
+              <div className="strategy-body">
+                <p className="muted">
+                  本任务使用的模型与次序：{[...ready].filter((p) => !selectedModels || selectedModels.includes(p.id)).sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。规格、测试方案、测试修订与诊断由最高等级模型负责（token 少、决定一切）；代码实现与修复从本地模型起步，失败后逐级上推；预算耗尽会停止并保留证据。
+                </p>
+                <div className="row wrap">
+                  <Link to="/settings/order?from=new" className="btn btn-default btn-sm">模型与次序 · 调整 / 勾选</Link>
+                  <Link to="/settings/accounts" className="btn btn-ghost btn-sm">API 账户</Link>
+                </div>
+                <label className="field inline">
+                  <span className="field-label">API token 上限</span>
+                  <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => setApiTokens(e.target.value)} />
+                </label>
+              </div>
+            )}
+            <p className="hint">
+              {auto === 'automatic' ? '自动采用有效草稿，真实检查失败最多修复四轮。' : '方案与代码都会停下来等你确认，可编辑后再批准。'} 会调用所选模型。
+            </p>
+          </div>
+        </details>
         {!ready.length && (
           <Notice tone="warn">
             还没有可用模型。<button className="link" onClick={() => navigate('/settings/models')}>前往添加</button> 或 <button className="link" onClick={() => navigate('/settings/local')}>选择本地 Ollama 模型</button>。
@@ -193,7 +199,7 @@ export function NewTask() {
         )}
         {working && <Notice tone="warn">另一个任务正在执行；后端目前串行，完成后才能开始新任务。你仍可浏览历史。</Notice>}
         <div className="examples">
-          {examples.map((e) => (
+          {examples.slice(0, 3).map((e) => (
             <button key={e.text} className="example" onClick={() => setGoal(e.text)}>
               {e.level !== null && <span className="tag">L{e.level}</span>} {e.text}
             </button>
