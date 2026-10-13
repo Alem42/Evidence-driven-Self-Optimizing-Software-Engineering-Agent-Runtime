@@ -1,6 +1,6 @@
 # 方案：让低质量模型完成高难度工作（上下文、反馈与自学习）
 
-2026-10-04（随实现持续更新）。前置：[进展011](../progress/PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)、[进展012](../progress/PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)、[进展013](../progress/PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。
+2026-10-04（随实现持续更新）。前置：[进展011](../archive/progress/PROGRESS_2026-10-04_003_m1-diagnoser-declarative-fix-flow.md)、[进展012](../archive/progress/PROGRESS_2026-10-04_004_syntax-gate-strong-spec-no-console-windows.md)、[进展013](../archive/progress/PROGRESS_2026-10-04_005_frontend-defaults-evidence-attempts-imports.md)。
 约束：没有比 DeepSeek v4-pro 更强的 API，只能在 runtime 里想办法。
 
 > **关于“别人怎么做”的出处说明**：下面对其他项目/论文的描述来自公开论文与文档的要点，是为了说明“我们为什么这么做、取什么不取什么”。

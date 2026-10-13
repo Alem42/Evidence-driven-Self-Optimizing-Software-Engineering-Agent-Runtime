@@ -5,7 +5,7 @@
 ## 做了什么
 1. **Tester 用例审计**（策略 `test_audit`，默认关闭）：规划阶段，便宜的云端模型只看用例输入、不看期望，独立推导 3 次，再由“等价判断”与 Tester 的期望比较；多数认为不一致的用例被丢弃（最少保留 3 个，丢完仍须是合法计划）。每次调用都经过持久角色层（计入预算、可恢复），结果写进计划和账本事件 `case_audit`；任何失败都保持原用例。新增两个数据角色 `case_deriver`、`case_judge`，逻辑在 `application/checks/case_audit.py`，挂载点在 `planning.py`。
 2. **经验库最小版**（策略 `library`：0 关 / 1 只记录 / 2 记录并注入，默认 0）：`intelligence/library.py`。签名 = 失败类别 + 归一化信息；只有“修复之后未解决条目真的变少或通过”才记为成功并保存做法（做法来自账本事实）；字节与条数上限，按效用（成功率 × 命中 × 新近度）淘汰；命中且有成功记录才注入（至多 2 条）。
-3. **上下文框架**（影子模式，默认不接入）：`orchestration/context_plan.py`（必需/重要/可丢三层，规模规则：小任务原样全给）；`scripts/eval/context_profile.py`、`context_shadow.py` 量化；分析见 [design/CONTEXT_ENGINEERING](../design/CONTEXT_ENGINEERING.md)。
+3. **上下文框架**（影子模式，默认不接入）：`orchestration/context_plan.py`（必需/重要/可丢三层，规模规则：小任务原样全给）；`scripts/eval/context_profile.py`、`context_shadow.py` 量化；分析见 [design/CONTEXT_ENGINEERING](../../design/CONTEXT_ENGINEERING.md)。
 4. **实验结果页**（设置 → 实验结果）：条形图和表，数据由 `scripts/eval/export_experiments.py` 导出到 `frontend/src/data/experiments.json`。路由页新增用例审计开关与经验库级别（带风险/数据提示）。
 5. **MCP**：`scripts/smoke/mcp_client_check.py` 用官方 MCP 客户端以子进程方式启动服务器，握手、列工具并真实调用（验证通过、验证失败、路径穿越被拒、路由预览、花钱工具默认被拒）——协议层的端到端验证（不是 Claude Desktop/Code）。
 

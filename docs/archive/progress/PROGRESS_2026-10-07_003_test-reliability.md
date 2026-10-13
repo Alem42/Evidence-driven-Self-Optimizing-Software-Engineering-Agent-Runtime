@@ -1,6 +1,6 @@
 # 让测试更可靠：测量与结论（只测量，还没有接进流程）
 
-2026-10-07。数据与完整表格见 [reference/TEST_RELIABILITY](../reference/TEST_RELIABILITY.md)（每任务的难度、耗时、token、费用、期望准确率）。总花费 ≈ ¥1.1（API，并行；两个测量各 184 次调用，每次 1–3 秒）。
+2026-10-07。数据与完整表格见 [reference/TEST_RELIABILITY](../../reference/TEST_RELIABILITY.md)（每任务的难度、耗时、token、费用、期望准确率）。总花费 ≈ ¥1.1（API，并行；两个测量各 184 次调用，每次 1–3 秒）。
 
 ## 做了什么
 - 两个新的**数据角色**（RoleSpec，无需 Python 校验器）：`expectation_deriver`（只给输入，独立推导期望的 stdout/退出码）、`expectation_auditor`（给声明的期望，判断对不对）。

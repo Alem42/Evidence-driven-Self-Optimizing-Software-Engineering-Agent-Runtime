@@ -1,6 +1,6 @@
 # 进展015：W0 评测基线（评测系统 + 第一批纯云端基线）
 
-2026-10-05。分支 `feature/multi-model`。前置：[进展014](PROGRESS_2026-10-04_006_diagnoser-checks-rewrite-leaks-testlint.md)。使用说明：[USER_BENCHMARK](../guides/USER_BENCHMARK.md)。
+2026-10-05。分支 `feature/multi-model`。前置：[进展014](PROGRESS_2026-10-04_006_diagnoser-checks-rewrite-leaks-testlint.md)。使用说明：[USER_BENCHMARK](../../guides/USER_BENCHMARK.md)。
 
 ## 1. 做了什么
 

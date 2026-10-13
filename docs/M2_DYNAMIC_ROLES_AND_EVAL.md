@@ -49,7 +49,7 @@
 
 - 原始数据：`.masa/p2eval/summary.json`（每次运行的状态、费用、token、机制计数）和 `.masa/p2eval/bench/state/` 的账本（本机，不进仓库）。
 - 复现：`python scripts/eval/p2_eval.py --tasks 8 --yuan 4`（需要两个云端配置）；差分检查见 `scripts/eval/loop_equivalence.py` 顶部说明。
-- 详细过程与每个缺陷的现象：[进展 005](progress/PROGRESS_2026-10-06_005_p2-real-eval.md)。
+- 详细过程与每个缺陷的现象：[进展 005](archive/progress/PROGRESS_2026-10-06_005_p2-real-eval.md)。
 
 ## 6. 收尾验证（2026-10-07，新的 ¥10 预算里花了 ¥1.83）
 

@@ -1,6 +1,6 @@
 # 进展016：评测的实时显示、中间难度题、混合 vs 纯云端的真实对比，以及评测抓到的缺陷
 
-2026-10-05。分支 `feature/multi-model`。前置：[进展015](PROGRESS_2026-10-05_001_w0-benchmark-baseline.md)。使用说明：[USER_BENCHMARK](../guides/USER_BENCHMARK.md)。
+2026-10-05。分支 `feature/multi-model`。前置：[进展015](PROGRESS_2026-10-05_001_w0-benchmark-baseline.md)。使用说明：[USER_BENCHMARK](../../guides/USER_BENCHMARK.md)。
 
 ## 1. 做了什么
 
