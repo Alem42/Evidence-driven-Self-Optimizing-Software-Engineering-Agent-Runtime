@@ -99,8 +99,8 @@
 | `src/masa/infrastructure/` | 模型调用（`llm.py`、`streaming.py`）、SQLite 账本、设置、Ollama 控制、Go runner 的 Python 侧 |
 | `src/masa/bench/` | 评测：任务库、独立判官、汇总与对比、运行器 |
 | `runner/`（Go） | 受控执行：在 Windows Job Object 里启动 `go build/test/vet`，超时取消、进程树 kill-on-close |
-| `frontend/`（React+TS） | 任务图、代码查看、报告、设置（模型次序、路由预算、评测） |
-| `tests/` | 404 项 Python 测试 + 31 项前端测试；很多是“修复前确认会失败”的回归测试 |
+| `frontend/`（React+TS） | 工作台（`features/workbench/`：文件树、流式编辑器、diff、流程带、折叠的输出/追踪/版本/报告、底部输入框）、新任务页、设置（模型次序、路由预算、评测） |
+| `tests/` | 717 项 Python 测试 + 60 项前端测试；很多是“修复前确认会失败”的回归测试 |
 
 ## 7. 做了什么 / 没做什么
 
@@ -118,3 +118,20 @@ cd frontend && npm run dev                  # 前端
 python scripts/eval/bench.py --suite canary      # 5 分钟评测（会调用模型）
 python -m unittest discover -s tests        # 全部测试（不调用真实模型）
 ```
+
+## 9. 2026-10-14 收口：人在回路、缓存友好的上下文、调用检视、护栏
+
+**人在回路**（[`runtime/user_input.py`](../src/masa/runtime/user_input.py)）：底部输入框 → `POST /api/runs/<rid>/input`。`note` 写成 `user_input` 事件（先写账本），只在**节点边界**被读取，之后新开始的角色调用的上下文里会带 `user_notes`（沿版本链收集；已存在的调用保留原上下文，所以恢复/重放不会报“输入变了”）；`pause/resume/stop` 在协调器的节点边界（`_pause_gate`）生效。不打断正在进行的调用（会白花钱）。对比：LangGraph 的 `interrupt()` 恢复时会从头重跑被中断的节点。
+
+**流式代码**（[`runtime/streamfiles.py`](../src/masa/runtime/streamfiles.py)）：模型回答是一整段 JSON；前端要让代码逐字出现，就在 JSON 还没闭合时把已写出的字符串解码出来（转义写到一半则丢弃那一小段，不解成乱码）。`GET /api/runs/<rid>/live` 只在内存里，不进账本。
+
+**缓存友好的提示排布**（[`domain/prompt_layout.py`](../src/masa/domain/prompt_layout.py)，说明与数据见 [reference/PROMPT_LAYOUT.md](reference/PROMPT_LAYOUT.md)）：稳定内容在前、每步都变的在后。零 token 回放可缓存前缀 55.9%→64.1%；Go 小任务真实对照，服务端报告的命中率 39%→68%（3 对，只作方向）。`llm.py` 解析 `prompt_cache_hit_tokens / miss`，进入用量、报告和评测记录；没有报告就是“未知”，不是 0。
+
+**调用检视**（[`application/call_inspector.py`](../src/masa/application/call_inspector.py)）：`GET /api/runs/<rid>/calls[/<角色>/<调用>]`，从账本还原“模型这一次看到了什么”：各部分的字符数/估算 token、被省略的内容与原因（上下文自己的 `omitted` 与分层预算的 `context_plan`）、与同角色上一次调用共享的前缀、服务端缓存命中、你的提示是否带上、回答摘要。只读，不新增状态。
+
+**安全与护栏**（不是新增代码，是已有设计的汇总，面试时按这个讲）：
+- 模型只能提议**白名单里的操作**：检查图由代码生成（`runtime/engine.py::compile_project_checks`），提案不能带任意执行图；V2 工人的工具封装语言包操作，没有任意 shell（`application/v2/workers.py`）。
+- **受限子进程与写入范围由工具强制**：Go runner 在 Windows Job Object 里执行并 kill-on-close；工人只能写自己包计划里的文件。
+- **源码、注释、工具日志一律当作不可信数据**：角色提示词里写明，且成功只认账本里的真实工具证据（`agents/protocol.py`、Gate）。
+- **云端调用有预算上限**：任务级 token/时间/费用/调用数“先预留后结算”，耗尽即停并保留证据；付费调用结果未知时不重发。
+- 本地服务默认只监听回环地址，会话令牌与来源白名单；演示部署为只读。
