@@ -14,6 +14,10 @@ npm run dev        # http://127.0.0.1:5173
 
 或一键：`.\scripts\dev.ps1`。后端地址不同时，在 `frontend/.env` 设置 `VITE_API_BASE`；前端换了端口，用 `masa serve --origin http://127.0.0.1:端口` 加入白名单。生产式预览：`npm run build && npm run preview`（4173，已在默认白名单）。
 
+## 新任务页
+
+写需求时页面会实时给出**开跑前估计**（本地模型推测难度、系统能不能处理、云端 API token 三档与价格区间，选中的档位就是 token 上限）；需求点名了第三方包时会先问你；首页的推荐任务含模糊需求，可以“换一批”。Python 项目跑在项目自己的环境 `.tools/pyenv` 里。详见 [PROJECT_PYTHON_ENV](PROJECT_PYTHON_ENV.md)。
+
 ## 界面（任务页 = 工作台）
 
 ![工作台](../assets/workbench-code.jpg)
