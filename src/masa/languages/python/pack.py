@@ -13,8 +13,8 @@ from pathlib import Path
 
 from masa.domain.models import MasaError
 from masa.languages.base import ConfigField, LanguagePack, OperationDef, Readiness
-from masa.languages.python import checks, failures, oracle, prompts
-from masa.languages.python.triage_rules import RISKS, RULES
+from masa.languages.python import checks, env, failures, oracle, prompts
+from masa.languages.python.triage_rules import RISKS, RULES, relaxed_rules
 
 HERE = Path(__file__).resolve().parent
 MIN_VERSION = (3, 10)
@@ -22,21 +22,93 @@ _VERSIONS = {}  # 解释器路径 -> (版本元组, 版本字符串)；探测一
 NO_WINDOW = {'creationflags': 0x08000000} if sys.platform == 'win32' else {}
 
 
+class ProjectEnvironment:
+    """Python 项目环境的操作（设置页与新任务页通过它做事；策略与上限来自包的配置）。 Operations on the Python project environment (the Settings and New Task pages use it; policy and cap come from the pack's configuration)."""
+
+    def __init__(self, pack):
+        self.pack = pack
+
+    def status(self):
+        pack = self.pack
+        return {**env.status(pack.env_max_mb()), 'policy': pack.package_policy(), 'uses_project_env': pack.uses_project_env(), 'interpreter': str(pack.interpreter()), 'tooling_missing': pack.tooling_missing(),
+                'configured_interpreter': str(pack.config.get('interpreter') or ''), 'candidates': env.discover_interpreters()}
+
+    def create(self):
+        """创建环境；选了 pytest 时顺手补装 pytest（它是你选的测试工具，不算“项目依赖”，不再问；算进大小上限）。幂等：环境已存在就只补缺的工具。
+        Create the environment; when pytest is the chosen framework it is installed too (it is the test tool you chose, not a project dependency, so no further asking; it counts toward the size cap). Idempotent: an existing environment only gets its missing tools."""
+        env.create()
+        missing = self.pack.tooling_missing()
+        if missing:
+            env.install(missing, self.pack.env_max_mb())
+
+    def reset(self):
+        env.reset()
+
+    def install(self, names, approve=False):
+        """策略 ask：没有 approve 只返回“需要批准”；allow：直接装；deny：拒绝。 Policy ask: without approve only "needs approval" comes back; allow installs at once; deny refuses."""
+        pack = self.pack
+        names = env.clean_requirements(names)
+        if pack.package_policy() == 'deny':
+            raise MasaError('installing packages is switched off (Settings -> Languages -> Python -> Third-party packages)')
+        if pack.package_policy() == 'ask' and approve is not True:
+            return {'needs_approval': True, 'packages': names, 'size_mb': env.size_mb() if env.exists() else 0, 'max_mb': pack.env_max_mb()}
+        return {'needs_approval': False, **env.install(names, pack.env_max_mb())}
+
+    def pick_interpreter(self):
+        return env.pick_file()
+
+    def required_packages(self, goal):
+        return self.pack.required_packages(goal)
+
+    def summary(self):
+        pack = self.pack
+        return {'policy': pack.package_policy(), 'env_exists': env.exists(), 'size_mb': env.size_mb() if env.exists() else 0, 'max_mb': pack.env_max_mb()}
+
+
 class PythonPack(LanguagePack):
     override_seeds = True
 
+    def environment(self):
+        return ProjectEnvironment(self)
+
     # ---------- 配置 / configuration ----------
     def interpreter(self):
-        """设置里配置的解释器；留空用运行 masa 的这一个。 The interpreter from Settings; empty means the one running masa."""
+        """设置里配置的解释器；留空时用**项目自己的环境**（.tools/pyenv，创建过才有），再没有才退回运行 masa 的这一个。
+        The interpreter from Settings; empty means the project's own environment (.tools/pyenv, once created), and only without one the Python that runs masa."""
         configured = str(self.config.get('interpreter') or '').strip()
-        return Path(configured) if configured else Path(sys.executable)
+        if configured:
+            return Path(configured)
+        return env.env_python() if env.exists() else Path(sys.executable)
+
+    def uses_project_env(self):
+        return not str(self.config.get('interpreter') or '').strip() and env.exists()
+
+    def package_policy(self):
+        """第三方包策略：ask（要装就问我，默认）、allow（完全访问：只在项目环境里自动装）、deny（只用标准库）。 Third-party package policy: ask (default), allow (full access, project environment only) or deny (standard library only)."""
+        value = self.config.get('package_policy')
+        return value if value in ('ask', 'allow', 'deny') else 'ask'
+
+    def tooling_missing(self):
+        """项目环境里缺的测试工具（只有选了 pytest 才可能缺）。 Test tools missing from the project environment (only possible with pytest chosen)."""
+        if self.framework() == 'pytest' and self.uses_project_env() and 'pytest' not in env.top_levels():
+            return ['pytest']
+        return []
+
+    def env_max_mb(self):
+        try:
+            return max(50, int(str(self.config.get('env_max_mb') or env.DEFAULT_MAX_MB).strip()))
+        except ValueError:
+            return env.DEFAULT_MAX_MB
 
     def framework(self):
         return 'pytest' if self.config.get('test_framework') == 'pytest' else 'unittest'
 
     def config_schema(self):
-        return [ConfigField('interpreter', 'Python 解释器', 'path', '', '留空使用运行 masa 的解释器；建议为生成的项目单独建一个干净的虚拟环境（见 scripts/ops/setup_python_pack.py）'),
-                ConfigField('test_framework', '测试框架', 'choice', 'unittest', 'unittest 是标准库、无需安装；pytest 需要在上面的解释器里已经安装', choices=('unittest', 'pytest'))]
+        return [ConfigField('interpreter', 'Python 解释器', 'path', '', '留空 = 使用项目自己的 Python 环境（.tools/pyenv，在下面创建）；要用本机其它环境请在下面选择，不要手写路径'),
+                ConfigField('test_framework', '测试框架', 'choice', 'unittest', 'unittest 是标准库、无需安装；pytest 需要在上面的解释器里已经安装', choices=('unittest', 'pytest')),
+                ConfigField('package_policy', '第三方包', 'choice', 'ask', '需要安装第三方包时怎么办。只会装进项目环境，永远不碰系统环境', choices=('ask', 'allow', 'deny'),
+                            labels=('每次都询问我（推荐）', '完全访问：允许自动安装（仅项目环境）', '禁止：只用标准库')),
+                ConfigField('env_max_mb', '项目环境大小上限（MB）', 'text', str(env.DEFAULT_MAX_MB), '装完超过上限会撤销这次安装')]
 
     # ---------- 布局 / layout ----------
     def entrypoint(self, spec=None):
@@ -82,7 +154,8 @@ class PythonPack(LanguagePack):
         if self.framework() == 'pytest':
             done = subprocess.run([str(interpreter), '-c', 'import pytest'], capture_output=True, timeout=30, **NO_WINDOW)
             if done.returncode != 0:
-                problems.append('所选解释器里没有安装 pytest（pip install pytest）')
+                problems.append('项目环境里还没有 pytest：到 设置 → 语言 → Python 点“补装 pytest”（或把测试框架改回 unittest）' if self.uses_project_env()
+                                else '所选解释器里没有安装 pytest（pip install pytest）')
         return Readiness(not problems, tuple(problems) or (f'Python {text}',))
 
     def fingerprint(self, executor):
@@ -152,7 +225,23 @@ class PythonPack(LanguagePack):
             raise MasaError(f'{path} {message}')
 
     def _extra_imports(self):
-        return {'pytest'} if self.framework() == 'pytest' else set()
+        """静态检查放行的第三方模块：pytest（选了 pytest 时），以及项目环境里已经装好的包（策略不是“禁止”时）。 Third-party modules the static check lets through: pytest (when chosen) and what is installed in the project environment (unless the policy is deny)."""
+        out = {'pytest'} if self.framework() == 'pytest' else set()
+        if self.uses_project_env() and self.package_policy() != 'deny':
+            out |= set(env.top_levels())
+        return out
+
+    def packages_note(self):
+        """给模型的一句话：项目环境里有哪些第三方包可以导入；没有就是空串（提示词保持原样）。 One sentence for the models: which third-party packages of the project environment may be imported; empty when there are none (prompts stay as they were)."""
+        names = sorted(self._extra_imports() - {'pytest'})
+        return ('Besides the standard library you may import these third-party packages, which are installed in the project environment (no others): ' + ', '.join(names) + '. ') if names else ''
+
+    def required_packages(self, goal):
+        """目标里点名的第三方包（pip 名字），以及其中还没装的。 Third-party packages the goal names (pip names) and which of them are not installed yet."""
+        from masa.languages.python.triage_rules import third_party_names
+        named = third_party_names(goal)
+        have = {n.lower() for n in env.top_levels()} | {p['name'].lower().replace('-', '_') for p in (env.packages() if env.exists() else [])}
+        return {'named': named, 'missing': [n for n in named if n.lower().replace('-', '_') not in have]}
 
     # ---------- 确定性检查 / deterministic checks ----------
     def normalize(self, executor, files, paths, imports=True):
@@ -226,7 +315,7 @@ class PythonPack(LanguagePack):
                 'from <module>.<package>.<file> import run; sys.exit(run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr)) with the FULL dotted path of the FILE that defines run; never read stdin there. '
                 'Logic lives in <module>/<package>/<file>.py; tests are tests/test_<name>.py using unittest (assertEqual(actual, expected), ACTUAL first), never skipped, never assert True. '
                 'Import project modules with absolute imports (from <module>.<package>.<file> import name); call run(args, io.StringIO(...), out, err) directly in tests. '
-                'If a test starts the program as a process compare decoded text (text=True), never raw bytes (Windows writes CRLF).')
+                'If a test starts the program as a process compare decoded text (text=True), never raw bytes (Windows writes CRLF). ') + self.packages_note()
 
     def outline(self, source):
         return checks.outline(source)
@@ -270,13 +359,14 @@ class PythonPack(LanguagePack):
 
     # ---------- 提示词、规则、判官 / prompts, rules, oracle ----------
     def project_prompt(self, context, default_instruction):
-        return prompts.project_roles_prompt(context, default_instruction)
+        return prompts.project_roles_prompt(context, default_instruction) + self.packages_note()
 
     def transport_hint(self, context):
         return prompts.transport_hint(context)
 
     def triage_rules(self):
-        return RULES, RISKS
+        # 策略不是“禁止”：第三方包不再是“不可能”，而是“要装、要你批准或授权”的风险提示。 Unless the policy is deny, a third-party package is no longer "impossible" but a risk: it needs to be installed with your approval or permission.
+        return (relaxed_rules() if self.package_policy() != 'deny' else RULES), RISKS
 
     def judge(self, files, task, executor=None):
         return oracle.judge(self, self.interpreter(), files, task)

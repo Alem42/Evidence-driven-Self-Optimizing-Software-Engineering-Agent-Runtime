@@ -191,8 +191,16 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     result = console.settings.save(body) if write else console.settings.public()
                 elif path == '/api/triage' and write:
                     result = console.triage(body)
+                elif path == '/api/estimate' and write:
+                    result = console.estimate(body)
                 elif path == '/api/languages':
                     result = console.save_languages(body) if write else console.languages()
+                elif len(parts) == 4 and parts[:2] == ['api', 'languages'] and parts[3] == 'env':
+                    result = console.project_env_action(parts[2], body) if write else console.project_env(parts[2])
+                elif len(parts) == 4 and parts[:2] == ['api', 'languages'] and parts[3] == 'packages' and write:
+                    result = console.project_env_install(parts[2], body)
+                elif path == '/api/pick-file' and write:
+                    result = console.pick_file(body)
                 elif path == '/api/routing':
                     result = console.settings.save_routing(body) if write else console.settings.routing()
                 elif path == '/api/settings/order' and write:

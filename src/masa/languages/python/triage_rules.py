@@ -50,3 +50,34 @@ RISKS = [
      '包含无法用测试判定的主观要求。',
      '把主观要求换成可检查的具体行为（输出格式、退出码、边界值）。'),
 ]
+
+
+# 第三方包名 → pip 名字（import 名与 pip 名不同的几个）。 Third-party import names -> pip names (the few that differ).
+PIP_NAMES = {'bs4': 'beautifulsoup4', 'beautifulsoup': 'beautifulsoup4', 'sklearn': 'scikit-learn', 'scikit-learn': 'scikit-learn', 'pillow': 'pillow', 'opencv': 'opencv-python'}
+_THIRD_PARTY = next(rule[2] for rule in RULES if rule[0] == 'third_party')
+
+
+def third_party_names(goal):
+    """目标里直接点名的第三方包（pip 名字，去重，保持出现顺序）；“第三方库”“pip install” 这类泛指不产生名字。 Third-party packages the goal names outright (pip names, de-duplicated, in order); generic wording such as "third-party libraries" yields no name."""
+    import re
+    names = []
+    for match in re.finditer(_THIRD_PARTY, str(goal or ''), flags=re.IGNORECASE):
+        word = match.group(0).lower()
+        if not (word.isascii() and word.replace('-', '').isalnum()):  # “pip install”“第三方库”这类泛指不是包名 / generic wording is not a package name
+            continue
+        name = PIP_NAMES.get(word, word)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def relaxed_rules():
+    """策略允许装包时的规则：third_party 从“不可能”降成“风险（要安装、需要批准）”，其余不变。 The rules when the policy allows installing packages: third_party drops from infeasible to a risk (needs installing, needs approval); the rest is unchanged."""
+    out = []
+    for rule in RULES:
+        if rule[0] == 'third_party':
+            out.append(('third_party', RISKY, rule[2], '用到了第三方依赖：需要先安装到项目的 Python 环境里（只装 PyPI 的预编译包，装进 .tools/pyenv，不碰系统环境）。',
+                        '按设置：每次询问你 / 完全访问时自动安装；不想装就改成只用 Python 标准库实现。'))
+        else:
+            out.append(rule)
+    return out

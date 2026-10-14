@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { qk } from '../../api/queries';
 import type { LanguageInfo, Languages } from '../../api/types';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
+import { ProjectEnvPanel } from './ProjectEnvPanel';
 
 type Draft = { default: string; packs: Record<string, Record<string, unknown>>; extra_dirs: string };
 
@@ -59,11 +60,14 @@ export function LanguagesSection() {
                 <span key={kind} style={{ display: 'contents' }}><dt>{kind}</dt><dd><code>{op.id}</code> · {op.label}</dd></span>
               ))}
             </dl>
-            {(l.config ?? []).map((f) => (
+            {l.has_environment && (
+              <ProjectEnvPanel language={l.id} interpreter={String(draft.packs[l.id]?.interpreter ?? '')} onInterpreter={(path) => setField(l.id, 'interpreter', path)} />
+            )}
+            {(l.config ?? []).filter((f) => !(l.has_environment && f.key === 'interpreter')).map((f) => (
               <Field key={f.key} label={f.label} hint={f.help}>
                 {f.kind === 'choice' ? (
                   <select value={String(draft.packs[l.id]?.[f.key] ?? f.default ?? '')} onChange={(e) => setField(l.id, f.key, e.target.value)}>
-                    {(f.choices ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                    {(f.choices ?? []).map((c, i) => <option key={c} value={c}>{f.labels?.[i] || c}</option>)}
                   </select>
                 ) : f.kind === 'bool' ? (
                   <input type="checkbox" checked={Boolean(draft.packs[l.id]?.[f.key])} onChange={(e) => setField(l.id, f.key, e.target.checked)} />

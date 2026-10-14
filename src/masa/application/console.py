@@ -72,6 +72,38 @@ class Console:
         """每个语言包的说明、就绪状态与当前配置（设置页用）。 Every pack's description, readiness and current configuration (for the Settings page)."""
         return {'default': registry.default_id(), 'languages': registry.describe(self._probe_executor()), 'extra_dirs': self.settings.load_languages().get('extra_dirs', [])}
 
+    # ───────────── Python 项目环境（设置 → 语言 → Python）/ the Python project environment ─────────────
+    def _environment(self, language):
+        environment = registry.get(language).environment() if language in registry.ids() else None
+        if environment is None:
+            raise MasaError('this language has no project environment')
+        return environment
+
+    def project_env(self, language='python'):
+        """项目环境的状态、策略、本机能选的其它解释器。 Status of the project environment, the policy and the other interpreters that can be chosen."""
+        return self._environment(language).status()
+
+    def project_env_action(self, language, body):
+        action = body.get('action')
+        if action not in ('create', 'reset'):
+            raise MasaError('action must be create or reset')
+        environment = self._environment(language)
+        with self.lock:
+            (environment.reset if action == 'reset' else environment.create)()
+        return environment.status()
+
+    def project_env_install(self, language, body):
+        """装第三方包到项目环境。策略 ask：没有 approve 就只返回“需要批准”；allow：直接装；deny：拒绝。你在设置页手动点“安装”本身就是批准。
+        Install third-party packages into the project environment. Policy ask: without approve only "needs approval" comes back; allow installs at once; deny refuses. Clicking Install in Settings is the approval."""
+        environment = self._environment(language)
+        with self.lock:
+            done = environment.install(body.get('packages'), approve=body.get('approve') is True)
+        return done if done.get('needs_approval') else {**done, 'env': environment.status()}
+
+    def pick_file(self, body):
+        """在运行 masa 的这台电脑上弹出系统“打开文件”对话框（设置页的“浏览…”）。 Opens the system file dialog on the machine running masa (the Settings page's Browse button)."""
+        return {'path': self._environment(body.get('language') or 'python').pick_interpreter()}
+
     def save_languages(self, body):
         self.settings.save_languages(body)
         return self.languages()
@@ -154,7 +186,72 @@ class Console:
         if not isinstance(goal, str) or len(goal) > 16000:
             raise MasaError('goal must be text up to 16000 characters')
         from masa.application.checks.triage import assess
-        return assess(goal, registry.get(body.get('language') or registry.default_id()))  # 规则属于所选语言的包 / the rules belong to the chosen language's pack
+        pack = registry.get(body.get('language') or registry.default_id())  # 规则属于所选语言的包 / the rules belong to the chosen language's pack
+        result = assess(goal, pack)
+        environment = pack.environment()
+        if environment is not None:  # 点名了第三方包：告诉页面要装什么、按什么策略 / the goal names third-party packages: tell the page what to install and under which policy
+            wanted = environment.required_packages(goal)
+            if wanted['named']:
+                result = {**result, 'packages': {**wanted, **environment.summary()}}
+        return result
+
+    # ───────────── 新任务页的“开跑前估计” / the pre-run estimate of the New Task page ─────────────
+    ESTIMATE_IDLE_SECONDS = 45  # 估计完后本地模型最多再驻留这么久（用户还在打字时不必反复冷加载），之后释放显存 / how long the local model may stay loaded after an estimate (no cold load per keystroke), then the VRAM is freed
+
+    def estimate(self, body):
+        """估计这个需求大概多难、云端 API 要多少 token、多少钱，以及系统能不能处理。mode=rules：确定性规则，立刻返回；mode=model：再让本地模型看一眼（只用本地模型，不写账本，没有本地模型或正在跑任务就退回规则）。
+        Estimate how hard the goal is, how many cloud API tokens and how much money it needs, and whether the system can handle it. mode=rules: deterministic and instant; mode=model: the local model looks as well (local only, no ledger entry; without one, or while a task runs, the rules answer)."""
+        from masa.application import estimate as sizing
+        from masa.application.checks.triage import assess
+        goal = body.get('goal')
+        if not isinstance(goal, str) or not goal.strip() or len(goal) > 16000:
+            raise MasaError('goal must be text up to 16000 characters')
+        pack = registry.get(body.get('language') or registry.default_id())
+        cloud = [p for _i, p in self.settings.ready_profiles() if p.get('model_type') == 'cloud']
+        ready = pack.probe(self._probe_executor()).ok if self.runner_path.is_file() else True
+        rules = assess(goal, pack)
+        answer, note, name = None, '', ''
+        if body.get('mode') == 'model':
+            answer, note, name = self._ask_local_estimator(goal, pack.id)
+        result = sizing.build(goal, rules, answer, cloud, ready, source='local-model' if answer else 'rules')
+        return {**result, 'model': name, 'note': note, 'mode': 'model' if body.get('mode') == 'model' else 'rules'}
+
+    def _ask_local_estimator(self, goal, language):
+        """(回答 | None, 说明, 模型名)。同一个目标 10 分钟内只问一次；任务在跑时不动本地模型。 (answer | None, note, model name). The same goal is asked once per 10 minutes; the local model is left alone while a task runs."""
+        import time as _time
+        import threading
+        key = (goal.strip(), language)
+        cache = self.__dict__.setdefault('_estimates', {})
+        hit = cache.get(key)
+        if hit and _time.time() - hit[0] < 600:
+            return hit[1], hit[2], hit[3]
+        if self.job_thread and self.job_thread.is_alive():
+            return None, '有任务正在运行，本地模型留给它，这里按规则估计。', ''
+        local = [(i, p) for i, p in self.settings.ready_profiles() if p.get('model_type') == 'local']
+        if not local:
+            return None, '没有可用的本地模型，按规则估计。', ''
+        ident, profile = local[0]
+        try:
+            provider = self.settings.provider(ident)
+            answer = provider.respond({'purpose': 'task_estimator', 'goal': goal, 'language': language, 'reason_language': '中文' if any('一' <= ch <= '鿿' for ch in goal) else 'English'}, timeout=90)
+        except Exception as exc:  # 估计只是建议：任何失败都退回规则 / advisory: any failure falls back to the rules
+            return None, '本地模型没能给出估计（' + str(exc)[:80] + '），按规则估计。', profile.get('model', '')
+        finally:
+            timer = self.__dict__.get('_estimate_timer')
+            if timer:
+                timer.cancel()
+            timer = threading.Timer(self.ESTIMATE_IDLE_SECONDS, self._release_if_idle)
+            timer.daemon = True
+            timer.start()
+            self._estimate_timer = timer
+        if len(cache) >= 64:
+            cache.clear()
+        cache[key] = (_time.time(), answer, '', profile.get('model', ''))
+        return answer, '', profile.get('model', '')
+
+    def _release_if_idle(self):
+        if not (self.job_thread and self.job_thread.is_alive()):
+            self._release_local_models()
 
     def project_report(self, rid):
         """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""

@@ -68,9 +68,10 @@ class ConfigField:
     help: str = ''
     choices: tuple = ()
     secret: bool = False
+    labels: tuple = ()  # 选项的显示名，与 choices 一一对应（空 = 直接显示选项值）/ display names of the choices, one each (empty = show the raw value)
 
     def to_dict(self):
-        return {'key': self.key, 'label': self.label, 'kind': self.kind, 'default': self.default, 'help': self.help, 'choices': list(self.choices)}
+        return {'key': self.key, 'label': self.label, 'kind': self.kind, 'default': self.default, 'help': self.help, 'choices': list(self.choices), 'labels': list(self.labels)}
 
 
 @dataclass
@@ -273,6 +274,11 @@ class LanguagePack:
         """失败断言里实际值与期望值真正不同的部分：[{'path','line','got','want'}]，给断言裁判；没有这种能力的语言返回空列表。 The parts where the actual and expected values really differ in failing assertions, for the assertion referee; empty for a language without it."""
         return []
 
+    def environment(self):
+        """语言自带的“项目环境”管理（创建/重置、装包、可选的其它解释器）；没有这种能力的语言返回 None。目前只有 Python。
+        The language's own "project environment" management (create/reset, install packages, other interpreters to choose); None for a language without it. Only Python has one today."""
+        return None
+
     def failure_details(self, checks, limit=1400):
         """前几个失败的“期望 vs 实际”原文（例如 unittest 的逐行差异），给自主工人看；没有的语言返回空串。 The expected-vs-actual text of the first failures (e.g. unittest's line diff) for autonomous workers; empty for a language without it."""
         return ''
@@ -362,7 +368,7 @@ class LanguagePack:
     def describe(self):
         return {'id': self.id, 'title': self.title, 'version': self.version, 'capabilities': sorted(self.capabilities),
                 'operations': {k: {'id': op.id, 'label': op.label} for k, op in self.operations.items()}, 'ui': self.ui(),
-                'config': [f.to_dict() for f in self.config_schema()]}
+                'config': [f.to_dict() for f in self.config_schema()], 'has_environment': self.environment() is not None}
 
 
 def load_manifest(path):

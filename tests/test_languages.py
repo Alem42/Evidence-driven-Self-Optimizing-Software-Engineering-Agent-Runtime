@@ -83,7 +83,7 @@ class SettingsApiTests(unittest.TestCase):
     def test_the_language_list_carries_readiness_and_config_fields(self):
         info = {l['id']: l for l in self.console.languages()['languages']}
         self.assertIn('python', info)
-        self.assertEqual({f['key'] for f in info['python']['config']}, {'interpreter', 'test_framework'})
+        self.assertEqual({f['key'] for f in info['python']['config']}, {'interpreter', 'test_framework', 'package_policy', 'env_max_mb'})
         self.assertFalse(info['go']['readiness']['ok'])  # 这个临时环境没有 Go 工具链 / this temp setup has no Go toolchain
         self.assertEqual(self.console.bootstrap()['language'], 'go')
         self.assertEqual({l['id'] for l in self.console.bootstrap()['languages']} >= {'go', 'python'}, True)

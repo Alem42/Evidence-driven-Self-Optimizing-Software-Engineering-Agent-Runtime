@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
 import { useBenchTasks, useProfiles } from '../../api/queries';
 import { languageTitle } from '../../entities/languages';
-import { pickExamples } from '../../entities/examples';
+import { KIND_LABEL, pickExamples } from '../../entities/examples';
+import { EstimatePanel } from './EstimatePanel';
+import { PackagesNotice } from './PackagesNotice';
 import { api } from '../../api/client';
 import type { Triage } from '../../api/types';
 import { TriageView } from '../decisions/TriageView';
@@ -13,24 +15,6 @@ import { Link } from 'react-router-dom';
 import { profileLabel, profileReady } from '../../entities/profiles';
 import { useToasts, useUi } from '../../stores/ui';
 import { Button, Notice, Segmented } from '../../shared/ui';
-
-// 备用建议任务：评测题库还没加载出来时使用。 Fallback suggestions, used until the benchmark set has loaded.
-const EXAMPLE_POOL = [
-  '生成一个随机整数 CLI，支持范围、数量和可选种子；无效参数返回错误，不输出结果。',
-  '写一个文本统计 CLI：读取标准输入，输出行数、单词数和字节数。',
-  '实现 CSV 费用汇总命令行：按类别求和并按金额降序输出。',
-  '写一个简单的动态规划，自己确定输入和输出，题目写在注释中。',
-  '实现一个 CLI：把标准输入的每一行反转后输出，空行保持不变。',
-  '写一个 CLI：统计标准输入中每个单词出现的次数，按次数降序、同次数按字典序输出前 10 个。',
-  '实现一个 CLI：判断命令行参数给出的每个整数是否为素数，每行输出 yes 或 no。',
-  '写一个 CLI：把十进制整数参数转换为二进制、八进制和十六进制并分别输出。',
-  '实现一个简易的 LRU 缓存包和演示 CLI：从标准输入读取 get/put 命令，输出结果。',
-  '写一个 CLI：读取标准输入的逗号分隔数字，输出最小值、最大值、平均值和中位数。',
-  '实现一个括号匹配检查 CLI：读取标准输入的每一行，输出该行括号是否匹配。',
-  '写一个 CLI：计算两个日期（YYYY-MM-DD）相差的天数，参数无效时返回错误。',
-  '实现一个 CLI：把标准输入的 Markdown 标题行（# 开头）提取为带缩进的目录。',
-  '写一个 CLI：对标准输入的整数做归并排序，支持 --desc 参数，每行输出一个。',
-];
 
 // 新任务页：一个大输入框 + 模型与执行方式。提交后任务图在任务页出现。
 // New-task page: one big prompt box; the task graph appears on the task page.
@@ -53,13 +37,21 @@ export function NewTask() {
   // 默认：自动执行 + 本地优先有界升级。需要逐步确认或固定模型时再手动切换。
   // Defaults: automatic execution + local-first bounded escalation; switch manually for step-by-step review or a fixed model.
   const [auto, setAuto] = useState<'review' | 'automatic'>('automatic');
-  // 推荐任务：从评测题库随机抽 3 个低等级任务；题库加载出来后抽一次，之后不再变（避免输入时闪烁）。
-  // Suggestions: three random low-level tasks from the benchmark set, drawn once after it loads (no flicker while typing).
+  // 推荐任务：内置的丰富题库（含故意写得模糊的需求）+ 评测题库里的低等级题，抽 3 个不同类型的；只在题库加载或点“换一批”时重抽（输入时不闪烁）。
+  // Suggestions: the built-in rich pool (with deliberately vague requirements) plus low-level benchmark tasks, three of different kinds; redrawn only when the set loads or on "refresh" (no flicker while typing).
   const { data: catalog } = useBenchTasks();
-  const examples = useMemo(() => pickExamples(catalog?.tasks, EXAMPLE_POOL), [catalog]);
+  const [batch, setBatch] = useState(0);
+  const shown = useRef<string[]>([]);
+  const examples = useMemo(() => {
+    const drawn = pickExamples(catalog?.tasks, [], 3, 5, Math.random, shown.current);
+    shown.current = drawn.map((e) => e.text);
+    return drawn;
+  }, [catalog, batch]);
   const [starting, setStarting] = useState(false);
   const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('ladder');
   const [apiTokens, setApiTokens] = useState('');
+  // API token 上限的来源：默认跟着“开跑前估计”选的档位；用户在高级设置里手填后就不再被覆盖。 Where the API token limit comes from: the tier chosen in the pre-run estimate, until the user types one by hand in the advanced settings.
+  const [tokenSource, setTokenSource] = useState<'estimate' | 'manual'>('estimate');
   const selectedModels = useUi((x) => x.selectedModels);
   const [triage, setTriage] = useState<Triage | null>(null);
   const [force, setForce] = useState(false);
@@ -71,6 +63,10 @@ export function NewTask() {
     return () => clearTimeout(t);
   }, [goal, chosen]);
   const blockedByTriage = triage?.verdict === 'infeasible' && !force;
+  // 点名了还没装的第三方包且策略是“询问”：先让用户决定（允许安装 / 改成只用标准库），不替用户装。 Named third-party packages not installed yet under the ask policy: the user decides first (allow / standard library only); nothing is installed for them.
+  const pkg = triage?.packages;
+  const blockedByPackages = Boolean(pkg && pkg.missing.length && pkg.policy === 'ask');
+  const refreshTriage = () => api<Triage>('/triage', { goal, language: chosen }).then(setTriage).catch(() => undefined);
 
   const ready = (profiles?.profiles ?? []).filter(profileReady);
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
@@ -79,9 +75,13 @@ export function NewTask() {
   const blocked = !ready.length || !toolchainReady || working;
 
   async function start() {
-    if (!goal.trim() || blocked || starting || blockedByTriage) return;
+    if (!goal.trim() || blocked || starting || blockedByTriage || blockedByPackages) return;
     setStarting(true);
     try {
+      if (pkg && pkg.missing.length && pkg.policy === 'allow') {
+        push({ tone: 'info', text: `完全访问：正在把 ${pkg.missing.join('、')} 装进项目环境…` });
+        await api(`/languages/${chosen}/packages`, { packages: pkg.missing, approve: true });
+      }
       useUi.getState().set({ follow: true });
       const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
@@ -121,11 +121,20 @@ export function NewTask() {
           />
           <div className="composer-bar">
             <span className="hint">⌘/Ctrl + Enter 开始</span>
-            <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage} onClick={start}>
+            <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage || blockedByPackages} onClick={start}>
               {starting ? '正在启动…' : '开始任务'}
             </Button>
           </div>
         </div>
+        <EstimatePanel goal={goal} language={chosen} enabled={tokenSource === 'estimate'} onTokens={(n) => setApiTokens(n ? String(n) : '')} />
+        {pkg && pkg.missing.length > 0 && (
+          <PackagesNotice
+            packages={pkg}
+            language={chosen}
+            onInstalled={refreshTriage}
+            onStdlibOnly={() => setGoal((g) => (g.includes('只用 Python 标准库') ? g : g.trim() + '（只用 Python 标准库，不要第三方包）'))}
+          />
+        )}
         {triage && triage.verdict !== 'ok' && (
           <div className="triage-preview">
             <TriageView triage={triage} compact />
@@ -178,7 +187,7 @@ export function NewTask() {
                 </div>
                 <label className="field inline">
                   <span className="field-label">API token 上限</span>
-                  <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => setApiTokens(e.target.value)} />
+                  <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => { setTokenSource('manual'); setApiTokens(e.target.value); }} />
                 </label>
               </div>
             )}
@@ -200,10 +209,11 @@ export function NewTask() {
         {working && <Notice tone="warn">另一个任务正在执行；后端目前串行，完成后才能开始新任务。你仍可浏览历史。</Notice>}
         <div className="examples">
           {examples.slice(0, 3).map((e) => (
-            <button key={e.text} className="example" onClick={() => setGoal(e.text)}>
-              {e.level !== null && <span className="tag">L{e.level}</span>} {e.text}
+            <button key={e.text} className="example" onClick={() => setGoal(e.text)} title={e.kind === 'vague' ? '故意写得模糊：看系统会先问你，还是选常见约定并写进验收' : undefined}>
+              <span className="tag">{e.kind === 'clear' && e.level !== null ? `L${e.level}` : KIND_LABEL[e.kind]}</span> {e.text}
             </button>
           ))}
+          <button className="link" onClick={() => setBatch((b) => b + 1)} title="换三个别的推荐需求">换一批</button>
         </div>
       </div>
     </div>

@@ -153,6 +153,36 @@ export interface LanguageConfigField {
   default?: unknown;
   help?: string;
   choices?: string[];
+  /** 选项的显示名，与 choices 一一对应。 Display names of the choices, one each. */
+  labels?: string[];
+}
+
+/** Python 等语言的“项目环境”（.tools/pyenv）。 A language's project environment (.tools/pyenv). */
+export interface ProjectEnv {
+  exists: boolean;
+  path: string;
+  python: string;
+  version: string;
+  size_mb: number;
+  max_mb: number;
+  over_limit: boolean;
+  packages: { name: string; version: string }[];
+  policy: 'ask' | 'allow' | 'deny';
+  uses_project_env: boolean;
+  /** 项目环境里缺的测试工具（选了 pytest 才可能缺）。 Test tools missing from the project environment. */
+  tooling_missing?: string[];
+  interpreter: string;
+  configured_interpreter: string;
+  candidates: { path: string; label: string }[];
+}
+
+export interface PackageInstall {
+  needs_approval: boolean;
+  packages?: string[];
+  installed?: string[];
+  size_mb: number;
+  max_mb?: number;
+  env?: ProjectEnv;
 }
 
 export interface LanguageInfo {
@@ -164,6 +194,7 @@ export interface LanguageInfo {
   readiness: { ok: boolean; details: string[] };
   config?: LanguageConfigField[];
   config_values?: Record<string, unknown>;
+  has_environment?: boolean;
   default?: boolean;
   digest?: string;
   error?: string;
@@ -432,6 +463,37 @@ export interface Triage {
   findings: TriageFinding[];
   /** 本地模型的复核意见：只能告警，不拦截。 Local-model review: warns only. */
   model?: { verdict: 'ok' | 'risky' | 'skipped'; reasons: string[]; suggestions: string[]; by?: string };
+  /** 需求点名了第三方包（只有带“项目环境”的语言才有）。 The goal names third-party packages (only for a language with a project environment). */
+  packages?: TriagePackages;
+}
+
+export interface TriagePackages {
+  named: string[];
+  missing: string[];
+  policy: 'ask' | 'allow' | 'deny';
+  env_exists: boolean;
+  size_mb: number;
+  max_mb: number;
+}
+
+// ───────── 开跑前估计 Pre-run estimate ─────────
+export interface EstimateTier {
+  key: 'economy' | 'standard' | 'rich';
+  label: string;
+  tokens: number;
+  price: { low: number | null; high: number | null; models: { model: string; per_million: number; cost: number }[]; unpriced: number };
+}
+
+export interface Estimate {
+  source: 'local-model' | 'rules';
+  mode: 'model' | 'rules';
+  level: number;
+  files: number | null;
+  can_handle: 'yes' | 'risky' | 'no';
+  reasons: string[];
+  tiers: EstimateTier[];
+  model: string;
+  note: string;
 }
 
 // ───────── 工作台：实时文件流、用户输入、调用检视 Workbench: live files, user input, call inspection ─────────
