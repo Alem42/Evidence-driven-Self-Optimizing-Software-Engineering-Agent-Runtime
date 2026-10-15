@@ -13,3 +13,6 @@ __pycache__/
 frontend/node_modules/
 
 demo-state/
+
+# Internal notes (kept locally, not published)
+docs/

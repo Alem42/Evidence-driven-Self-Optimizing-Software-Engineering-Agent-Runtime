@@ -1,49 +1,197 @@
-# Verdict（MASA）— 可验证、可恢复、成本可控的编码 Agent Runtime
+# MASA — An AI Coding Runtime for Unattended Work
+**Local small models iterate; cloud models supervise on demand.**
 
-输入一句需求，系统自动 **规划 → 先写并冻结测试 → 逐文件生成代码 → 在隔离环境里真实运行检查 → 失败就诊断并只修出问题的包 → 给出“通过 / 没通过”和证据**。多个模型分工（便宜的先试，不行再升级，整个任务有预算上限），**“做成没有”由运行时按真实工具结果裁决，不信模型自报**。
+> MASA｜面向无人值守场景的 AI 编码运行时：本地小模型迭代，云端大模型按需监督。
 
-![工作台：代码逐字出现](docs/assets/workbench-streaming.jpg)
+![Workbench: code appears as it is written](assets/workbench-streaming.jpg)
 
-## 90 秒看懂
+## What it is / 这是什么
 
-| 你看到的 | 背后是什么 |
+You describe a small coding task (or bring a spec). MASA **plans → writes and freezes the tests first → generates code file by file → runs real checks in an isolated sandbox → diagnoses failures and reopens only the failing package → reports pass / fail with evidence.**
+
+Three problems it targets:
+
+| Problem with typical AI coding tools | What MASA does |
 |---|---|
-| 顶栏一行 **“正在写 internal/stats/stats.go”** | 流式读取模型回答，从**还没写完的 JSON**里增量解出正在写的文件（[`streamfiles.py`](src/masa/runtime/streamfiles.py)） |
-| 编辑器里代码**逐字出现**、文件树里跳动的点 | `GET /runs/<id>/live`；写完后可切到“相对上一版”的 diff |
-| 底部输入框：**追加提示 / 暂停 / 继续 / 停止** | 人在回路：输入先写账本，**只在节点边界生效**，不打断已付费的调用（[`user_input.py`](src/masa/runtime/user_input.py)） |
-| “追踪 · 检视”里点任意一次调用 | 还原**模型这一次看到了什么**：各部分占多少 token、被省略的内容与原因、与上一次共享的前缀、缓存命中（[`call_inspector.py`](src/masa/application/call_inspector.py)） |
-| 流程带 / 版本分支 | 事件溯源账本：每次调用先记账再发送，崩溃后已完成的不重做，付费调用结果未知时不盲目重发 |
-| 一次失败后只重开出问题的那个包 | V2 修复：失败证据 → 范围内的包工人（写入范围由工具强制）→ 只交出检查结果最好的状态 |
+| The model says "done", nobody proves it | An independent **Gate** decides, from real tool results recorded in an append-only ledger. Tests are written first and frozen; changing them is refused. |
+| Cloud cost has no hard ceiling | Per-task budget for tokens, time and money. Cheap models try first, stronger ones only after a failure. Budget is **reserved before** a call and **settled after**. |
+| A crash repeats paid calls | An event-sourced ledger records the *intent* before any network request, so a paid call is never replayed after a restart. |
 
-![检视器](docs/assets/workbench-inspector.jpg)
+> 输入一句需求，系统自动规划、先写并冻结测试、逐文件生成、在隔离环境里真实运行检查，失败后只重开出问题的包，最后给出“通过 / 没通过”和证据。“是否完成”由运行时按真实工具结果裁决，不信模型自报。
 
-## 真实测到的（样本都很小，只作方向）
+**Intended scenario / 目标场景：** hand over a well-specified small module before you leave; read an evidence-backed report in the morning (what passed, what it cost, where it got stuck and why). Think "test-driven overnight delegation", not an interactive pair programmer.
 
-- **缓存友好的提示排布**：稳定内容在前、每步都变的在后。零 token 回放 4 841 次真实调用，可缓存前缀 **55.9% → 64.1%**；Go 小任务真实对照（V2、Flash、3 对交替运行），服务端报告的缓存命中率 **39% → 68%**。详见 [PROMPT_LAYOUT](docs/reference/PROMPT_LAYOUT.md)。
-- **默认运行方式回归**（只用云端 Flash）：Go 文本统计通过 ¥0.043；Python 大写转换通过 ¥0.016；V2 在 Go 词频任务通过 ¥0.045。
-- **测试**：后端 717 项、前端 60 项；默认流程与上一提交的差分检查逐项相同（零 token）。
-- 其余评测（10 级 23 题、独立判官、假通过率）见 [PROJECT_OVERVIEW](docs/PROJECT_OVERVIEW.md) 与 [评测指南](docs/guides/USER_BENCHMARK.md)。**没有测到的不写数字。**
+## Quick start / 快速开始 (Windows)
 
-## 快速开始（Windows）
+**Requirements:** Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 20+, and at least one model: a cloud API key (OpenAI-compatible, e.g. DeepSeek) and/or a local [Ollama](https://ollama.com) model. A Go toolchain is installed locally by the setup script; Python projects use a project-local environment.
 
 ```powershell
-# 终端 1：后端 API（只监听本机）
+# 1. One-time setup: Go toolchain into .tools, Python deps, build the Go runner
+.\scripts\setup-env.ps1
+.\scripts\build.ps1
+
+# 2. Terminal A — backend API (loopback only)
 .\.venv\Scripts\python.exe -m masa serve --port 8765
-# 终端 2：前端
-cd frontend; npm install; npm run dev      # http://127.0.0.1:5173
+
+# 3. Terminal B — frontend
+cd frontend; npm install; npm run dev        # http://127.0.0.1:5173
 ```
 
-先在 **设置 → 模型配置** 添加一个云端模型（或在 **本地运行时** 选 Ollama 模型），再在首页描述需求。需要 Go 或 Python 工具链：见 [Go 环境](docs/guides/USER_GO_ENVIRONMENT_AND_TESTING.md)、[新增一种语言](docs/guides/ADD_A_LANGUAGE.md)。Docker 部署见 [DEPLOY_DOCKER](docs/guides/DEPLOY_DOCKER.md)。
+1. Open **Settings → Models** and add a cloud model (and/or pick an Ollama model under **Local runtime**).
+2. On the home page, choose a language (Go or Python), describe the task, and start.
+3. Watch the flow strip, the streaming editor and the file tree. You can **add a hint, pause, resume or stop** from the input bar; input takes effect at node boundaries and never interrupts a paid call.
+4. Open the report for the verdict, evidence, cost per role and every model call (the inspector shows exactly what each call saw).
+
+> 先在“设置 → 模型配置”添加云端模型（或选择本地 Ollama 模型），再在首页选择语言并描述需求。底部输入框可追加提示、暂停、继续、停止，只在节点边界生效。
+
+### Command line / 命令行
+
+```powershell
+python -m masa lang list                       # available language packs
+python -m masa lang check python               # conformance check of a pack
+python -m masa run --repo <dir> --language go  # run verification on a project
+python -m masa status <run_id>                 # also: events, report, resume, cancel
+```
+
+### MCP server (independent verification for other agents)
+
+Expose the Gate as a tool so another agent (Claude Code, Cursor, …) can ask "is this really correct?" before declaring success.
+
+```powershell
+pip install "mcp>=1.2"
+python scripts/ops/mcp_server.py               # stdio
+```
+
+| Tool | Purpose |
+|---|---|
+| `verify_project(files, checks, language)` | Run allow-listed checks in an isolated workspace; return the Gate verdict with evidence |
+| `route_preview(role, history, …)` | Read-only preview of which model the router would pick, and why |
+| `get_run_report(run_id)` | Read a finished run's report |
+| `run_benchmark(...)` | Real evaluation; spends money, **refused unless** `MASA_MCP_ALLOW_BENCH=1` |
+
+Only relative source-file paths (size-limited) are accepted; no command strings are ever executed.
+
+### Docker (read-only showcase) / Docker 展示部署
 
 ```bash
-PYTHONPATH=src python -m pytest -q          # 后端（4 个既有 ERROR 是被误收集的 test_* 函数）
-cd frontend && npx vitest run && npm run build
+docker compose up --build -d      # http://localhost:8765, read-only demo mode by default
 ```
 
-## 文档
+No local model and no API keys are inside the image. Set `MASA_DEMO=0` and mount a state volume for full mode.
 
-[项目总览（先读）](docs/PROJECT_OVERVIEW.md) · [路线图与终点](docs/ROADMAP.md) · [使用工作台](docs/guides/USER_WORKBENCH.md) · [文档索引](docs/00_INDEX.md) · [简历描述](docs/RESUME_PROJECT_DESCRIPTION.md)
+### Tests
 
-## 做不到 / 没做的
+```powershell
+$env:PYTHONPATH="src"; python -m pytest -q     # backend (a few ERRORs are test_* helper functions collected by mistake)
+cd frontend; npx vitest run; npm run build     # frontend
+cd runner; go test ./...                       # Go runner
+```
 
-追加**需求**（需求版本化）只有设计；Gate 通过只代表所选检查通过，不等于业务一定正确；混合（本地起步）目前不一定比纯云端好；样本小，不是通过率。完整列表见 [PROJECT_OVERVIEW §7](docs/PROJECT_OVERVIEW.md)。
+## How a task flows / 任务流程
+
+```
+requirement
+   │  pre-check (rules; optional local review)
+   ▼
+Planner ──► spec + acceptance criteria        (strong model, once; deterministic gate checks the spec)
+Tester  ──► check plan + cases                (optional blind-derivation audit of expected values)
+   │  approved & FROZEN
+   ▼
+Generate files ──► per-file syntax check, import repair, in-place rewrite
+   ▼
+Verify in sandbox ──► Gate: real tests / static analysis / format, snapshot matches, tool ledger matches
+   ├─ pass ──► report with evidence
+   └─ fail ──► ownership analysis ─► Diagnoser (who is wrong: code or test?)
+                 ├─ code wrong ─► reopen ONLY the failing package (worker loop, writes limited to that package, tests frozen)
+                 └─ test wrong ─► revise tests in a new version (old versions are never overwritten)
+```
+
+## Architecture / 架构
+
+```
+ ┌──────────────── Frontend (React + TypeScript) ────────────────┐
+ │ workbench · streaming editor + diff · flow strip · inspector  │
+ └──────────────────────────────┬────────────────────────────────┘
+                                │ HTTP / SSE (loopback by default)
+ ┌──────────────────────────────▼────────────────────────────────┐
+ │ interfaces/   http server · CLI · MCP server                   │
+ ├────────────────────────────────────────────────────────────────┤
+ │ application/  coordinator (workflow graph) · routing · budget  │
+ │               planning · generation · v2 package workers       │
+ │               checks/ (deterministic) · review/ · call inspector│
+ ├────────────────────────────────────────────────────────────────┤
+ │ roles/        RoleSpec registry: roles as validated data       │
+ │ languages/    language packs: go · python (pluggable)          │
+ │ runtime/      engine + Gate · role runtime (exactly-once)      │
+ │               streaming · live output · user input             │
+ ├────────────────────────────────────────────────────────────────┤
+ │ infrastructure/  SQLite event ledger + content-addressed store │
+ │                  model providers · settings · process control  │
+ └──────────────────────────────┬────────────────────────────────┘
+                                │ allow-listed operations only
+                      ┌─────────▼─────────┐
+                      │ runner/ (Go)      │  isolated execution, size & time limits
+                      └───────────────────┘
+```
+
+### Key design decisions / 关键设计
+
+| Decision | How it works | Where |
+|---|---|---|
+| **The Gate, not the model, says "done"** | Verdict needs: required checks executed in the sandbox, code snapshot hash equal to the delivered artifact, tool-call ledger consistent, exit code 0. Model claims are never evidence. | `runtime/engine.py` |
+| **Exactly-once paid calls** | Intent, budget reservation and the "started" event are committed in one transaction *before* the request; idempotency key is (run, role, invocation id). After a crash a paid call is not replayed; a free local call may be retried. | `runtime/roles.py` |
+| **Pure-function routing** | `route(role, failure history, spend, budget, policy)` returns a model or a stop reason. Candidates are ordered by (level, priority); escalation is bounded; blocked candidates are recorded so every decision is explainable. | `application/orchestration/routing.py` |
+| **Two-phase budget** | Context, call count, time, cloud tokens and cost are checked at admission; cloud calls reserve "input + max output" first and settle after. | `application/orchestration/routing.py` |
+| **Tests first, then frozen** | Tests are approved before implementation and frozen; implementation workers cannot write test files. | `application/generation.py`, `application/v2/workers.py` |
+| **Local repair of one package** | After a failure only the packages named by the evidence are reopened; the worker keeps the best-checked state and returns "unchanged" if it cannot improve. | `application/v2/workers.py` |
+| **Roles as data** | Each role is a validated JSON (+ optional prompt file): permissions, output schema, validator. Adding a role needs no routing/UI code. | `roles/`, `src/masa/roles/specs/` |
+| **Language packs** | Everything language-specific (commands, failure parsing, layout, import repair, prompts) sits behind one interface; the core only talks to the pack. | `languages/` |
+| **Cache-friendly prompts** | Stable fields first, per-step fields last, to raise server-side prefix-cache hits. Only the serialization order changes; ledger identity hashes do not. | `domain/prompt_layout.py` |
+| **Streaming + human in the loop** | Partial JSON is parsed incrementally to show the file being written; user input is appended to the ledger and applied at node boundaries. | `runtime/streamfiles.py`, `runtime/user_input.py` |
+
+### Code map / 代码地图
+
+```
+src/masa/
+  interfaces/     cli.py · mcp_server.py · http/server.py
+  application/    console.py (orchestration entry) · planning.py · generation.py
+                  orchestration/  coordinator.py · routing.py · flow.py · workflows.py · attempts.py
+                  v2/workers.py   package worker loop (tools: read/write/edit/run_check/finish)
+                  checks/         deterministic checks: contract, leaks, ownership, referee, case audit …
+                  review/         source and test review
+                  call_inspector.py   "what did this call see?"
+  runtime/        engine.py (Gate) · roles.py (exactly-once) · tools.py · streamfiles.py · live.py · user_input.py
+  roles/          registry.py · jsonschema.py · specs/*.json + *.prompt.md
+  languages/      base.py · registry.py · conformance.py · go/ · python/
+  agents/         protocol.py (prompts, validators) · schemas.py · handoffs.py
+  infrastructure/ store.py (ledger + artifacts) · llm.py · providers.py · settings.py · workspaces.py
+  bench/          23-task benchmark, independent oracle, reports
+  tuning/         offline workflow tuner (search over data, not code)
+  intelligence/   code index search, memory, repair context
+runner/           Go program: allow-listed operations, sandboxed execution
+frontend/         React + TypeScript workbench
+scripts/          setup · eval/ (A/B and analysis tools) · ops/ · smoke/
+tests/            backend tests
+```
+
+## Evidence and honest status / 实测结果与诚实说明
+
+All numbers are small samples and indicate direction, not statistical significance.
+
+- **Benchmark:** 23 tasks in 10 levels with an independent oracle (hand-written reference implementations). The first run showed the system declared "pass" while the oracle disagreed on **17%** of tasks; after fixing 5 classes of defects, the cloud configuration passed **79–92%** of tasks with no false pass.
+- **Blind-derivation test audit:** asking a model "is this expected value right?" catches only **26–33%** of planted errors (it anchors on the claimed value), while deriving the answer blind and comparing catches **91%** (8% false alarms). In a small paired A/B the audit was better in 5 pairs, worse in 0, and cut cost per run by about **36%**.
+- **Prompt-cache layout:** server-reported cache hit rate rose from about **39% to 68%** in a 3-pair Go comparison.
+- **Experiments that did *not* pay off** (kept as opt-in switches, off by default): LLM "conductor" scheduling, best-of-N repair sampling, an experience library, tiered context budgeting, planner examples.
+- **Local models:** a 17.9 GB local model could not reliably act as a tool-using repair worker on a 16 GB GPU; today the local model is used for pre-checks and first drafts, and cloud Flash handles repair. The "local small model grinds, cloud model supervises" goal is the design direction; a local pass@k study is still to be done.
+
+## Limitations / 做不到或没做的
+
+- Languages: Go and Python only; tasks are small, well-specified modules (about 1–10 files), not large repositories.
+- A Gate pass means the selected checks passed; it does not prove business correctness.
+- If the tests themselves are wrong, repeated repairs are wasted; the audit and a "stuck → arbitrate" signal reduce this but do not eliminate it.
+- Bring-your-own-tests entry (human-written tests, frozen as-is) and requirement versioning are designed but not implemented.
+- Hybrid (local-first) mode is not yet proven cheaper or better than a cloud-only run.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
