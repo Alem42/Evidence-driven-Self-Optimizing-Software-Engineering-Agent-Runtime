@@ -1,15 +1,33 @@
 """提供商结构约束；业务校验仍由 domain 执行。 Provider schemas never replace domain validation."""
+import copy
+
+
+from masa.roles import registry
+from masa.languages.registry import registry as languages
 
 
 def response_schema(context):
     """约束 Planner 规格或澄清，保留业务校验。 Constrain specs or clarification without replacing validation."""
     string={'type':'string'}
     purpose=context.get('purpose')
+    pack=languages.for_run(context)  # 语言包决定文件类别、检查名与入口 / the language pack decides file kinds, check names and the entrypoint
+    # 数据驱动的角色（以及已迁入 JSON 的诊断、预检）：输出契约就在注册表里。 Data-driven roles (and the diagnoser / triage, now in JSON): the contract lives in the registry.
+    spec=registry.get(purpose)
+    if spec is not None and spec.output_schema is not None:
+        schema = copy.deepcopy(spec.output_schema)
+        allowed = context.get('allowed_tools')
+        if purpose == 'package_worker' and isinstance(allowed, list) and allowed and isinstance(schema.get('oneOf'), list):
+            # 工人这一步只允许这些工具：约束解码下弱模型不再有机会选 finish（真实运行里本地 glm 在第一步连续四次选 finish，两次尝试都如此）。
+            # This step allows only these tools: under constrained decoding a weak model can no longer pick finish (in real runs the local glm chose finish four times in a row at step 1, in two attempts).
+            kept = [o for o in schema['oneOf'] if (o.get('properties', {}).get('tool') or {}).get('const') in allowed]
+            if kept:
+                schema['oneOf'] = kept
+        return schema
     if purpose in {'project_repair','project_test_revision'}:
         # 在传输层就限制修复文件类别，Domain 再独立核对冻结边界。
         # Restrict repair paths in transport; Domain independently enforces frozen boundaries.
         tests=purpose=='project_test_revision'
-        paths=[p for p in context['original_files'] if p.endswith('.go') and p.endswith('_test.go')==tests]
+        paths=[p for p in context['original_files'] if pack.is_code(p) and pack.is_test(p)==tests]
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'minProperties':1,
                                      'properties':{p:string for p in paths}}}}
@@ -20,22 +38,6 @@ def response_schema(context):
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'required':[path],
                                      'properties':{path:string}}}}
-    if purpose=='project_diagnoser':
-        text={'type':'string','maxLength':2000}
-        short={'type':'string','maxLength':300}
-        # 属性顺序即生成顺序：先写“需求怎么说”，再写“测试期望什么”，最后才下结论，减少被测试带偏。
-        # Property order is generation order: first what the REQUIREMENT says, then what the test expects, the verdict last, so the test cannot anchor the answer.
-        check={'type':'object','additionalProperties':False,'required':['case','requirement_says','test_expects','matches'],
-               'properties':{'case':short,'requirement_says':short,'test_expects':short,'matches':{'type':'boolean'}}}
-        return {'type':'object','additionalProperties':False,
-                'required':['expectation_checks','owner','rationale','implementation_instructions','test_instructions'],
-                'properties':{'expectation_checks':{'type':'array','maxItems':8,'items':check},
-                              'owner':{'enum':['implementation','test','both','spec','unclear']},'rationale':text,
-                              'implementation_instructions':text,'test_instructions':text}}
-    if purpose=='project_triage':
-        short={'type':'array','maxItems':5,'items':{'type':'string','maxLength':400}}
-        return {'type':'object','additionalProperties':False,'required':['verdict','reasons','suggestions'],
-                'properties':{'verdict':{'enum':['ok','risky']},'reasons':short,'suggestions':short}}
     if purpose=='project_tester':
         case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
               'properties':{'name':{'type':'string','minLength':1},'input':string,
@@ -49,16 +51,20 @@ def response_schema(context):
         test={**check,'required':check['required']+['cases']}
         static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
         return {'type':'object','additionalProperties':False,'required':['checks'],
-                'properties':{'checks':{'type':'object','additionalProperties':False,'required':['go_test'],
-                    'properties':{'go_test':test,'go_vet':static,'go_fmt_check':static}}}}
+                'properties':{'checks':{'type':'object','additionalProperties':False,'required':[pack.op_id('test')],
+                    'properties':{pack.op_id(kind):(test if kind=='test' else static) for kind in ('test','static','format') if kind in pack.operations}}}}
     if purpose!='project_planner':
         return 'json'
     spec={'type':'object','additionalProperties':False,
             'required':['summary','module','entrypoint','files','acceptance'],
-            'properties':{'summary':string,'module':string,'entrypoint':{'type':'string','const':'cmd/app/main.go'},
-                'files':{'type':'array','minItems':3,'maxItems':20,'items':{'type':'object','additionalProperties':False,
+            'properties':{'summary':string,'module':string,'entrypoint':pack.entrypoint_schema(),
+                'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}
+    if context.get('examples_required'):
+        spec['required'] = spec['required'] + ['examples']
+        spec['properties']['examples'] = {'type':'array','minItems':3,'maxItems':8,'items':{'type':'object','additionalProperties':False,'required':['name','args','stdin','stdout','exit_code'],
+            'properties':{'name':string,'args':{'type':'array','maxItems':6,'items':string},'stdin':string,'stdout':string,'exit_code':{'type':'integer','minimum':0,'maximum':255}}}}
     if not context.get('clarification_allowed'):
         return spec
     option={'type':'object','additionalProperties':False,'required':['id','label'],

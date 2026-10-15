@@ -39,7 +39,7 @@ def _model_calls(store, run, events=None):
                     'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'), 'attempt_no': p.get('attempt_no'),
                     'status': 'abandoned', 'model': route.get('model') or '未知模型', 'provider': route.get('provider'),
                     'kind': 'local' if _is_local(route) else 'cloud', 'started': req['created'], 'finished': e['created'], 'duration_ms': None,
-                    'prompt_tokens': None, 'completion_tokens': None, 'total_tokens': None, 'tokens_per_second': None,
+                    'prompt_tokens': None, 'completion_tokens': None, 'total_tokens': None, 'cache_hit_tokens': None, 'cache_miss_tokens': None, 'tokens_per_second': None,
                     'error': '进程中断或请求丢失，已作为新尝试重试', 'reserved_tokens': _int(route.get('context_limit'))})
         elif e['type'] in ('model_completed', 'model_failed'):
             req, route = pending.pop(key, (None, {}))
@@ -51,6 +51,7 @@ def _model_calls(store, run, events=None):
                 duration = round((e['created'] - started) * 1000)
             prompt = _int(usage.get('prompt_tokens'))
             completion = _int(usage.get('completion_tokens'))
+            hit, miss = _int(usage.get('prompt_cache_hit_tokens')), _int(usage.get('prompt_cache_miss_tokens'))
             total = _int(usage.get('total_tokens'))
             if total is None and prompt is not None and completion is not None:
                 total = prompt + completion
@@ -61,6 +62,7 @@ def _model_calls(store, run, events=None):
                 'kind': 'local' if route and _is_local(route) else 'cloud' if route else 'unknown',
                 'started': started, 'finished': e['created'], 'duration_ms': duration,
                 'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': total,
+                'cache_hit_tokens': hit, 'cache_miss_tokens': miss,
                 'tokens_per_second': metrics.get('generation_tokens_per_second'),
                 'error': p.get('error') or p.get('reason') or (p.get('contract_diagnostic') and '响应不符合契约') or None,
                 # 上下文上限是单次调用 token 的上界：用量未知时按它预留，不当作 0。 Upper bound used when usage is unknown.
@@ -74,7 +76,7 @@ def _model_calls(store, run, events=None):
             'attempt_no': p.get('attempt_no'), 'status': 'pending', 'model': route.get('model') or '未知模型',
             'provider': route.get('provider'), 'kind': 'local' if _is_local(route) else 'cloud',
             'started': req['created'], 'finished': None, 'duration_ms': None, 'prompt_tokens': None,
-            'completion_tokens': None, 'total_tokens': None, 'tokens_per_second': None, 'error': None,
+            'completion_tokens': None, 'total_tokens': None, 'cache_hit_tokens': None, 'cache_miss_tokens': None, 'tokens_per_second': None, 'error': None,
             'reserved_tokens': _int(route.get('context_limit')),
         })
     return calls
@@ -137,7 +139,7 @@ def task_report(store, run_id):
     tools.sort(key=lambda t: t['started'] or 0)
 
     totals = {'calls': len(calls), 'failed_calls': 0, 'unknown_usage_calls': 0, 'prompt_tokens': 0, 'completion_tokens': 0,
-              'total_tokens': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'model_ms': 0}
+              'total_tokens': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'model_ms': 0, 'cache_hit_tokens': 0, 'cache_miss_tokens': 0, 'cache_hit_rate': None}
     by_model, by_step = {}, {}
     for c in calls:
         totals['failed_calls'] += c['status'] == 'failed'
@@ -148,6 +150,9 @@ def task_report(store, run_id):
         _add(totals, 'total_tokens', c['total_tokens'])
         _add(totals, 'local_tokens' if c['kind'] == 'local' else 'cloud_tokens', c['total_tokens'])
         _add(totals, 'model_ms', c['duration_ms'])
+        if c['cache_hit_tokens'] is not None and c['cache_miss_tokens'] is not None:  # 只统计服务端报告了缓存情况的调用 / only calls whose server reported cache data
+            _add(totals, 'cache_hit_tokens', c['cache_hit_tokens'])
+            _add(totals, 'cache_miss_tokens', c['cache_miss_tokens'])
         for table, key in ((by_model, (c['model'], c['kind'])), (by_step, (c['step_id'],))):
             row = table.setdefault(key, {'calls': 0, 'failed': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'model_ms': 0})
             row['calls'] += 1
@@ -155,6 +160,8 @@ def task_report(store, run_id):
             for k in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
                 _add(row, k, c[k])
             _add(row, 'model_ms', c['duration_ms'])
+    seen = totals['cache_hit_tokens'] + totals['cache_miss_tokens']
+    totals['cache_hit_rate'] = round(totals['cache_hit_tokens'] / seen, 4) if seen else None  # 没有任何缓存数据就是“未知”，不是 0 / no cache data at all is unknown, not 0
     models = [{'model': k[0], 'kind': k[1], **v} for k, v in by_model.items()]
     steps = [{'step_id': k[0], **v} for k, v in by_step.items()]
 
@@ -192,7 +199,7 @@ def task_report(store, run_id):
 # 修复过程里值得在报告里展示的事件：子图走过的节点、诊断、模型释放、轮数延长、无改动拒收、停止原因。
 # Events shown as the "process" of a task: workflow steps, diagnoses, model releases, extended rounds, rejected no-op fixes, stop reasons.
 _PROCESS_EVENTS = {'workflow_node', 'diagnosis', 'diagnosis_failed', 'models_released', 'rounds_extended', 'noop_revision', 'task_stopped', 'transport_retry',
-                   'rewrite_started', 'imports_fixed'}
+                   'rewrite_started', 'imports_fixed', 'conductor_decided', 'conductor_rejected', 'skeptic_verdict', 'skeptic_failed', 'code_review', 'code_review_skipped', 'best_of_n', 'best_of_n_skipped', 'case_audit', 'case_audit_failed', 'library_hit', 'context_plan', 'package_contract', 'package_contract_failed', 'assertion_referee'}
 
 
 def _process_data(event):
@@ -204,7 +211,7 @@ def _process_data(event):
 def _routing_section(report_calls, tools, totals, budget_events, decisions):
     """路由与预算：模式、限额、当前花费（含预留）、每次决策与升级链。没有 task_budget 事件的旧任务返回 None。
     Routing and budget view; legacy tasks without a task_budget event yield None."""
-    from masa.application.routing import spend_from_report
+    from masa.application.orchestration.routing import spend_from_report
     if not budget_events:
         return None
     latest = max(budget_events, key=lambda e: e['created'])['payload']

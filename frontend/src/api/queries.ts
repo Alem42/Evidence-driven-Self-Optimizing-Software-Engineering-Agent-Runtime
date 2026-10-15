@@ -2,7 +2,8 @@
 // Server state with adaptive polling; revisiting a task shows cached data instantly.
 import { useQuery, type Query } from '@tanstack/react-query';
 import { api } from './client';
-import type { Bootstrap, CheckResult, TaskReport, Detail, Job, ProjectSummary, ProjectView, Profiles, RepairAdvice } from './types';
+import type { BenchCatalog } from './bench-types';
+import type { Bootstrap, CallDetail, CallRow, CheckResult, TaskReport, Detail, InputBody, Job, LiveView, ProjectSummary, ProjectView, Profiles, RepairAdvice } from './types';
 
 export const qk = {
   bootstrap: ['bootstrap'] as const,
@@ -16,15 +17,26 @@ export const qk = {
   logs: (id: string) => ['logs', id] as const,
   ollama: ['ollama'] as const,
   report: (id: string) => ['report', id] as const,
+  live: (id: string) => ['live', id] as const,
+  calls: (id: string) => ['calls', id] as const,
 };
 
 const isLive = (d?: Detail): boolean => Boolean(d && (d.active || d.role_active));
+
+export const useBenchTasks = () =>
+  useQuery({ queryKey: ['bench', 'tasks'], queryFn: () => api<BenchCatalog>('/bench/tasks'), staleTime: Infinity });
 
 export const useBootstrap = () =>
   useQuery({ queryKey: qk.bootstrap, queryFn: () => api<Bootstrap>('/bootstrap'), refetchInterval: 2500 });
 
 export const useProjects = (hot: boolean) =>
   useQuery({ queryKey: qk.projects, queryFn: async () => (await api<{ projects: ProjectSummary[] }>('/projects')).projects, refetchInterval: hot ? 2000 : 6000 });
+
+import { applyRoles, type RoleInfo } from '../entities/roles';
+
+/** 角色清单（RoleSpec 注册表）；在 select 里把名字写进标签表，所以消费者渲染时标签已经就绪。 Role list; labels are applied in select so they are ready when consumers render. */
+export const useRoles = () =>
+  useQuery({ queryKey: ['roles'] as const, queryFn: () => api<{ roles: RoleInfo[] }>('/roles'), staleTime: Infinity, select: (d) => applyRoles(d.roles) });
 
 export const useProfiles = () => useQuery({ queryKey: qk.profiles, queryFn: () => api<Profiles>('/settings'), staleTime: 30_000 });
 
@@ -81,3 +93,36 @@ export const useReport = (runId?: string, live = false) =>
     enabled: Boolean(runId),
     refetchInterval: live ? 2000 : 10_000,
   });
+
+/** 此刻正在进行的模型调用，以及它正在写的文件（从没写完的 JSON 里解出）。只在执行中高频轮询。
+ *  The model call in flight and the file it is writing (decoded from unfinished JSON). Polled quickly only while live. */
+export const useLive = (runId?: string, active = false) =>
+  useQuery({
+    queryKey: qk.live(runId ?? ''),
+    queryFn: ({ signal }) => api<LiveView>('/runs/' + runId + '/live', undefined, signal),
+    enabled: Boolean(runId) && active,
+    refetchInterval: active ? 450 : false,
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+/** 整条版本链的每一次模型调用（追踪面板）。 Every model call along the version chain (trace panel). */
+export const useCalls = (runId: string | undefined, enabled: boolean, live: boolean) =>
+  useQuery({
+    queryKey: qk.calls(runId ?? ''),
+    queryFn: ({ signal }) => api<{ calls: CallRow[] }>('/runs/' + runId + '/calls', undefined, signal),
+    enabled: Boolean(runId) && enabled,
+    refetchInterval: live ? 2500 : false,
+  });
+
+/** 一次调用的检视：模型看到了什么。调用是不可变的，读到就不再过期。 What the model saw; calls are immutable once complete. */
+export const useCallDetail = (runId: string | undefined, step?: string, invocation?: string) =>
+  useQuery({
+    queryKey: ['call', runId ?? '', step ?? '', invocation ?? ''],
+    queryFn: ({ signal }) => api<CallDetail>('/runs/' + runId + '/calls/' + encodeURIComponent(step!) + '/' + encodeURIComponent(invocation!), undefined, signal),
+    enabled: Boolean(runId && step && invocation),
+    staleTime: 30_000,
+  });
+
+/** 向正在运行的任务发一条输入：追加提示，或暂停/继续/停止。 Send one input to the running task. */
+export const sendInput = (runId: string, body: InputBody) => api<{ ok: boolean; applies?: string }>('/runs/' + runId + '/input', body);

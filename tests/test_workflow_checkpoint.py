@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from masa.application.workflow import WorkflowCheckpoint
+from masa.application.orchestration.workflow import WorkflowCheckpoint
 from masa.infrastructure.jobs import Jobs
 
 

@@ -1,17 +1,19 @@
 """Loopback-only HTTP transport. No shell endpoints or arbitrary file serving."""
 
 import json
+import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
 import sqlite3
 import socket
 import os
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from masa.domain.models import MasaError
 from masa.application.console import Console
 from masa.infrastructure.locking import owner_lock
+from masa.infrastructure import capability
 
 
 # 前端独立部署（Vite dev/preview 或任意静态服务器），后端只提供 API；默认放行本机 Vite 端口。
@@ -30,9 +32,22 @@ class LocalHTTPServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
+# 演示模式（只读）下允许的 GET 前缀和 POST 路径。其余一律拒绝：特别是会用到 API 密钥的 /api/accounts、会动本地模型的 /api/ollama、读硬件的 /api/hardware。
+# Prefixes (GET) and paths (POST) allowed in demo (read-only) mode; everything else is refused, notably /api/accounts (uses the API key), /api/ollama and /api/hardware.
+DEMO_GET = ('/api/session', '/api/bootstrap', '/api/languages', '/api/projects', '/api/runs', '/api/jobs', '/api/settings', '/api/routing', '/api/roles',
+            '/api/workflows', '/api/bench/tasks', '/api/bench/status', '/api/bench/results')
+DEMO_POST = ('/api/triage',)  # 确定性规则预检，不调用任何模型 / deterministic pre-check, calls no model
+DEMO_MESSAGE = '演示模式（只读）：这个部署只用于展示，不能发起或修改任务。 This deployment is a read-only demo.'
+
+
+def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1', hosts=(), static_dir=None, demo=False):
     token = secrets.token_urlsafe(32)
     allowed_origins = frozenset(o.rstrip("/") for o in origins)
+    # 部署时额外允许的 Host（带不带端口都写）。默认只有本机回环，用来防 DNS rebinding。
+    # Extra Host values allowed when deployed (with or without a port); by default only loopback, which defends against DNS rebinding.
+    extra_hosts = frozenset(h.strip().lower() for h in hosts if h and h.strip())
+    static_root = Path(static_dir).resolve() if static_dir else None
+    console.demo = bool(demo)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MASA"
@@ -64,10 +79,13 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
         def check_access(self, api=False):
             host = self.headers.get("Host", "")
             allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
-            if host not in allowed:
+            if host not in allowed and host.lower() not in extra_hosts:
                 return False
             origin = self.headers.get("Origin")
-            if origin and origin != f"http://{host}" and origin not in allowed_origins:
+            # 同源（含部署在 TLS 反向代理之后的 https 同源）总是允许；其它来源必须在白名单里。
+            # Same origin (including https behind a TLS proxy) is always allowed; any other origin must be allow-listed.
+            same_origin = {f"http://{host}", f"https://{host}"} if host.lower() in extra_hosts else {f"http://{host}"}
+            if origin and origin not in same_origin and origin not in allowed_origins:
                 return False
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 return False
@@ -88,6 +106,35 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        def serve_static(self, path):
+            """同源托管构建好的前端：路径限制在目录内；没有扩展名的未知路径回退到 index.html（单页应用的前端路由）。
+            Serve the built frontend from the same origin: paths stay inside the directory; unknown paths without an extension fall back to index.html (SPA routing)."""
+            relative = unquote(path).lstrip("/")
+            target = (static_root / relative).resolve() if relative else static_root / "index.html"
+            if target.is_dir():
+                target = target / "index.html"
+            inside = target == static_root or static_root in target.parents
+            if not inside or not target.is_file():
+                if inside and "." not in Path(relative).name:
+                    target = static_root / "index.html"
+                else:
+                    self.send(404, {"error": "not found"})
+                    return
+            raw = target.read_bytes()
+            kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", kind + ("; charset=utf-8" if target.suffix in (".html", ".js", ".css", ".svg", ".json") else ""))
+            self.send_header("Content-Length", str(len(raw)))
+            # 带哈希的资源可以长期缓存；index.html 不缓存，这样发布新版本后立刻生效。
+            # Hashed assets are cacheable for a year; index.html is not, so a new release takes effect at once.
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable" if "assets" in target.parts else "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            self.end_headers()
+            self.wfile.write(raw)
+
         def do_GET(self):
             self.dispatch(False)
 
@@ -99,11 +146,23 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
             if not self.check_access(path.startswith("/api/") and path != "/api/session"):
                 self.send(403, {"error": "local session access denied"})
                 return
+            if not write and static_root is not None and not path.startswith("/api/"):
+                self.serve_static(path)
+                return
+            if demo and not (path.startswith(DEMO_GET) if not write else path in DEMO_POST):
+                self.send(403, {"error": DEMO_MESSAGE})
+                return
+            if (path == '/api/ollama' or path.startswith('/api/ollama/')) and not capability.local_allowed():
+                self.send(403, {"error": 'local models are disabled on this host: ' + capability.STATE['reason']})
+                return
             try:
                 if path == "/api/session" and not write:
                     # 令牌只发给白名单来源的前端页面，其他来源即使 Host 正确也拿不到。
                     # Only allow-listed frontend origins can obtain the session token.
-                    if self.headers.get("Origin") not in allowed_origins:
+                    origin = self.headers.get("Origin")
+                    # 同源页面的 GET 请求浏览器不会带 Origin，但会带 Sec-Fetch-Site: same-origin（页面脚本无法伪造这个头）。
+                    # A same-origin GET carries no Origin, but the browser adds Sec-Fetch-Site: same-origin, which page scripts cannot forge.
+                    if origin not in allowed_origins and not (origin is None and static_root is not None and self.headers.get("Sec-Fetch-Site") == "same-origin"):
                         self.send(403, {"error": "origin not allowed"})
                         return
                     self.send(200, {"token": token, "version": "api-v1"})
@@ -132,6 +191,16 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     result = console.settings.save(body) if write else console.settings.public()
                 elif path == '/api/triage' and write:
                     result = console.triage(body)
+                elif path == '/api/estimate' and write:
+                    result = console.estimate(body)
+                elif path == '/api/languages':
+                    result = console.save_languages(body) if write else console.languages()
+                elif len(parts) == 4 and parts[:2] == ['api', 'languages'] and parts[3] == 'env':
+                    result = console.project_env_action(parts[2], body) if write else console.project_env(parts[2])
+                elif len(parts) == 4 and parts[:2] == ['api', 'languages'] and parts[3] == 'packages' and write:
+                    result = console.project_env_install(parts[2], body)
+                elif path == '/api/pick-file' and write:
+                    result = console.pick_file(body)
                 elif path == '/api/routing':
                     result = console.settings.save_routing(body) if write else console.settings.routing()
                 elif path == '/api/settings/order' and write:
@@ -160,8 +229,13 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                     from masa.infrastructure import orphans
                     result = orphans.clean_orphans()
                 elif path == '/api/workflows/fix-v1' and not write:
-                    from masa.application.workflows import FIX_V1
+                    from masa.application.orchestration.workflows import FIX_V1
                     result = FIX_V1
+                elif path == '/api/roles' and not write:
+                    # 角色清单来自 RoleSpec 注册表（只读，不含提示词全文）：前端的阶段标签与顺序据此显示。
+                    # The role list from the RoleSpec registry (read-only, never the prompts): the UI derives stage labels and order from it.
+                    from masa.roles import registry
+                    result = {'roles': registry.current().public()}
                 elif path == '/api/bench/tasks' and not write:
                     result = console.bench_tasks()
                 elif path == '/api/bench/status' and not write:
@@ -198,6 +272,12 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                         result = {"artifact": console.artifact(rid, parts[4])}
                     elif len(parts) == 4 and parts[3] == "report" and not write:
                         result = {"markdown": console.report(rid)}
+                    elif len(parts) == 4 and parts[3] == 'live' and not write:
+                        result = console.live_view(rid)
+                    elif len(parts) == 4 and parts[3] == 'calls' and not write:
+                        result = console.call_list(rid)
+                    elif len(parts) == 6 and parts[3] == 'calls' and not write:
+                        result = console.call_detail(rid, unquote(parts[4]), unquote(parts[5]))
                     elif len(parts) == 4 and parts[3] == 'results' and not write:
                         result = console.results(rid)
                     elif len(parts) == 4 and parts[3] == 'logs' and not write:
@@ -208,6 +288,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                             result = console.resume(rid, body.get('pause_after'))
                         elif action == 'auto-fix':
                             result = console.auto_fix(rid, body)
+                        elif action == 'input':
+                            result = console.user_input(rid, body)
                         elif action == 'rerun':
                             result = console.rerun(rid)
                         elif action == 'approve-project':
@@ -259,10 +341,10 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS):
                 request_id = console.diagnostics.record(('POST' if write else 'GET')+' /api/'+group, exc)
                 self.send(500, {"error": "后台处理失败，请在本地模型控制的后台诊断中查看。", "request_id": request_id})
 
-    return LocalHTTPServer(("127.0.0.1", port), Handler)
+    return LocalHTTPServer((bind, port), Handler)
 
 
-def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS):
+def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS, *, bind="127.0.0.1", hosts=(), static_dir=None, demo=False):
     """先取得状态目录独占权再恢复任务，失败启动也释放资源。 Own state before recovery and clean up failed starts."""
     if not 0 <= port <= 65535:
         raise MasaError("port must be 0..65535")
@@ -271,13 +353,19 @@ def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS):
     # 独立锁不与 Runtime 的短期工具锁混用，所有端口共享同一目录独占权。
     # A separate lifetime lock leaves Runtime tool locks free and covers every port.
     with owner_lock(Path(state_dir).resolve() / "console.lock"):
+        state = capability.configure(demo=demo)
+        print("local models: " + ("enabled" if state["allowed"] else "DISABLED") + f" ({state['reason']}; GPU {state['vram_gb']} GB, RAM {state['ram_gb']} GB)")
         console = Console(state_dir, runner, go, project)
         server = None
         try:
-            server = make_server(console, port, origins)
-            url = f"http://127.0.0.1:{server.server_port}"
+            server = make_server(console, port, origins, bind=bind, hosts=hosts, static_dir=static_dir, demo=demo)
+            url = f"http://{bind}:{server.server_port}"
             print(f"MASA API: {url}\nAllowed frontend origins: {', '.join(sorted(origins))}", flush=True)
-            print("Local-only. Start the frontend separately: cd frontend && npm run dev. Ctrl+C stops the API and cancels its active run.", flush=True)
+            if bind in ("127.0.0.1", "localhost", "::1"):
+                print("Local-only. Start the frontend separately: cd frontend && npm run dev. Ctrl+C stops the API and cancels its active run.", flush=True)
+            else:
+                mode = "READ-ONLY demo" if demo else "FULL ACCESS: put an authenticated proxy in front"
+                print(f"Listening on {bind} (deployment). Allowed hosts: {', '.join(sorted(hosts)) or '(loopback only)'}; static frontend: {static_dir or 'none'}; {mode}.", flush=True)
             server.serve_forever(poll_interval=0.2)
         except KeyboardInterrupt:
             pass

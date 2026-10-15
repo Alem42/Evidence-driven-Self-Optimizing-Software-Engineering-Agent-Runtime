@@ -1,0 +1,113 @@
+{
+ "application/checks/__init__.py": {
+  "gofmt": 1
+ },
+ "application/checks/contract.py": {
+  "go_word": 2
+ },
+ "application/checks/triage.py": {
+  "go_file": 1,
+  "go_template": 1,
+  "go_word": 1
+ },
+ "application/console.py": {
+  "go_file": 2,
+  "op_ids": 1,
+  "pack_import": 1
+ },
+ "application/generation.py": {
+  "go_file": 4,
+  "go_mod": 3,
+  "go_word": 4,
+  "gofmt": 2
+ },
+ "application/orchestration/coordinator.py": {
+  "go_file": 2,
+  "go_mod": 1
+ },
+ "application/orchestration/flow.py": {
+  "go_template": 1
+ },
+ "application/orchestration/workflows.py": {
+  "gofmt": 2
+ },
+ "application/reports.py": {
+  "go_word": 3
+ },
+ "application/review/source_review.py": {
+  "go_word": 1
+ },
+ "bench/oracle.py": {
+  "go_env": 1
+ },
+ "bench/tasks.py": {
+  "go_word": 3
+ },
+ "domain/models.py": {
+  "op_ids": 1
+ },
+ "domain/proposals.py": {
+  "go_word": 2
+ },
+ "infrastructure/runner.py": {
+  "go_env": 5,
+  "go_word": 1
+ },
+ "infrastructure/workspaces.py": {
+  "go_mod": 1
+ },
+ "intelligence/library.py": {
+  "go_file": 1
+ },
+ "intelligence/repair_context.py": {
+  "go_file": 1,
+  "pack_import": 1
+ },
+ "interfaces/cli.py": {
+  "go_file": 5,
+  "go_word": 4,
+  "pack_import": 1
+ },
+ "interfaces/mcp_server.py": {
+  "go_word": 1,
+  "gofmt": 1
+ },
+ "roles/specs/assertion_referee.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/code_generation.prompt.md": {
+  "go_word": 1,
+  "gofmt": 1
+ },
+ "roles/specs/code_reviewer.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/package_contract.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_conductor.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_diagnoser.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/project_triage.json": {
+  "go_word": 1
+ },
+ "roles/specs/project_triage.prompt.md": {
+  "go_file": 1,
+  "go_template": 1,
+  "go_word": 1
+ },
+ "roles/specs/test_skeptic.prompt.md": {
+  "go_word": 1
+ },
+ "roles/specs/workflow_tuner.prompt.md": {
+  "go_word": 1
+ },
+ "runtime/engine.py": {
+  "go_file": 1,
+  "gofmt": 1,
+  "pack_import": 1
+ }
+}

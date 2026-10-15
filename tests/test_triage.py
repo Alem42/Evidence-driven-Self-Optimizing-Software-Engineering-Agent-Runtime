@@ -6,10 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from masa.application.console import Console
-from masa.application.coordinator import WorkflowCoordinator
-from masa.application.router import Router
-from masa.application.routing import DEFAULT_POLICY, validate_policy
-from masa.application.triage import INFEASIBLE, OK, RISKY, assess
+from masa.application.orchestration.coordinator import WorkflowCoordinator
+from masa.application.orchestration.router import Router
+from masa.application.orchestration.routing import DEFAULT_POLICY, validate_policy
+from masa.application.checks.triage import INFEASIBLE, OK, RISKY, assess
 from masa.domain.models import MasaError
 from masa.domain.proposals import validate_triage
 from masa.infrastructure.jobs import Jobs
@@ -41,6 +41,18 @@ class RuleTests(unittest.TestCase):
                     self.assertEqual(result['verdict'], INFEASIBLE)
                     self.assertIn(rule, rules(goal))
                     self.assertTrue(all(f['suggestion'] for f in result['findings']))  # 每条都有可操作的改写建议
+
+    def test_a_word_that_merely_starts_with_library_or_package_is_not_a_library_request(self):
+        # 真实运行：“写一个库存管理命令行程序”被判成“要的是库”而整个任务被拦截；“写一个包含三个命令的程序”也一样。
+        # Real run: "write an inventory-management CLI" (库存 starts with 库) was judged "wants a library" and the whole task was blocked; "a program that contains three commands" (包含) too.
+        from masa.languages.registry import registry
+        pack = registry.get('python')
+        for goal in ('写一个库存管理命令行程序，按行读取命令', '写一个包含三个命令的命令行程序', '实现一个模块化的命令行记账程序'):
+            with self.subTest(goal=goal):
+                self.assertEqual(assess(goal, pack)['verdict'], OK, assess(goal, pack)['findings'])
+        for goal in ('写一个库，提供加法', '写一个 Python 库来解析 CSV', '实现一个模块，提供排序'):
+            with self.subTest(goal=goal):
+                self.assertEqual(assess(goal, pack)['verdict'], INFEASIBLE)
 
     def test_negations_cancel_a_hit(self):
         for goal in ('只用 Go 标准库，无第三方依赖，写一个整数求和命令行', '不使用 gin 或 cobra，纯标准库实现 CLI',
@@ -92,6 +104,35 @@ class Provider:
                 raise self.triage_error
             return self.triage or {'verdict': 'ok', 'reasons': [], 'suggestions': []}
         return {'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+
+
+class FrozenProvider(Provider):
+    """带真实配置快照的假提供商：测试里的普通假提供商没有 snapshot，所以冻结检查从来没被触发过。 A fake with a real configuration snapshot: plain fakes have none, so the freeze check was never exercised."""
+    def __init__(self, name, kind, error=None):
+        super().__init__(name, kind, triage_error=error)
+        self.snapshot = {'version': 1, 'model': name, 'config': {'model_type': kind}}
+
+
+class TriageFreezeTests(unittest.TestCase):
+    def test_a_dead_local_review_does_not_stop_a_cloud_planner_in_the_same_run(self):
+        # 真实事故：本地复核无响应 → 规划者换云端 → “task model configuration changed”。 The real incident: local review got no response, then a cloud planner was refused.
+        from masa.application.planning import ProjectPlanning
+        from test_project_plan import PlannerProvider
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            try:
+                local = FrozenProvider('small', 'local', error=MasaError('transport failure: no response received'))
+                cloud = FrozenProvider('big', 'cloud')
+                cloud.respond = PlannerProvider().respond
+                rid = ProjectPlanning(store, FakeExecutor()).generate(cloud, 'Build CLI', triage_provider=local)
+                plan = store.run(rid)['data']['project_plan']
+                self.assertEqual(plan['triage']['model']['verdict'], 'skipped')
+                self.assertNotEqual(plan['status'], 'failed', plan.get('error'))
+                self.assertIn('spec_ref', plan)
+                data = store.run(rid)['data']
+                self.assertNotEqual(data.get('triage_snapshot_ref'), data.get('model_snapshot_ref'))  # 各冻结各的 / each froze its own
+            finally:
+                store.close()
 
 
 class IntegrationTests(unittest.TestCase):

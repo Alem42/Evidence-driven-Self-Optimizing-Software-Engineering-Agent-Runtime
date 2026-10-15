@@ -1,0 +1,467 @@
+"""Python 语言包：确定性检查、规格校验、失败解析，以及用脚本化模型 + 真实运行器的端到端流程（零 token）。
+The Python language pack: deterministic checks, spec validation, failure parsing, and an end-to-end run with scripted models and the real runner (zero tokens).
+"""
+import copy
+import tempfile
+import unittest
+from pathlib import Path
+
+from masa.agents.protocol import validate_response
+from masa.application.generation import ProjectGeneration
+from masa.application.planning import ProjectPlanning
+from masa.domain.models import MasaError
+from masa.domain.proposals import validate_checks, validate_files, validate_spec
+from masa.infrastructure.runner import Runner
+from masa.infrastructure.store import Store
+from masa.languages.python import checks, failures
+from masa.languages.registry import registry
+from masa.runtime.engine import Runtime
+
+ROOT = Path(__file__).resolve().parents[1]
+RUNNER = ROOT / '.tools/bin/masa-runner.exe'
+NL = chr(10)
+
+APP = NL.join(['"""求和。 Sum."""', '', '', 'def total(text):', '    return sum(int(item) for item in text.split())', '', '',
+               'def run(args, stdin, stdout, stderr):', '    print(total(stdin.read()), file=stdout)', '    return 0', ''])
+MAIN = NL.join(['import sys', '', 'from calc.app import run', '', 'sys.exit(run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr))', ''])
+TEST = NL.join(['import io', 'import unittest', '', 'from calc.app import run, total', '', '',
+                'class AppTests(unittest.TestCase):', '    def test_total(self):', '        self.assertEqual(total("1 2 3"), 6)', '',
+                '    def test_run(self):', '        out = io.StringIO()', '        self.assertEqual(run([], io.StringIO("5 5"), out, io.StringIO()), 0)',
+                '        self.assertEqual(out.getvalue(), "10" + chr(10))', ''])
+SPEC = {'summary': 'sum integers from stdin', 'module': 'calc', 'entrypoint': 'calc/__main__.py',
+        'files': [{'path': 'pyproject.toml', 'purpose': 'metadata'}, {'path': 'calc/__init__.py', 'purpose': 'package'},
+                  {'path': 'calc/__main__.py', 'purpose': 'thin entry that calls run'}, {'path': 'calc/app.py', 'purpose': 'sum and run'},
+                  {'path': 'tests/test_app.py', 'purpose': 'tests'}],
+        'acceptance': ['prints the sum of the integers on stdin followed by a newline']}
+CHECKS = [{'operation': 'py_test', 'purpose': 'behaviour', 'acceptance_indices': [0],
+           'cases': [{'name': 'sum', 'input': '1 2 3', 'expected': 'stdout 6 and newline, exit code 0', 'level': 'cli'}]},
+          {'operation': 'py_static', 'purpose': 'syntax', 'acceptance_indices': [0]}]
+pack = registry.get('python')
+FILES = {**pack.seed_files(SPEC), 'calc/__init__.py': '', 'calc/__main__.py': MAIN, 'calc/app.py': APP, 'tests/test_app.py': TEST}
+
+
+class FakeModel:
+    profile = {'provider': 'test', 'model': 'fake'}
+    usage = {'total_tokens': 10}
+
+    def __init__(self, files=None):
+        self.files = files or FILES
+        self.contexts = []
+
+    def respond(self, context):
+        self.contexts.append(copy.deepcopy(context))
+        if context['purpose'] == 'project_planner':
+            return copy.deepcopy(SPEC)
+        if context['purpose'] == 'project_tester':
+            return copy.deepcopy(CHECKS)
+        return validate_response(context, {'files': {context['target_path']: self.files[context['target_path']]}}, '')
+
+
+class LocalFake(FakeModel):
+    config = {'model_type': 'local', 'protocol': 'ollama'}
+    snapshot = {'version': 1, 'mode': 'fixed', 'profile_id': 'local', 'config': config}
+
+
+class ChecksTests(unittest.TestCase):
+    def test_syntax_errors_carry_line_and_column(self):
+        found = checks.parse_errors({'a.py': 'def f(:' + NL}, ['a.py'])
+        self.assertRegex(found['a.py'], r'a\.py:1:\d+: SyntaxError')
+        self.assertEqual(checks.parse_errors({'a.py': 'x = 1' + NL}, ['a.py']), {})
+
+    def test_unused_imports_are_removed_and_missing_standard_modules_added(self):
+        source = 'import os' + NL + 'from collections import OrderedDict, Counter' + NL + NL + 'def f(a):' + NL + '    return sys.argv, Counter(a)' + NL
+        fixed, changes = checks.fix_imports(source)
+        self.assertNotIn('import os', fixed)
+        self.assertIn('from collections import Counter', fixed)
+        self.assertNotIn('OrderedDict', fixed)
+        self.assertIn('import sys', fixed)
+        self.assertEqual(sorted(changes), [('add', 'sys'), ('remove', 'OrderedDict'), ('remove', 'os')])
+        self.assertEqual(checks.fix_imports(fixed)[1], [])  # 幂等 / idempotent
+
+    def test_imports_of_modules_the_spec_lacks_and_third_party_packages_are_reported(self):
+        planned = [f['path'] for f in SPEC['files']]
+        files = {'calc/app.py': 'from calc.ghost import x' + NL + 'import requests' + NL, 'calc/__main__.py': MAIN, 'tests/test_app.py': TEST}
+        found = checks.unknown_import_messages(files, list(files), 'calc', planned)
+        self.assertEqual(list(found), ['calc/app.py'])
+        self.assertIn('calc.ghost', found['calc/app.py'])
+        self.assertIn('calc.app', found['calc/app.py'])  # 列出真正能导入的模块 / lists what can really be imported
+        self.assertIn('third-party package requests', found['calc/app.py'])
+        self.assertEqual(checks.unknown_import_messages({'calc/app.py': 'from . import app' + NL, 'calc/__init__.py': ''}, ['calc/app.py'], 'calc', planned), {})
+
+    def test_importing_a_name_the_module_does_not_define_is_caught_in_both_directions(self):
+        # 真实运行里的“假通过”：__main__ 从包的 __init__ 导入 run，但 run 定义在 app/app.py。 The real false pass: __main__ imports run from a package __init__, but run lives in app/app.py.
+        files = {'calc/__main__.py': 'from calc.app import run' + NL, 'calc/app/__init__.py': '', 'calc/app/app.py': 'def run(args, stdin, stdout, stderr):' + NL + '    return 0' + NL}
+        found = checks.name_import_problems(files, ['calc/__main__.py'], 'calc')
+        self.assertIn("imports 'run' from 'calc.app'", found['calc/__main__.py'])
+        self.assertIn('calc.app.app', found['calc/__main__.py'])  # 指出它真正定义在哪 / says where it really is
+        fixed = {**files, 'calc/__main__.py': 'from calc.app.app import run' + NL}
+        self.assertEqual(checks.name_import_problems(fixed, ['calc/__main__.py', 'calc/app/app.py'], 'calc'), {})
+        # 反方向：刚写完的 app/app.py 没有定义别人导入的名字 / the other way: the file just written lacks a name others import
+        lacking = {**fixed, 'calc/app/app.py': 'def other():' + NL + '    return 1' + NL}
+        again = checks.name_import_problems(lacking, ['calc/app/app.py'], 'calc')
+        self.assertIn('calc/__main__.py imports', again['calc/app/app.py'])
+
+    def test_a_file_that_imports_itself_is_caught(self):
+        # 真实运行（FizzBuzz）：app.py 第一行 `from fizzbuzzcli.app.app import run`，整个测试模块因此无法导入。 The real FizzBuzz run: line 1 of app.py imported from itself, so the whole test module failed to import.
+        planned = ['pyproject.toml', 'calc/__init__.py', 'calc/app/__init__.py', 'calc/app/app.py', 'calc/__main__.py', 'tests/test_app.py']
+        files = {'calc/app/app.py': 'from calc.app.app import run' + NL + NL + 'def run(a, i, o, e):' + NL + '    return 0' + NL}
+        found = checks.unknown_import_messages(files, ['calc/app/app.py'], 'calc', planned)
+        self.assertIn('imports itself', found['calc/app/app.py'])
+        self.assertIn('circular import', found['calc/app/app.py'])
+
+    def test_empty_cases_arrays_are_dropped_from_a_check_plan_instead_of_rejecting_the_answer(self):
+        from masa.agents.protocol import validate_response
+        context = {'purpose': 'project_tester', 'spec': SPEC, 'language': 'python'}
+        plan = [{**CHECKS[0]}, {**CHECKS[1], 'cases': []}]
+        self.assertEqual(len(validate_response(context, {'checks': plan}, '')), 2)
+        self.assertNotIn('cases', validate_response(context, {'checks': plan}, '')[1])
+
+    def test_an_entry_that_reads_input_itself_is_refused(self):
+        bad = 'import sys' + NL + 'for line in sys.stdin:' + NL + '    print(line)' + NL
+        self.assertIn('for ... in sys.stdin', checks.entry_problem_messages({'calc/__main__.py': bad}, ['calc/__main__.py'], 'calc/__main__.py')['calc/__main__.py'])
+        self.assertEqual(checks.entry_problem_messages({'calc/__main__.py': MAIN}, ['calc/__main__.py'], 'calc/__main__.py'), {})  # 只把 sys.stdin 传下去是允许的 / passing sys.stdin on is fine
+
+    def test_tests_that_can_never_fail_are_refused(self):
+        vacuous = 'import unittest' + NL + 'class T(unittest.TestCase):' + NL + '    def test_a(self):' + NL + '        self.assertTrue(True)' + NL
+        self.assertTrue(checks.test_problems(vacuous))
+        self.assertTrue(checks.test_problems('x = 1' + NL))
+        self.assertTrue(checks.test_problems('import unittest' + NL + 'class T(unittest.TestCase):' + NL + '    @unittest.skip("x")' + NL + '    def test_a(self):' + NL + '        self.assertEqual(1, 2)' + NL))
+        self.assertEqual(checks.test_problems(TEST), [])
+
+    def test_outline_declares_and_test_function_source(self):
+        outline = checks.outline(APP)
+        self.assertIn('def total(text): ...', outline)
+        self.assertIn('def run(args, stdin, stdout, stderr): ...', outline)
+        self.assertNotIn('sum(', outline)  # 函数体被去掉 / bodies are removed
+        self.assertTrue(checks.declares(APP, 'run') and not checks.declares(APP, 'missing'))
+        source = checks.test_function_source({'tests/test_app.py': TEST}, 'test_app.py', 9)
+        self.assertIn('def test_total', source)
+        self.assertNotIn('def test_run', source)
+
+
+class SpecTests(unittest.TestCase):
+    def test_a_valid_spec_and_files_pass(self):
+        validate_spec(SPEC, 'python')
+        validate_checks(CHECKS, SPEC, language='python')
+        validate_files(FILES, SPEC, 'python')
+
+    def test_go_checks_are_not_accepted_for_python(self):
+        with self.assertRaisesRegex(MasaError, 'unauthorized'):
+            validate_checks([{**CHECKS[0], 'operation': 'go_test'}], SPEC, language='python')
+
+    def test_layout_rules(self):
+        def broken(**change):
+            spec = copy.deepcopy(SPEC)
+            spec.update(change)
+            return spec
+        extra = SPEC['files'] + [{'path': 'helper.py', 'purpose': 'x'}]
+        for spec, message in ((broken(files=extra), 'subdirectories'),
+                              (broken(files=[f for f in SPEC['files'] if f['path'] != 'calc/__init__.py']), '__init__'),
+                              (broken(module='Calc'), 'module name'),
+                              (broken(entrypoint='main.py'), 'entrypoint must be calc/__main__.py')):
+            with self.subTest(message=message), self.assertRaisesRegex(MasaError, message):
+                validate_spec(spec, 'python')
+        with self.assertRaisesRegex(MasaError, 'pyproject.toml'):
+            validate_files({**FILES, 'pyproject.toml': '[project]' + NL + 'name = "other"' + NL}, SPEC, 'python')
+        with self.assertRaisesRegex(MasaError, 'third-party'):
+            validate_files({**FILES, 'calc/app.py': 'import numpy' + NL + APP}, SPEC, 'python')
+
+    def test_the_pack_describes_itself_and_its_operations(self):
+        self.assertEqual(pack.op_id('test'), 'py_test')
+        self.assertEqual(pack.kind_of('py_static'), 'static')
+        self.assertIsNone(pack.op_id('format'))
+        self.assertFalse(pack.supports('index'))
+        self.assertTrue(pack.is_test('tests/test_app.py') and pack.is_source('calc/app.py') and not pack.is_source('tests/test_app.py'))
+        self.assertEqual(pack.entrypoint(SPEC), 'calc/__main__.py')
+
+
+UNITTEST_OUTPUT = '''test_boom (test_app.AppTests.test_boom) ... ERROR
+test_wrong (test_app.AppTests.test_wrong) ... FAIL
+
+======================================================================
+ERROR: test_boom (test_app.AppTests.test_boom)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:/work/workspaces/0123456789abcdef0123456789abcdef/tests/test_app.py", line 20, in test_boom
+    total("x")
+  File "C:/work/workspaces/0123456789abcdef0123456789abcdef/calc/app.py", line 2, in total
+    return sum(int(x) for x in text.split())
+ValueError: invalid literal for int() with base 10: 'x'
+
+======================================================================
+FAIL: test_wrong (test_app.AppTests.test_wrong)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:/work/workspaces/0123456789abcdef0123456789abcdef/tests/test_app.py", line 12, in test_wrong
+    self.assertEqual(total("1 2"), 4)
+AssertionError: 3 != 4
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+'''
+IMPORT_FAILURE = '''======================================================================
+ERROR: test_app (unittest.loader._FailedTest.test_app)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_app
+Traceback (most recent call last):
+  File "C:/Python312/Lib/unittest/loader.py", line 396, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "C:/work/workspaces/0123456789abcdef0123456789abcdef/tests/test_app.py", line 4, in <module>
+    from calc.app import missing
+ImportError: cannot import name 'missing' from 'calc.app' (C:/work/workspaces/0123456789abcdef0123456789abcdef/calc/app.py)
+'''
+PYTEST_OUTPUT = '''============================= FAILURES =============================
+_____________________________ test_total ______________________________
+tests/test_app.py:5: in test_total
+    assert total("1 2") == 4
+E   assert 3 == 4
+E    +  where 3 = total('1 2')
+'''
+
+
+class FailureParsingTests(unittest.TestCase):
+    def parse(self, text, operation='py_test'):
+        return pack.parse_failures([(operation, {'stdout': '', 'stderr': text, 'exit_code': 1, 'status': 'completed'})])
+
+    def test_unittest_errors_and_assertions_get_the_right_owner(self):
+        items = self.parse(UNITTEST_OUTPUT)
+        self.assertEqual([(i['owner'], i['kind'], i['path'], i['line']) for i in items],
+                         [('implementation', 'compile', 'calc/app.py', 2), ('ambiguous', 'assertion', 'tests/test_app.py', 12)])
+        self.assertEqual(pack.assertion_of(items[1]['message']), {'call': 'self.assertEqual(total("1 2"), 4)', 'got': '3', 'want': '4'})
+
+    def test_a_failing_test_import_is_a_test_setup_problem(self):
+        items = self.parse(IMPORT_FAILURE)
+        self.assertEqual([(i['owner'], i['kind'], i['path']) for i in items], [('test', 'setup', 'tests/test_app.py')])
+        self.assertTrue(pack.needs_test_revision(IMPORT_FAILURE, [('py_test', {'stdout': '', 'stderr': IMPORT_FAILURE, 'exit_code': 1, 'status': 'completed'})]))
+        self.assertFalse(pack.needs_test_revision(UNITTEST_OUTPUT))
+
+    def test_pytest_assertions_and_static_check_lines_are_parsed(self):
+        items = self.parse(PYTEST_OUTPUT)
+        self.assertEqual((items[0]['kind'], items[0]['path'], items[0]['line']), ('assertion', 'tests/test_app.py', 5))
+        self.assertEqual(pack.assertion_of(items[0]['message'])['want'], '4')
+        lint = self.parse('calc/app.py:3:5: SyntaxError: invalid syntax' + NL, 'py_static')
+        self.assertEqual([(i['owner'], i['kind'], i['path'], i['line']) for i in lint], [('implementation', 'compile', 'calc/app.py', 3)])
+
+    def test_signatures_ignore_line_numbers(self):
+        a = pack.assertion_signature([('py_test', {'stdout': '', 'stderr': UNITTEST_OUTPUT, 'exit_code': 1})])
+        b = pack.assertion_signature([('py_test', {'stdout': '', 'stderr': UNITTEST_OUTPUT.replace('line 12', 'line 99'), 'exit_code': 1})])
+        self.assertEqual(a, b)
+        self.assertTrue(a)
+        self.assertTrue(pack.failure_signature([('py_test', {'stdout': '', 'stderr': UNITTEST_OUTPUT, 'exit_code': 1})]))
+
+
+class OracleTests(unittest.TestCase):
+    """评测的独立判官对 Python 项目同样有效：好的通过，错的被拒绝。 The independent oracle works for Python projects: a good one passes, a wrong one is rejected."""
+    SUM = NL.join(['import sys', '', '', 'def run(args, stdin, stdout, stderr):', '    words = stdin.read().split()', '    try:', '        total = sum(int(w) for w in words)',
+                   '    except ValueError:', '        print("error", file=stderr)', '        return 1', '    print(total, file=stdout)', '    return 0', ''])
+
+    def files(self, app):
+        return {'pyproject.toml': pack.seed_files({'module': 'sumcli', 'files': []})['pyproject.toml'], 'sumcli/__init__.py': '',
+                'sumcli/__main__.py': MAIN.replace('calc', 'sumcli'), 'sumcli/app.py': app}
+
+    def test_sum_task(self):
+        from masa.bench.runner import BY_ID
+        from masa.bench import oracle
+        good = oracle.judge(self.files(self.SUM), BY_ID['sum'], None, 'python')
+        self.assertTrue(good['passed'], good)
+        wrong = oracle.judge(self.files(self.SUM.replace('return 1', 'return 0')), BY_ID['sum'], None, 'python')
+        self.assertFalse(wrong['passed'])
+        self.assertIn('exit code', wrong['cases'][2]['reason'])
+        broken = oracle.judge(self.files('def run(:' + NL), BY_ID['sum'], None, 'python')
+        self.assertFalse(broken['built'])
+
+
+@unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
+class EndToEndTests(unittest.TestCase):
+    """脚本化模型 + 真实运行器：规划 → 批准 → 逐文件生成（带就地检查）→ 批准 → 真实 unittest 验证 → Gate。 Scripted models + the real runner."""
+
+    def run_flow(self, files):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            runner = Runner(RUNNER)
+            try:
+                planning = ProjectPlanning(store, runner)
+                parent = planning.generate(FakeModel(), 'sum integers', language='python')
+                meta = store.run(parent)['data']['project_plan']
+                self.assertEqual(store.run(parent)['data']['language'], 'python')
+                self.assertEqual(meta['template'], 'py-cli')
+                planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': SPEC, 'checks': CHECKS})
+                service = ProjectGeneration(store, runner)
+                developer = LocalFake(files)
+                draft = service.generate(parent, developer)
+                self.assertTrue(all(c.get('language') == 'python' for c in developer.contexts))
+                meta = store.run(draft)['data']['project_plan']
+                generated = store.read(meta['files_ref'])
+                verified = service.approve(draft, {'files_ref': meta['files_ref'], 'files': generated})
+                result = Runtime(store, runner).execute(verified)
+                operations = [store.read(c['request_ref'])['operation'] for c in store.tools(verified)]
+                return result, operations, developer, generated, store.run(verified)['data']
+            finally:
+                store.close()
+
+    def test_a_python_project_is_generated_verified_and_passes_the_gate(self):
+        result, operations, developer, generated, data = self.run_flow(FILES)
+        self.assertEqual(result['status'], 'succeeded', result)
+        self.assertEqual(sorted(operations), ['py_static', 'py_test'])
+        self.assertEqual(data['language'], 'python')
+        self.assertEqual(data['profile']['language']['id'], 'python')
+        self.assertIn('python_executable', data['profile'])
+        self.assertEqual(generated['calc/app.py'], APP)
+
+    def test_a_wrong_expectation_fails_the_gate_with_a_parsed_assertion(self):
+        wrong = {**FILES, 'tests/test_app.py': TEST.replace('"1 2 3"), 6', '"1 2 3"), 7')}
+        result, operations, developer, generated, data = self.run_flow(wrong)
+        self.assertEqual(result['status'], 'failed')
+
+
+@unittest.skipUnless(RUNNER.is_file() and pack.probe().ok, 'built runner and a usable Python interpreter are required')
+class ProductSurfaceTests(unittest.TestCase):
+    """用户模拟测试发现的产品面问题：运行程序、源码语法检查要跟着任务的语言走。 Product-surface bugs found by the simulated-user test: running the program and the source review must follow the task's language."""
+
+    def test_running_the_program_and_reviewing_sources_work_for_python(self):
+        from masa.application.applications import run_application
+        from masa.application.review.source_review import review_sources
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp))
+            runner = Runner(RUNNER)
+            try:
+                planning = ProjectPlanning(store, runner)
+                parent = planning.generate(FakeModel(), 'sum integers', language='python')
+                meta = store.run(parent)['data']['project_plan']
+                planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': SPEC, 'checks': CHECKS})
+                service = ProjectGeneration(store, runner)
+                draft = service.generate(parent, LocalFake())
+                meta = store.run(draft)['data']['project_plan']
+                files = store.read(meta['files_ref'])
+                report = review_sources(store, runner, draft, {'files_ref': meta['files_ref'], 'files': files})
+                self.assertEqual((report['status'], report['findings']), ('parsed', []))
+                self.assertIn('Python', report['scope'])
+                broken = dict(files, **{'calc/app.py': 'def total(:' + NL})
+                found = review_sources(store, runner, draft, {'files_ref': meta['files_ref'], 'files': broken})
+                self.assertEqual(found['status'], 'issues_found')
+                self.assertEqual((found['findings'][0]['path'], found['findings'][0]['code']), ('calc/app.py', 'syntax_error'))
+                verified = service.approve(draft, {'files_ref': meta['files_ref'], 'files': files})
+                self.assertEqual(Runtime(store, runner).execute(verified)['status'], 'succeeded')
+                ran = run_application(store, runner, verified, [], lambda: False)
+                self.assertEqual((ran['status'], ran['exit_code'], ran['phase']), ('completed', 0, 'run'), ran)
+                self.assertEqual(ran['stdout'].strip(), '0')  # 没有输入，和为 0 / no input, the sum is 0
+            finally:
+                store.close()
+
+    def test_a_malformed_check_plan_is_named_precisely(self):
+        with self.assertRaisesRegex(MasaError, r"invalid check fields: got \['operation', 'purpose'\]"):
+            validate_checks([{'operation': 'py_test', 'purpose': 'x'}], SPEC, language='python')
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+class NormalizeChecksTests(unittest.TestCase):
+    """Tester 的格式小错被确定性地改正；实质错误仍然被拒绝；有效计划原样不动。 Formatting slips are corrected; substantive errors are still rejected; a valid plan is untouched."""
+
+    def case(self, name='c', level='unit'):
+        return {'name': name, 'input': 'x', 'expected': 'y', 'level': level}
+
+    def validate(self, checks):
+        from masa.domain.proposals import normalize_checks
+        return validate_checks(normalize_checks(checks), SPEC, language='python')
+
+    def test_a_valid_plan_is_returned_unchanged(self):
+        from masa.domain.proposals import normalize_checks
+        self.assertEqual(normalize_checks(CHECKS), CHECKS)
+
+    def test_extra_check_fields_and_empty_cases_are_dropped(self):
+        checks = [{**CHECKS[0], 'level': 'unit', 'timeout': 5}, {**CHECKS[1], 'cases': [], 'level': 'unit'}]
+        result = self.validate(checks)
+        self.assertEqual(set(result[0]), {'operation', 'purpose', 'acceptance_indices', 'cases'})
+        self.assertNotIn('cases', result[1])
+
+    def test_the_same_operation_twice_is_merged(self):
+        checks = [{'operation': 'py_test', 'purpose': 'unit', 'acceptance_indices': [0], 'cases': [self.case('a')]},
+                  {'operation': 'py_test', 'purpose': 'cli', 'acceptance_indices': [0], 'cases': [self.case('b', 'cli')]}]
+        result = self.validate(checks)
+        self.assertEqual(len(result), 1)
+        self.assertEqual([c['name'] for c in result[0]['cases']], ['a', 'b'])
+        self.assertEqual(result[0]['purpose'], 'unit' + NL + 'cli')
+
+    def test_level_synonyms_and_extra_case_fields_are_corrected(self):
+        checks = [{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [0], 'cases': [{**self.case('a', 'E2E'), 'note': 'x'}, self.case('b', 'Integration')]}]
+        cases = self.validate(checks)[0]['cases']
+        self.assertEqual([(c['level'], set(c)) for c in cases], [('cli', {'name', 'input', 'expected', 'level'}), ('integration', {'name', 'input', 'expected', 'level'})])
+
+    def test_substantive_errors_are_still_rejected(self):
+        from masa.domain.proposals import normalize_checks
+        for bad, message in (([{'operation': 'py_compile', 'purpose': 'p', 'acceptance_indices': [0]}], 'unauthorized'),
+                             ([{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [7], 'cases': [self.case()]}], 'acceptance reference'),
+                             ([{'operation': 'py_test', 'purpose': 'p'}], 'invalid check fields'),
+                             ([{'operation': 'py_test', 'purpose': 'p', 'acceptance_indices': [0], 'cases': [self.case('a', 'weird')]}], 'test level')):
+            with self.subTest(message=message), self.assertRaisesRegex(MasaError, message):
+                validate_checks(normalize_checks(bad), SPEC, language='python')
+
+
+class FailureDetailsTests(unittest.TestCase):
+    def test_the_line_diff_after_the_exception_line_is_kept_for_the_first_failures(self):
+        # 真实运行：异常行把长字符串缩成 'erro[21 chars]...'，工人看不出期望与实际差在哪；逐行差异在异常行之后。
+        # Real run: the exception line abbreviates long strings to 'erro[21 chars]...' so the worker could not see the difference; the line diff follows the exception line.
+        pack = registry.get('python')
+        block = NL.join(['FAIL: test_x (test_app.T.test_x)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_app.py", line 64, in test_x', '    self.assertEqual(a, b)',
+                         "AssertionError: 'erro[21 chars]ror: exists' != 'erro[21 chars]ror: bad'", '- error: ok', '+ error: exists', '?        ++++', '', '-' * 70, 'Ran 2 tests in 0.001s', '', 'FAILED (failures=1)', ''])
+        text = pack.failure_details([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + block, 'stdout': ''})])
+        self.assertIn('- error: ok' + NL + '+ error: exists', text)
+        self.assertTrue(text.startswith('FAIL: test_x'))
+        self.assertNotIn('Ran 2 tests', text)
+        self.assertNotIn('FAILED (', text)
+        self.assertEqual(pack.failure_details([('other_op', {'stderr': block})]), '')
+
+
+class TestsFollowTheirPackageTests(unittest.TestCase):
+    SPEC = {'module': 'bankledger', 'files': [{'path': p, 'purpose': 'x'} for p in (
+        'bankledger/__main__.py', 'bankledger/app/app.py', 'bankledger/command/parser.py', 'bankledger/store/accounts.py', 'bankledger/transfer/rules.py', 'bankledger/report/format.py',
+        'tests/test_command_parser.py', 'tests/test_store_accounts.py', 'tests/test_transfer_rules.py', 'tests/test_report_format.py', 'tests/test_app.py', 'tests/test_integration.py')]}
+
+    def test_a_test_named_after_package_and_file_goes_to_that_package(self):
+        # 真实运行：tests/test_command_parser.py 被归给入口包，command 包没有自己的测试，工人永远封不了包。
+        # Real run: tests/test_command_parser.py went to the entry package, so the command package had no tests of its own and its worker could never seal.
+        pack = registry.get('python')
+        got = {f['path']: pack.package_of(f['path'], self.SPEC) for f in self.SPEC['files'] if f['path'].startswith('tests/')}
+        self.assertEqual(got, {'tests/test_command_parser.py': 'bankledger/command', 'tests/test_store_accounts.py': 'bankledger/store', 'tests/test_transfer_rules.py': 'bankledger/transfer',
+                               'tests/test_report_format.py': 'bankledger/report', 'tests/test_app.py': 'bankledger/app', 'tests/test_integration.py': 'bankledger'})
+
+
+class PlannerSpecShapeTests(unittest.TestCase):
+    def test_an_extra_field_is_dropped_and_a_missing_one_is_named(self):
+        # 真实运行：三次规划分别是“只有 summary”“多了 acceptance_note”“缺 acceptance”，旧消息只说“字段无效”，任务在规划阶段失败。
+        # Real run: three planning attempts were "summary only", "an extra acceptance_note" and "acceptance missing"; the old message only said "invalid fields" and the task died in planning.
+        from masa.agents.protocol import validate_response
+        context = {'purpose': 'project_planner', 'language': 'python'}
+        spec = validate_response(context, {**SPEC, 'acceptance_note': 'why'}, '')
+        self.assertNotIn('acceptance_note', spec)
+        without = {k: v for k, v in SPEC.items() if k != 'acceptance'}
+        with self.assertRaisesRegex(MasaError, r"missing: \['acceptance'\]"):
+            validate_response(context, without, '')
+
+
+class AssertionDiffsTests(unittest.TestCase):
+    def test_only_the_lines_that_differ_are_kept_as_candidate_values(self):
+        # 真实运行：多行输出的断言消息被缩写成 'ok\n[13 chars]...'，断言裁判读不懂；差异块只留下真正不同的行。
+        # Real run: the message of a multi-line comparison is abbreviated to 'ok\n[13 chars]...' which the referee cannot read; the diff hunks keep only the lines that really differ.
+        pack = registry.get('python')
+        block = NL.join(['FAIL: test_gpa (test_parser.T.test_gpa)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_parser.py", line 43, in test_gpa', '    self.assertEqual(out, exp)',
+                         "AssertionError: 'ok\n[13 chars]k\ndave 91.33\n' != 'ok\n[13 chars]k\ndave 91.13\n'", '  ok', '  ok', '- dave 91.33', '?         ^', '+ dave 91.13', '?         ^', '  error: unknown student', '- amy 90.00', '+ amy 90', '', '-' * 70, 'Ran 1 test', '', 'FAILED (failures=1)', ''])
+        diffs = pack.assertion_diffs([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + block, 'stdout': ''})])
+        self.assertEqual([(d['path'], d['line'], d['got'], d['want']) for d in diffs], [('tests/test_parser.py', 43, 'dave 91.33', 'dave 91.13'), ('tests/test_parser.py', 43, 'amy 90.00', 'amy 90')])
+        single = NL.join(['FAIL: test_x (t.T.test_x)', '-' * 70, 'Traceback (most recent call last):', '  File "tests/test_gpa.py", line 35, in test_x', '    self.assertEqual(f(87.5), "87.50")', "AssertionError: '87.5' != '87.50'", "- 87.5", '+ 87.50', '?     +', ''])
+        self.assertEqual(pack.assertion_diffs([(pack.op_id('test'), {'stderr': NL + '=' * 70 + NL + single})])[0]['want'], '87.50')
+        self.assertEqual(pack.assertion_diffs([('other', {'stderr': block})]), [])
+
+
+class RevisionShapeTests(unittest.TestCase):
+    def test_a_file_beside_files_is_merged_and_other_extra_fields_are_dropped(self):
+        from masa.agents.protocol import validate_response
+        original = {'tests/test_a.py': 'x = 1' + NL, 'tests/test_b.py': 'y = 2' + NL, 'pyproject.toml': '[project]' + NL}
+        context = {'purpose': 'project_test_revision', 'language': 'python', 'original_files': original}
+        got = validate_response(context, {'files': {'tests/test_a.py': 'x = 3' + NL}, 'tests/test_b.py': 'y = 4' + NL, 'note': 'why'}, '')
+        self.assertEqual(got, {'tests/test_a.py': 'x = 3' + NL, 'tests/test_b.py': 'y = 4' + NL})
+        with self.assertRaises(MasaError):  # 没有 files：仍然拒绝 / no `files`: still rejected
+            validate_response(context, {'tests/test_b.py': 'y = 4' + NL}, '')

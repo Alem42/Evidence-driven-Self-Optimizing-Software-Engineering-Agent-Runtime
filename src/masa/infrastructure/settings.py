@@ -8,7 +8,8 @@ import uuid
 
 from masa.infrastructure.llm import ChatProvider, validate_config
 from masa.domain.models import MasaError
-from masa.infrastructure import providers
+from masa.infrastructure import providers, capability
+from masa.languages.registry import registry
 
 
 class Settings:
@@ -17,6 +18,7 @@ class Settings:
         self.path = root / "provider.json"
         self.secret_path = root / 'provider-keys.local.json'
         self.routing_path = root / 'routing.json'
+        self.languages_path = root / 'languages.json'
         self.lock = threading.RLock()
         self.profiles = {}
         self.keys = {}
@@ -41,6 +43,7 @@ class Settings:
             except (ValueError, TypeError, AttributeError, OSError, MasaError):
                 self.profiles = {}
                 self.active_id = None
+        self.load_languages()
         if self.secret_path.exists():
             try:
                 saved = json.loads(self.secret_path.read_text(encoding='utf-8'))
@@ -50,6 +53,62 @@ class Settings:
             except (ValueError, TypeError, AttributeError, OSError):
                 self.keys = {}
 
+    # ---------- 语言包配置 / language-pack configuration ----------
+    def load_languages(self):
+        """读取并应用保存的语言包配置（默认语言、每个包的设置、额外的包目录）。 Read and apply the saved language-pack configuration."""
+        saved = {}
+        if self.languages_path.exists():
+            try:
+                saved = json.loads(self.languages_path.read_text(encoding='utf-8'))
+            except (ValueError, OSError):
+                saved = {}
+        if not isinstance(saved, dict):
+            saved = {}
+        packs = saved.get('packs') if isinstance(saved.get('packs'), dict) else {}
+        dirs = [d for d in (saved.get('extra_dirs') or []) if isinstance(d, str) and d.strip()]
+        registry.configure(default=saved.get('default') if isinstance(saved.get('default'), str) else None, configs=packs, extra_dirs=dirs)
+        # 保存的默认语言如果已经不存在（包被删了），退回内置默认 / a saved default that no longer exists falls back to the built-in default
+        if registry.default_id() not in registry.ids():
+            registry.configure(default='go')
+        return saved
+
+    def save_languages(self, body):
+        """校验并保存：默认语言必须已注册；每个包只接受它自己声明过的配置项。 Validate and save: the default must be registered; a pack only accepts the settings it declared."""
+        if not isinstance(body, dict):
+            raise MasaError('JSON object required')
+        with self.lock:
+            saved = self.load_languages()
+            default = body.get('default', saved.get('default') or registry.default_id())
+            if default not in registry.ids():
+                raise MasaError(f'unknown language {default!r}')
+            packs = {k: dict(v) for k, v in (saved.get('packs') or {}).items() if isinstance(v, dict)}
+            for ident, values in (body.get('packs') or {}).items():
+                if ident not in registry.ids() or not isinstance(values, dict):
+                    raise MasaError(f'unknown language pack {ident!r}')
+                schema = {f.key: f for f in registry.get(ident).config_schema()}
+                clean = dict(packs.get(ident, {}))
+                for key, value in values.items():
+                    field = schema.get(key)
+                    if field is None:
+                        raise MasaError(f'{ident} has no setting {key!r}')
+                    if field.kind == 'choice' and value not in field.choices:
+                        raise MasaError(f'{key} must be one of {list(field.choices)}')
+                    if field.kind == 'bool':
+                        value = bool(value)
+                    elif not isinstance(value, str) or len(value) > 1000 or chr(0) in value:
+                        raise MasaError(f'{key} must be a short text')
+                    clean[key] = value.strip() if isinstance(value, str) else value
+                packs[ident] = clean
+            dirs = body.get('extra_dirs', saved.get('extra_dirs') or [])
+            if not isinstance(dirs, list) or len(dirs) > 8 or any(not isinstance(d, str) or len(d) > 500 for d in dirs):
+                raise MasaError('extra_dirs must be a short list of directory paths')
+            data = {'version': 1, 'default': default, 'packs': packs, 'extra_dirs': [d for d in dirs if d.strip()]}
+            tmp = self.languages_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+            tmp.replace(self.languages_path)
+            self.load_languages()
+        return data
+
     def public(self):
         """仅公开元数据和密钥存在状态。 Expose metadata and credential presence only."""
         with self.lock:
@@ -58,7 +117,7 @@ class Settings:
                     **p,
                     "id": i,
                     "key_configured": bool(self.keys.get(i)),
-                    "ready": p['enabled'] and (p['model_type']=='local' or bool(self.keys.get(i))),
+                    "ready": p['enabled'] and (capability.local_allowed() if p['model_type']=='local' else bool(self.keys.get(i))),
                     "last_test": self.tests.get(i),
                 }
                 for i, p in sorted(self.profiles.items(),key=lambda item:(item[1]['level'],item[1]['priority'],item[0]))
@@ -107,6 +166,8 @@ class Settings:
                 if ident not in profiles and len(profiles) >= 20:
                     raise MasaError("at most 20 profiles")
                 config = validate_config({**profiles.get(ident, {}), **body})
+                if config['model_type'] == 'local' and config['enabled'] and not capability.local_allowed():
+                    raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
                 key = body.get("api_key", "")
                 if isinstance(key, str):
                     key = key.strip()
@@ -162,7 +223,7 @@ class Settings:
     # ───────────── 路由默认值（可在设置页编辑）/ routing defaults editable in Settings ─────────────
     def routing(self):
         """已保存的路由默认值（策略与预算）；文件缺失或损坏时回到内置默认。 Saved routing defaults, built-in defaults when absent."""
-        from masa.application.routing import validate_budget, validate_policy
+        from masa.application.orchestration.routing import validate_budget, validate_policy
         raw = {}
         try:
             raw = json.loads(self.routing_path.read_text(encoding='utf-8')) if self.routing_path.exists() else {}
@@ -175,7 +236,7 @@ class Settings:
 
     def save_routing(self, body):
         """校验后原子保存。只保存与默认值不同的部分之外的完整规范化结果。 Validate, then save atomically."""
-        from masa.application.routing import validate_budget, validate_policy
+        from masa.application.orchestration.routing import validate_budget, validate_policy
         policy = validate_policy(body.get('policy'))
         budget = validate_budget(body.get('budget'))
         with self.lock:
@@ -312,7 +373,7 @@ class Settings:
         """已启用且凭据就绪（本地无需密钥）的配置，按等级与优先级排序。 Enabled, credentialed profiles in routing order."""
         with self.lock:
             return [(i, dict(p)) for i, p in sorted(self.profiles.items(), key=lambda item: (item[1]['level'], item[1]['priority'], item[0]))
-                    if p['enabled'] and (p['model_type'] == 'local' or self.keys.get(i))]
+                    if p['enabled'] and (capability.local_allowed() if p['model_type'] == 'local' else bool(self.keys.get(i)))]
 
     def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""
@@ -351,12 +412,13 @@ class Settings:
     def test(self, ident):
         """一次真实协议探测，不发送仓库内容。 Probe the real protocol once without repository content."""
         provider = self.provider(ident)
+        test_operation = registry.get().op_id("test")  # 探测只需要任意一个已授权的工具名 / any authorised tool name will do for the probe
         try:
             result = provider.respond(
                 {
                     "goal": "Connection test: request the allowed verification tool.",
-                    "operation": "go_test",
-                    "allowed_tools": ["go_test"],
+                    "operation": test_operation,
+                    "allowed_tools": [test_operation],
                     "tool_results": [],
                 }
             )

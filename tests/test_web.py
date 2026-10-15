@@ -154,6 +154,44 @@ class WebTests(unittest.TestCase):
         self.assertEqual(result['repair_advice']['action'],'revise_tests')
         self.assertEqual(result['checks'][0]['result']['exit_code'],1)
 
+    def test_workbench_read_and_input_routes(self):
+        """工作台用的新路由：实时文件、调用检视、用户输入。 The routes the workbench uses: live files, call inspection, user input."""
+        import json as _json
+        from urllib.parse import quote
+        from masa.domain.models import Budget
+        from masa.runtime import live
+        from masa.runtime.engine import Runtime
+        from masa.runtime.graph import harness_policy
+        from masa.runtime.roles import RoleRuntime
+
+        class Provider:
+            profile = {'provider': 'test', 'model': 'm'}
+            config = {'model_type': 'cloud'}
+            usage = {'prompt_tokens': 9, 'completion_tokens': 1, 'total_tokens': 10}
+
+            def respond(self, context):
+                return {'ok': True}
+        store = Store(self.root / 'state')
+        try:
+            rid = Runtime(store, FakeExecutor()).create(self.source, 'g', Budget(), graph=harness_policy(), project_plan={'status': 'planning'})
+            for invocation in ('initial', 'file:1'):
+                RoleRuntime(store).call(rid, Provider(), 'project_planner', {'goal': 'g'}, invocation_id=invocation)
+        finally:
+            store.close()
+        self.addCleanup(live.clear, rid)
+        self.assertEqual(self.request('/api/runs/' + rid + '/live')[1], {'live': None})
+        live.begin(rid, 'project_developer', 'file:2', 'm')
+        live.append(rid, _json.dumps({'files': {'a.txt': 'hel'}})[:-3])
+        self.assertEqual(self.request('/api/runs/' + rid + '/live')[1]['live']['files'][0]['content'], 'hel')
+        calls = self.request('/api/runs/' + rid + '/calls')[1]['calls']
+        self.assertEqual([c['invocation'] for c in calls], ['initial', 'file:1'])
+        status, detail = self.request('/api/runs/' + rid + '/calls/project_planner/' + quote('file:1', safe=''))  # 编号里的冒号要能往返 / the colon in the id must round-trip
+        self.assertEqual((status, detail['usage']['prompt_tokens']), (200, 9))
+        self.assertEqual(self.request('/api/runs/' + rid + '/calls/project_planner/nope')[0], 400)
+        self.assertEqual(self.request('/api/runs/' + rid + '/input', {'kind': 'note', 'text': 'keep it short'})[0], 200)
+        self.assertEqual(self.request('/api/runs/' + rid + '/input', {'kind': 'note', 'text': ''})[0], 400)
+        self.assertEqual(self.request('/api/runs/' + rid + '/input', {'kind': 'control', 'action': 'pause'})[0], 400)  # 没有正在运行的自动任务 / no running automatic task
+
     def test_second_service_cannot_listen_on_same_port(self):
         """同端口只允许一个工作台服务。 Prevent two workbench versions from sharing one port."""
         with self.assertRaises(OSError):

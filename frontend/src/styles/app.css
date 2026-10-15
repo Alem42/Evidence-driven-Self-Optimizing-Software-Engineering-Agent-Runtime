@@ -4,7 +4,6 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
-body.resizing { cursor: col-resize; user-select: none; }
 h1, h2, h3, h4, p { margin: 0; }
 h1 { font-size: 17px; font-weight: 650; }
 h2 { font-size: 16px; }
@@ -104,10 +103,6 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 /* ───────── shell ───────── */
 .shell { position: relative; display: grid; grid-template-columns: var(--sw, 272px) minmax(0, 1fr); height: 100vh; }
 .main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.resizer { position: absolute; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; }
-.resizer:hover, body.resizing .resizer { background: linear-gradient(90deg, transparent 3px, var(--accent) 3px, var(--accent) 4px, transparent 4px); }
-.resizer-sidebarWidth { left: calc(var(--sw, 272px) - 3px); }
-.resizer-inspectorWidth { right: calc(var(--iw, 340px) - 3px); }
 
 .sidebar { background: var(--sunken); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; min-height: 0; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 4px 6px; }
@@ -148,19 +143,9 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .example:hover { background: var(--hover); color: var(--text); }
 
 /* ───────── task page ───────── */
-.task { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--iw, 340px); height: 100%; min-height: 0; }
 .task-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.topbar { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
-.topbar-main { min-width: 0; flex: 1; }
-.topbar h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.topbar-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
-.meta { color: var(--muted); font-size: 12.5px; }
-.topbar-progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
 .switch { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 
-.graph-panel { background: var(--panel); border-bottom: 1px solid var(--line); padding: 8px 20px 10px; }
-.graph-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.graph-head.sub { margin-top: 12px; justify-content: flex-start; gap: 10px; }
 .graph { overflow: auto; padding: 4px 2px 6px; }
 .graph-canvas { position: relative; }
 .graph-canvas svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
@@ -182,19 +167,10 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .graph-compact .gtext small { display: none; }
 .graph-compact .gnode { padding-right: 8px; }
 
-.tabs { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.tabs button { position: relative; background: none; border: 0; padding: 10px 14px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; }
-.tabs button:hover { color: var(--text); }
-.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 .attn { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wait); margin-left: 6px; vertical-align: middle; }
 .attn.bad { background: var(--bad); }
-.tab-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; }
-.tab-body.flush { padding: 0; overflow: hidden; }
-.composer { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line); background: var(--panel); }
-.composer input { flex: 1; background: var(--sunken); }
 
 /* ───────── thread ───────── */
-.thread { display: flex; flex-direction: column; gap: 14px; max-width: 920px; margin: 0 auto; }
 .goal { white-space: pre-wrap; }
 .progress-line { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
 .progress-line progress { flex: 1; }
@@ -220,15 +196,6 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .activity li span { flex: 1; color: var(--text); } .activity time { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
 
 /* ───────── code ───────── */
-.code-view { display: grid; grid-template-columns: minmax(180px, 250px) minmax(0, 1fr); height: 100%; min-height: 0; }
-.file-tree { border-right: 1px solid var(--line); background: var(--sunken); overflow-y: auto; padding: 8px 6px; display: flex; flex-direction: column; gap: 1px; }
-.tree-head { font-size: 11px; color: var(--faint); padding: 4px 8px 8px; letter-spacing: 0.04em; }
-.file-tree button { display: flex; align-items: center; gap: 6px; text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12px; }
-.file-tree button:hover { background: var(--hover); } .file-tree button.current { background: var(--accent-soft); }
-.file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-ico { color: var(--faint); } .is-test .file-ico { color: var(--wait); }
-.editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--code-bg); }
-.editor-bar { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
 .code-editor { flex: 1; min-height: 0; overflow: hidden; }
 .diff { flex: 1; overflow: auto; padding: 8px 0; font-size: 12.5px; line-height: 1.6; }
 .diff div { padding: 0 14px; white-space: pre-wrap; } .diff span { display: inline-block; width: 1.4em; color: var(--faint); }
@@ -236,14 +203,8 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .marker-bar { padding: 6px 14px; background: var(--bad-soft); color: var(--bad); font-size: 12.5px; }
 
 /* ───────── checks / history ───────── */
-.checks, .history-view { display: flex; flex-direction: column; gap: 12px; max-width: 920px; margin: 0 auto; }
-.summary-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.check { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-.check.bad { border-left: 3px solid var(--bad); } .check.ok { border-left: 3px solid var(--ok); } .check.run { border-left: 3px solid var(--run); }
-.check header { display: flex; justify-content: space-between; align-items: center; }
 .failure { background: var(--bad-soft); color: var(--bad); padding: 8px 10px; border-radius: 8px; }
 .diag-links { display: flex; flex-wrap: wrap; gap: 6px; }
-.check details pre { background: var(--sunken); padding: 8px 10px; border-radius: 8px; max-height: 320px; overflow: auto; margin-top: 6px; }
 .versions { display: flex; flex-direction: column; gap: 4px; }
 .versions button { display: flex; align-items: center; gap: 10px; background: none; border: 1px solid transparent; border-radius: 8px; padding: 7px 10px; text-align: left; }
 .versions button:hover { background: var(--hover); } .versions button.current { background: var(--accent-soft); border-color: var(--accent); }
@@ -251,12 +212,8 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .log, .raw { background: var(--sunken); padding: 10px 12px; border-radius: 8px; max-height: 420px; overflow: auto; }
 
 /* ───────── inspector ───────── */
-.inspector { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.inspector h3 { margin-top: 10px; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
 .facts dt { color: var(--muted); } .facts dd { margin: 0; min-width: 0; word-break: break-all; }
-.calls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.calls li { display: flex; flex-direction: column; background: var(--sunken); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
 
 /* ───────── settings ───────── */
 .settings { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100%; min-height: 0; }
@@ -283,15 +240,10 @@ progress { height: 4px; width: 100%; accent-color: var(--accent); }
 .route-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ───────── responsive ───────── */
-@media (max-width: 1100px) {
-  .task { grid-template-columns: minmax(0, 1fr); }
-  .task .inspector, .resizer-inspectorWidth { display: none; }
-}
 @media (max-width: 760px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar, .resizer-sidebarWidth { display: none; }
-  .grid2, .split, .settings, .code-view { grid-template-columns: minmax(0, 1fr); }
-  .code-view .file-tree { max-height: 140px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .shell, .shell:not(.no-sidebar) { grid-template-columns: minmax(0, 1fr); }
+  .sidebar, .shell > .resizer-x { display: none; }
+  .grid2, .split, .settings { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ───────── token chips / report dialog ───────── */
@@ -363,5 +315,16 @@ td.best { font-weight: 700; color: var(--ok); }
 .process { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
 .process li { display: flex; gap: 8px; } .process time { color: var(--muted); font-family: var(--mono); min-width: 54px; }
 .process .p-bad { color: var(--bad, #c0392b); } .process .p-ok { color: var(--ok, #2e7d32); }
-.settings-close { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0; background: var(--bg, transparent); }
 .settings-nav .nav-actions { display: flex; gap: 6px; margin-bottom: 10px; }
+
+/* 实时输出：模型正在写的内容（最近一段），等宽、可滚动。 Live output: the latest stretch of what the model is writing, monospaced and scrollable. */
+.live-tail { flex: 0 0 100%; margin: 6px 0 0; padding: 8px 10px; max-height: 180px; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--muted); }
+.settings-close { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0; background: var(--bg, transparent); }
+
+/* 新任务页的“高级设置”折叠区，与设置页的“高级”导航。 The collapsible advanced block on the new-task page and the "Advanced" group in the settings nav. */
+.advanced { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; }
+.advanced > summary { cursor: pointer; font-weight: 500; }
+.advanced-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.advanced-body select { width: auto; max-width: 280px; }
+.nav-advanced { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.nav-advanced > summary { padding: 4px 10px; font-size: 12px; color: var(--faint); }

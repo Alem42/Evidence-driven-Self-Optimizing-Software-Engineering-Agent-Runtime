@@ -1,3 +1,4 @@
+import { isManifestPath, isTestPath } from '../../entities/languages';
 import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -28,7 +29,7 @@ export function useCodeFiles(detail: Detail) {
 
   /** 修复版本里被冻结的文件不可编辑。 Frozen files in repair revisions are read-only. */
   const locked = (path: string): boolean =>
-    Boolean(plan?.repair_of) && (plan?.revision_scope === 'tests' ? !path.endsWith('_test.go') : path === 'go.mod' || path.endsWith('_test.go'));
+    Boolean(plan?.repair_of) && (plan?.revision_scope === 'tests' ? !isTestPath(path) : isManifestPath(path) || isTestPath(path));
 
   const changed = new Set(plan?.changed_files ?? []);
   return {

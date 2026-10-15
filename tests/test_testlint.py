@@ -1,7 +1,7 @@
 """冻结前的测试静态检查。Static pre-freeze test checks."""
 import unittest
 
-from masa.application.testlint import test_problem_messages, test_problems
+from masa.languages.go.testlint import test_problem_messages, test_problems
 
 NL = chr(10)
 

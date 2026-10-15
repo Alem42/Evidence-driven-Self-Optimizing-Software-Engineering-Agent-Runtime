@@ -2,7 +2,7 @@
 import unittest
 
 from masa.application.generation import ProjectGeneration
-from masa.application.leaks import leak_messages, prompt_leaks
+from masa.application.checks.leaks import leak_messages, prompt_leaks
 from masa.domain.models import MasaError
 
 # 真实任务（stats_test.go:51）里被弱模型写进字符串的文字。

@@ -21,7 +21,11 @@ from pathlib import Path
 from masa.bench import oracle
 from masa.bench.report import ERROR, FALSE_PASS, GATE_FAIL, PASS, SKIPPED, STOPPED, TIMEOUT, aggregate
 from masa.bench.tasks import BY_ID, SUITES, TASKS
+from masa.bench.tasks_large import LARGE_TASKS
 from masa.infrastructure.proc import NO_WINDOW
+
+# 大项目任务（等级 10）不在默认套餐里，但可以按任务 id 运行。 Large-project tasks (level 10) are not in the default suites but can be run by task id.
+BY_ID.update({task.id: task for task in LARGE_TASKS})
 
 SETTINGS_FILES = ('provider.json', 'provider-keys.local.json', 'routing.json', 'token-calibration.json')
 POLL_SECONDS = 2
@@ -45,13 +49,30 @@ def resolve_config(body):
             raise MasaError(f'{name} must be an integer in {low}..{high}')
         return value
 
+    # 费用上限（可选，按模型价格估算，单位与价格相同）：整个评测的总额与单次运行的额度。没有就不限（保持原行为）。
+    # Optional cost caps (estimated from model prices, same currency as the prices): whole-suite total and per run. Absent = unlimited (legacy behaviour).
+    costs = {}
+    for name in ('total_cost', 'per_run_cost'):
+        if body.get(name) is not None:
+            value = body[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 100000:
+                raise MasaError(f'{name} must be a positive number')
+            costs[name] = float(value)
+    from masa.languages.registry import registry
+    language = body.get('language')
+    if language is not None and language not in registry.ids():
+        raise MasaError('unknown language')
     return {
+        **costs,
+        **({'language': language} if language else {}),
+        **({'runtime': body['runtime']} if body.get('runtime') in ('v1', 'v2', 'v2repair') else {}),
         'suite': suite, 'task_ids': list(dict.fromkeys(task_ids)),
         'repeats': bounded('repeats', preset['repeats'], 1, 10),
         'total_cloud_tokens': bounded('total_cloud_tokens', preset['total_cloud_tokens'], 1_000, 50_000_000),
         'total_minutes': bounded('total_minutes', preset['total_minutes'], 1, 2_000),
         # 单次运行的上限：缺省按任务等级给；这里的数字是“倍率”，100 = 默认。 Per-run limits default by level; the number is a percentage, 100 = default.
         'per_run_scale': bounded('per_run_scale', 100, 20, 400),
+        'max_model_calls': bounded('max_model_calls', 40, 10, 400),  # V2 的工人循环一次要很多小调用 / V2 worker loops make many small calls
         'model_ids': body.get('model_ids') if isinstance(body.get('model_ids'), list) else None,
     }
 
@@ -59,7 +80,8 @@ def resolve_config(body):
 def count_mechanisms(report, store, run_ids):
     """从账本事件里数出各个 runtime 机制被触发了几次——这是“改动有没有起作用”的直接证据。
     Count how often each runtime mechanism fired, straight from ledger events: direct evidence that a change is in effect."""
-    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0}
+    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0,
+              'conductor': 0, 'conductor_rejected': 0, 'skeptic': 0, 'code_review': 0}
     for item in report.get('process') or []:
         kind, data = item['kind'], item['data']
         if kind == 'imports_fixed':
@@ -71,6 +93,10 @@ def count_mechanisms(report, store, run_ids):
             counts['rewrite'] += 1
         elif kind == 'rounds_extended':
             counts['rounds_extended'] += 1
+        elif kind in ('conductor_rejected', 'skeptic_verdict', 'code_review'):
+            counts[{'conductor_rejected': 'conductor_rejected', 'skeptic_verdict': 'skeptic', 'code_review': 'code_review'}[kind]] += 1
+        elif kind == 'conductor_decided':
+            counts['conductor'] += 1
         elif kind == 'noop_revision':
             counts['noop'] += 1
         elif kind == 'workflow_node' and data.get('why') == 'flip_to_tests':
@@ -91,6 +117,12 @@ class BenchRunner:
         self.main_root = Path(main_root)
         self.runner_path, self.go_path, self.project = Path(runner_path), Path(go_path), Path(project)
         self.config = config
+        # 调优器的覆盖项（策略增量 + 要去掉的边）：只作用于这次评测的任务，从不写入用户的设置。构造时就校验，不合法立即报错。
+        # The tuner's overrides (policy delta + dropped edges): they apply to this benchmark's tasks only and never touch the user's settings; validated here so an illegal one fails at once.
+        self.overrides = None
+        if config.get('overrides'):
+            from masa.tuning import space
+            self.overrides = space.materialize(config['overrides'])
         self.clock = clock
         self.on_change = on_change or (lambda state: None)
         self.run_task = run_task or self._run_task_for_real
@@ -98,7 +130,7 @@ class BenchRunner:
         self.stop_flag = threading.Event()
         self.lock = threading.Lock()
         self.records = []
-        self.state = {'id': self.id, 'state': 'starting', 'config': config, 'started': clock(), 'current': None, 'used': {'cloud_tokens': 0, 'seconds': 0},
+        self.state = {'id': self.id, 'state': 'starting', 'config': config, 'started': clock(), 'current': None, 'used': {'cloud_tokens': 0, 'seconds': 0, 'cost': 0.0},
                       'total': len(config['task_ids']) * config['repeats'], 'message': None}
         self.console = None
         self.scratch = self.main_root / 'bench' / 'state' / self.id
@@ -154,7 +186,8 @@ class BenchRunner:
     def _add(self, record):
         with self.lock:
             self.records.append(record)
-            self.state['used'] = {'cloud_tokens': sum(r.get('cloud_tokens') or 0 for r in self.records), 'seconds': round(self.clock() - self.state['started'], 1)}
+            self.state['used'] = {'cloud_tokens': sum(r.get('cloud_tokens') or 0 for r in self.records), 'seconds': round(self.clock() - self.state['started'], 1),
+                                  'cost': round(sum(r.get('cost') or 0 for r in self.records), 4)}
         self.on_change(self.state)
 
     def _cap_reason(self):
@@ -163,13 +196,19 @@ class BenchRunner:
             return f"评测云端 token 总量已达上限（{used}/{self.config['total_cloud_tokens']}）"
         if self.clock() - self.state['started'] >= self.config['total_minutes'] * 60:
             return f"评测总时间已达上限（{self.config['total_minutes']} 分钟）"
+        if self.config.get('total_cost') and self.state['used'].get('cost', 0) >= self.config['total_cost']:
+            return f"评测费用已达上限（{self.state['used']['cost']}/{self.config['total_cost']}）"
         return None
 
     def _limits(self, task):
         scale = self.config['per_run_scale'] / 100
         remaining_tokens = max(1_000, self.config['total_cloud_tokens'] - self.state['used']['cloud_tokens'])
         remaining_seconds = max(30, self.config['total_minutes'] * 60 - (self.clock() - self.state['started']))
-        return {'cloud_tokens': int(min(task.max_cloud_tokens * scale, remaining_tokens)), 'seconds': int(min(task.max_seconds * scale, remaining_seconds))}
+        out = {'cloud_tokens': int(min(task.max_cloud_tokens * scale, remaining_tokens)), 'seconds': int(min(task.max_seconds * scale, remaining_seconds))}
+        if self.config.get('total_cost'):
+            left = max(0.01, self.config['total_cost'] - self.state['used'].get('cost', 0))
+            out['cost'] = round(min(self.config.get('per_run_cost') or left, left), 4)
+        return out
 
     def _skipped(self, task, repeat, reason):
         return self._blank(task, repeat, SKIPPED, note=reason)
@@ -177,7 +216,7 @@ class BenchRunner:
     @staticmethod
     def _blank(task, repeat, status, **extra):
         return {'task': task.id, 'level': task.level, 'repeat': repeat + 1, 'status': status, 'gate_passed': False, 'oracle_passed': None, 'oracle_reason': '',
-                'seconds': 0, 'calls': 0, 'failed_calls': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'escalations': 0, 'rounds': 0, 'mechanisms': {}, 'stop_reason': None,
+                'seconds': 0, 'cost': 0.0, 'calls': 0, 'failed_calls': 0, 'local_tokens': 0, 'cloud_tokens': 0, 'escalations': 0, 'rounds': 0, 'mechanisms': {}, 'stop_reason': None,
                 'note': None, 'run_id': None, 'fail_stage': None, **extra}
 
     def _guarded(self, task, repeat):
@@ -213,6 +252,8 @@ class BenchRunner:
                 pass
         # 有未通过的运行就保留这次评测的账本（否则失败的证据随临时目录一起消失，没法排查）；只留最近 3 份。
         # Keep the ledger when any run did not pass (otherwise the evidence of a failure vanishes with the scratch directory); keep only the newest 3.
+        if self.config.get('keep_state'):
+            return  # 对照评测要事后翻账本（例如指挥者为什么被拒绝）：全部保留，不裁剪 / A/B evaluations inspect the ledger afterwards (e.g. why the conductor was rejected): keep everything
         failed = any(r['status'] not in (PASS, SKIPPED) for r in self.records)
         if failed and not self.config.get('discard_state'):
             kept = sorted((p for p in self.scratch.parent.iterdir() if p.is_dir()), key=lambda p: p.name) if self.scratch.parent.exists() else []
@@ -245,8 +286,13 @@ class BenchRunner:
         record = self._blank(task, repeat, GATE_FAIL)
         started = self.clock()
         body = {'goal': task.goal, 'routing': 'ladder', 'auto_verify': True, 'api_profile_id': next(iter(console.settings.profiles), None),
-                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': 40}}
-        job_id = console.start_autonomous_project_job(body)['job_id']
+                **({'language': self.config['language']} if self.config.get('language') else {}),
+                **({'runtime': self.config['runtime']} if self.config.get('runtime') in ('v2', 'v2repair') else {}),
+                'budget': {'max_cloud_tokens': limits['cloud_tokens'], 'max_active_seconds': limits['seconds'], 'max_model_calls': self.config.get('max_model_calls', 40),
+                           **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
+        if self.overrides and self.overrides['policy']:
+            body['policy'] = self.overrides['policy']
+        job_id = console.start_autonomous_project_job(body, workflow=self.overrides['workflow'] if self.overrides else None)['job_id']
         deadline = started + limits['seconds'] + 30  # 路由层按“活跃秒数”停，这里是不依赖它的硬性墙钟线 / hard wall clock independent of the routing budget
         timed_out = False
         polls = 0
@@ -280,7 +326,8 @@ class BenchRunner:
             totals = report['totals']
             routing = report.get('routing') or {}
             versions = report.get('versions') or []
-            record.update(calls=totals['calls'], failed_calls=totals['failed_calls'], local_tokens=totals['local_tokens'], cloud_tokens=totals['cloud_tokens'],
+            record.update(cost=round((routing.get('spend') or {}).get('cost') or 0, 4), calls=totals['calls'], failed_calls=totals['failed_calls'], local_tokens=totals['local_tokens'], cloud_tokens=totals['cloud_tokens'],
+                          cache_hit_tokens=totals['cache_hit_tokens'], cache_miss_tokens=totals['cache_miss_tokens'],
                           escalations=routing.get('escalations', 0), rounds=sum(1 for v in versions if v['kind'] == 'verification'),
                           mechanisms=count_mechanisms(report, store, [v['run_id'] for v in versions]),
                           stop_reason=(routing.get('stopped') or {}).get('reason'))
@@ -289,7 +336,7 @@ class BenchRunner:
             if report['outcome'] == 'succeeded':
                 record['gate_passed'] = True
                 files = store.read(store.run(report['latest_run_id'])['data']['project_bundle']['approval_ref'])['files']
-                verdict = oracle.judge(files, task, console.go_path)
+                verdict = oracle.judge(files, task, console._probe_executor(), self.config.get('language'))
                 bad = [c for c in verdict['cases'] if not c['ok']]
                 record.update(oracle_passed=verdict['passed'], oracle_reason=(verdict.get('error') or (bad[0]['reason'] if bad else ''))[:200])
                 record['status'] = PASS if verdict['passed'] else FALSE_PASS

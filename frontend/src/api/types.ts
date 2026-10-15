@@ -15,6 +15,8 @@ export interface ProjectPlan {
   spec_ref?: string;
   checks_ref?: string;
   files_ref?: string;
+  /** 逐个文件生成时，已完成部分文件的快照；生成中就能在文件树里看到。 Snapshot of the files finished so far while generating one by one. */
+  partial_files_ref?: string;
   approval_ref?: string;
   base_approval_ref?: string;
   repair_of?: string;
@@ -126,7 +128,9 @@ export interface Job {
   current_model?: string | null;
   current_kind?: 'local' | 'cloud' | null;
   /** 流式传输的实时进度：此刻这次模型调用已生成的字符数与用时。 Live streaming progress of the in-flight model call. */
-  live?: { step: string; model: string | null; chars: number; seconds: number } | null;
+  live?: { step: string; model: string | null; chars: number; seconds: number; tail?: string } | null;
+  /** 用户点了暂停：在下一个节点边界停住。 The user paused: holds at the next node boundary. */
+  paused?: boolean;
   error?: string;
   result?: any;
   run_status?: string;
@@ -134,9 +138,85 @@ export interface Job {
   last_model_metrics?: { generation_tokens_per_second?: number; [k: string]: unknown } | null;
 }
 
+export interface LanguageSummary {
+  id: string;
+  title?: string;
+  ready: boolean;
+  default?: boolean;
+  ui?: { highlight?: string; verify_label?: string; [k: string]: unknown };
+}
+
+export interface LanguageConfigField {
+  key: string;
+  label: string;
+  kind: 'path' | 'text' | 'bool' | 'choice';
+  default?: unknown;
+  help?: string;
+  choices?: string[];
+  /** 选项的显示名，与 choices 一一对应。 Display names of the choices, one each. */
+  labels?: string[];
+}
+
+/** Python 等语言的“项目环境”（.tools/pyenv）。 A language's project environment (.tools/pyenv). */
+export interface ProjectEnv {
+  exists: boolean;
+  path: string;
+  python: string;
+  version: string;
+  size_mb: number;
+  max_mb: number;
+  over_limit: boolean;
+  packages: { name: string; version: string }[];
+  policy: 'ask' | 'allow' | 'deny';
+  uses_project_env: boolean;
+  /** 项目环境里缺的测试工具（选了 pytest 才可能缺）。 Test tools missing from the project environment. */
+  tooling_missing?: string[];
+  interpreter: string;
+  configured_interpreter: string;
+  candidates: { path: string; label: string }[];
+}
+
+export interface PackageInstall {
+  needs_approval: boolean;
+  packages?: string[];
+  installed?: string[];
+  size_mb: number;
+  max_mb?: number;
+  env?: ProjectEnv;
+}
+
+export interface LanguageInfo {
+  id: string;
+  title: string;
+  version?: number;
+  capabilities?: string[];
+  operations?: Record<string, { id: string; label: string }>;
+  readiness: { ok: boolean; details: string[] };
+  config?: LanguageConfigField[];
+  config_values?: Record<string, unknown>;
+  has_environment?: boolean;
+  default?: boolean;
+  digest?: string;
+  error?: string;
+}
+
+export interface Languages {
+  default: string;
+  languages: LanguageInfo[];
+  extra_dirs: string[];
+}
+
 export interface Bootstrap {
   console_version: string;
+  /** 只读演示部署：不能发起或修改任务。 A read-only demo deployment: nothing can be started or changed. */
+  demo?: boolean;
+  local_models?: { allowed: boolean; reason: string; vram_gb: number | null; ram_gb: number | null };
   runner_ready: boolean;
+  /** 运行器文件是否存在（语言的工具链是否就绪看 languages[].ready）。 Whether the runner binary exists (a language's toolchain readiness is languages[].ready). */
+  runner_exists?: boolean;
+  /** 默认语言 id。 The default language id. */
+  language?: string;
+  languages?: LanguageSummary[];
   active_run: string | null;
   active_job: (Job & { job_id: string }) | null;
   interrupted_jobs: { job_id: string; run_id?: string; phase?: string }[];
@@ -217,6 +297,9 @@ export interface ModelCall {
   completion_tokens: number | null;
   total_tokens: number | null;
   tokens_per_second?: number | null;
+  /** 服务端报告的提示缓存命中/未命中 token；没有报告就是 null（未知不是 0）。 Server-reported prompt-cache hit/miss tokens; null when not reported. */
+  cache_hit_tokens?: number | null;
+  cache_miss_tokens?: number | null;
   error?: string | null;
 }
 
@@ -261,6 +344,10 @@ export interface TaskReport {
     local_tokens: number;
     cloud_tokens: number;
     model_ms: number;
+    cache_hit_tokens?: number;
+    cache_miss_tokens?: number;
+    /** 命中 / (命中 + 未命中)；没有任何缓存数据时为 null。 hit / (hit + miss); null when nothing was reported. */
+    cache_hit_rate?: number | null;
   };
   by_model: (UsageRow & { model: string; kind: 'local' | 'cloud' | 'unknown' })[];
   by_step: (UsageRow & { step_id: string | null })[];
@@ -293,6 +380,16 @@ export interface RoutingPolicy {
   max_escalations: number;
   planner_retries: number;
   start_level_by_role: Record<string, number>;
+  conductor?: boolean;
+  conductor_max_calls?: number;
+  conductor_cascade?: boolean;
+  best_of_n?: number;
+  test_audit?: boolean;
+  library?: number;
+  context_budget?: boolean;
+  package_contract?: boolean;
+  planner_examples?: boolean;
+  assertion_referee?: boolean;
 }
 
 export interface RouteDecision {
@@ -366,4 +463,113 @@ export interface Triage {
   findings: TriageFinding[];
   /** 本地模型的复核意见：只能告警，不拦截。 Local-model review: warns only. */
   model?: { verdict: 'ok' | 'risky' | 'skipped'; reasons: string[]; suggestions: string[]; by?: string };
+  /** 需求点名了第三方包（只有带“项目环境”的语言才有）。 The goal names third-party packages (only for a language with a project environment). */
+  packages?: TriagePackages;
+}
+
+export interface TriagePackages {
+  named: string[];
+  missing: string[];
+  policy: 'ask' | 'allow' | 'deny';
+  env_exists: boolean;
+  size_mb: number;
+  max_mb: number;
+}
+
+// ───────── 开跑前估计 Pre-run estimate ─────────
+export interface EstimateTier {
+  key: 'economy' | 'standard' | 'rich';
+  label: string;
+  tokens: number;
+  price: { low: number | null; high: number | null; models: { model: string; per_million: number; cost: number }[]; unpriced: number };
+}
+
+export interface Estimate {
+  source: 'local-model' | 'rules';
+  mode: 'model' | 'rules';
+  level: number;
+  files: number | null;
+  can_handle: 'yes' | 'risky' | 'no';
+  reasons: string[];
+  tiers: EstimateTier[];
+  model: string;
+  note: string;
+}
+
+// ───────── 工作台：实时文件流、用户输入、调用检视 Workbench: live files, user input, call inspection ─────────
+export interface LiveFile {
+  path: string;
+  content: string;
+  /** 这个字符串已经写完（JSON 里闭合了）。 The string is closed in the JSON. */
+  complete: boolean;
+  /** write = 整份文件；edit = 只是新片段（V2 工人的 edit_file）。 write = the whole file; edit = just the new fragment. */
+  kind: 'write' | 'edit';
+}
+
+export interface LiveCall {
+  step: string;
+  invocation?: string | null;
+  model?: string | null;
+  chars: number;
+  seconds: number;
+  seq: number;
+  truncated: boolean;
+  files: LiveFile[];
+  tail: string;
+}
+
+export interface LiveView {
+  live: LiveCall | null;
+}
+
+export type InputBody = { kind: 'note'; text: string } | { kind: 'control'; action: 'pause' | 'resume' | 'stop' };
+
+export interface CallRow {
+  run_id: string;
+  step: string;
+  invocation: string;
+  attempt: number | null;
+  status: 'completed' | 'failed' | 'pending' | 'abandoned';
+  model: string;
+  kind: 'local' | 'cloud' | 'unknown';
+  started: number | null;
+  duration_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cache_hit_tokens: number | null;
+  cache_miss_tokens: number | null;
+  notes: number;
+  error: string | null;
+}
+
+export interface CallSection {
+  name: string;
+  kind: string;
+  chars: number;
+  est_tokens: number;
+  share: number;
+  preview: string;
+  entries: { name: string; chars: number; est_tokens: number }[];
+}
+
+export interface CallDetail {
+  run_id: string;
+  step: string;
+  invocation: string;
+  attempt: number;
+  status: string;
+  model: string | null;
+  provider: string | null;
+  duration_ms: number | null;
+  layout: 'stable_first' | 'sorted';
+  instruction: { chars: number; est_tokens: number };
+  sections: CallSection[];
+  est_total_tokens: number;
+  usage: { prompt_tokens: number | null; completion_tokens: number | null; cache_hit_tokens: number | null; cache_miss_tokens: number | null };
+  omitted: { section: string; id: string; reason: string }[];
+  context_plans: { where: string; window: number; total: number; kept_tokens: number; outlined: string[]; dropped: string[]; over_budget: boolean }[];
+  user_notes: string[];
+  prefix_with_previous: { against: { step: string; invocation: string }; common_chars: number; of_chars: number; share: number | null } | null;
+  response: { chars: number; keys: string[] | null; preview: string } | null;
+  error: string | null;
 }

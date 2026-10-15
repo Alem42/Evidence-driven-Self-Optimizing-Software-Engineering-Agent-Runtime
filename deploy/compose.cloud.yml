@@ -1,0 +1,44 @@
+name: masa-cloud
+services:
+  masa:
+    image: "${MASA_IMAGE:?set an immutable MASA_IMAGE}"
+    restart: unless-stopped
+    init: true
+    environment:
+      MASA_DEMO: "${MASA_DEMO:-1}"
+      MASA_LOCAL_MODELS: "0"
+      MASA_ALLOWED_HOSTS: "${MASA_ALLOWED_HOSTS:-localhost:${MASA_PORT:-8765},127.0.0.1:${MASA_PORT:-8765},${MASA_DOMAIN:-localhost}}"
+      MASA_ORIGINS: "${MASA_ORIGINS:-http://localhost:${MASA_PORT:-8765},http://127.0.0.1:${MASA_PORT:-8765},https://${MASA_DOMAIN:-localhost}}"
+      GOTOOLCHAIN: local
+    ports:
+      - "127.0.0.1:${MASA_PORT:-8765}:8765"
+    volumes:
+      - masa-data:/data
+      - masa-go-cache:/home/masa/.cache
+    networks:
+      - default
+      - edge
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      # Go test executes its compiled test binary from /tmp.
+      - /tmp:size=128m,mode=1777,exec
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  masa-data:
+  masa-go-cache:
+networks:
+  edge:
+    name: masa-edge
+    external: true

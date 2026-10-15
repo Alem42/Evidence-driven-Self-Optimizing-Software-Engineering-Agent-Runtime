@@ -15,7 +15,11 @@ import (
 	"masa.local/runner/internal/indexer"
 )
 
-type Config struct{ Workspace, GoExecutable string }
+// Config：工作区与操作清单。清单由受信任的 Python 侧给出（--ops），或由 --go 生成。 The workspace and the operation table (from --ops, or generated from --go).
+type Config struct {
+	Workspace string
+	Ops       *Ops
+}
 
 func validateWorkspace(root string) error {
 	info, err := os.Lstat(root)
@@ -36,39 +40,34 @@ func validateWorkspace(root string) error {
 	})
 }
 
-// Only explicitly approved environment settings reach repository test code.
-func cleanEnvironment(goExe string) []string {
-	keys := []string{"SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LOCALAPPDATA", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT"}
-	out := make([]string, 0, len(keys)+8)
-	for _, key := range keys {
-		if val := os.Getenv(key); val != "" {
-			out = append(out, key+"="+val)
-		}
+// expand 把参数模板里的 {timeout_ms} 与 {out} 换成具体值。 Fill {timeout_ms} and {out} in an argument template.
+func expand(args []string, req Request, out string) []string {
+	result := make([]string, len(args))
+	for i, a := range args {
+		a = strings.ReplaceAll(a, "{timeout_ms}", fmt.Sprint(req.TimeoutMS))
+		result[i] = strings.ReplaceAll(a, "{out}", out)
 	}
-	path := filepath.Dir(goExe)
-	if root := os.Getenv("SystemRoot"); root != "" {
-		path += string(os.PathListSeparator) + filepath.Join(root, "System32")
-	}
-	out = append(out, "PATH="+path, "GOENV=off", "GOWORK=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOPROXY=off", "GOFLAGS=-mod=readonly")
-	return out
+	return result
 }
 
 func Execute(ctx context.Context, req Request, cfg Config) Result {
 	start := time.Now()
-	if err := req.Validate(); err != nil {
+	ops := cfg.Ops
+	if ops == nil {
+		return Failure(req, "rejected", fmt.Errorf("no operation table"))
+	}
+	if err := req.Validate(ops.Policy()); err != nil {
 		return Failure(req, "rejected", err)
 	}
 	if err := validateWorkspace(cfg.Workspace); err != nil {
 		return Failure(req, "rejected", err)
 	}
-	if !filepath.IsAbs(cfg.GoExecutable) {
-		return Failure(req, "rejected", fmt.Errorf("Go path must be absolute"))
+	if _, err := os.Stat(filepath.Join(cfg.Workspace, ops.RootMarker)); err != nil {
+		return Failure(req, "rejected", fmt.Errorf("%s is required", ops.RootMarker))
 	}
-	if _, err := os.Stat(filepath.Join(cfg.Workspace, "go.mod")); err != nil {
-		return Failure(req, "rejected", fmt.Errorf("go.mod is required"))
-	}
-	// 索引复用进程隔离与时限，但不启动 Go 编译器。 Indexing reuses containment and deadlines without compilation.
-	if req.Operation == "go_index" {
+	op := ops.Operations[req.Operation]
+	// 索引复用进程隔离与时限，但不启动编译器。 Indexing reuses containment and deadlines without compilation.
+	if op.Builtin == "go_index" {
 		index, err := indexer.Scan(ctx, cfg.Workspace)
 		if err != nil {
 			return Failure(req, "internal_error", err)
@@ -85,17 +84,9 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 		code := 0
 		return Result{ProtocolVersion: 1, RequestID: req.RequestID, SnapshotID: req.SnapshotID, Status: "completed", ExitCode: &code, Stdout: string(raw), DurationMS: time.Since(start).Milliseconds()}
 	}
-	exe := cfg.GoExecutable
-	var args []string
-	switch req.Operation {
-	case "go_test":
-		args = []string{"test", "-json", "-count=1", fmt.Sprintf("-timeout=%dms", req.TimeoutMS), "./..."}
-	case "go_vet":
-		args = []string{"vet", "./..."}
-	case "go_fmt_check":
-		exe = filepath.Join(filepath.Dir(exe), "gofmt"+filepath.Ext(exe))
-		args = []string{"-l", "."}
-	case "app_run":
+	env := ops.environment()
+	exe, args := op.Exe, expand(op.Args, req, "")
+	if op.Build != nil {
 		// 构建产物放在临时目录，不改变批准快照；参数只传给程序。
 		// Build outside the approved snapshot and pass argv only to the executable.
 		dir, err := os.MkdirTemp("", "masa-app-")
@@ -103,10 +94,10 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 			return Failure(req, "internal_error", err)
 		}
 		defer os.RemoveAll(dir)
-		binary := filepath.Join(dir, "app"+filepath.Ext(exe))
-		build := exec.CommandContext(ctx, exe, "build", "-o", binary, "./cmd/app")
+		binary := filepath.Join(dir, "app"+filepath.Ext(op.Build.Exe))
+		build := exec.CommandContext(ctx, op.Build.Exe, expand(op.Build.Args, req, binary)...)
 		HideWindow(build)
-		build.Dir, build.Env = cfg.Workspace, cleanEnvironment(cfg.GoExecutable)
+		build.Dir, build.Env = cfg.Workspace, env
 		output := &capBuffer{limit: req.MaxOutputBytes}
 		build.Stdout, build.Stderr = output, output
 		build.WaitDelay = 300 * time.Millisecond
@@ -130,19 +121,25 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 			}
 			return res
 		}
-		exe, args = binary, req.Argv
+		exe, args = binary, nil
+	}
+	if op.ArgvFromRequest {
+		args = append(args, req.Argv...)
 	}
 	stdout := &capBuffer{limit: (req.MaxOutputBytes + 1) / 2}
 	stderr := &capBuffer{limit: req.MaxOutputBytes / 2}
 	cmd := exec.CommandContext(ctx, exe, args...)
 	HideWindow(cmd)
-	cmd.Dir, cmd.Env = cfg.Workspace, cleanEnvironment(cfg.GoExecutable)
+	cmd.Dir, cmd.Env = cfg.Workspace, env
 	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if op.ArgvFromRequest {
+		cmd.Stdin = strings.NewReader(req.Stdin) // 没有就是空输入，而不是继承运行器的标准输入 / empty input when absent, never the runner's own stdin
+	}
 	// A descendant holding a pipe must not keep the worker alive indefinitely.
 	cmd.WaitDelay = 300 * time.Millisecond
 	err := cmd.Run()
 	res := Result{ProtocolVersion: 1, RequestID: req.RequestID, SnapshotID: req.SnapshotID, Status: "completed", DurationMS: time.Since(start).Milliseconds(), Stdout: stdout.buf.String(), Stderr: stderr.buf.String(), Truncated: stdout.truncated || stderr.truncated}
-	if req.Operation == "app_run" {
+	if op.Run {
 		res.Phase = "run"
 	}
 	code := 0
@@ -162,7 +159,7 @@ func Execute(ctx context.Context, req Request, cfg Config) Result {
 		}
 		res.Error = ctx.Err().Error()
 	} else if res.Status == "completed" {
-		if req.Operation == "go_fmt_check" && strings.TrimSpace(res.Stdout) != "" {
+		if op.FailIfStdoutNonEmpty && strings.TrimSpace(res.Stdout) != "" {
 			code = 1
 		}
 		res.ExitCode = &code

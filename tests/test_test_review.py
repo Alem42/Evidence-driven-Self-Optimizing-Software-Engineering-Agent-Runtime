@@ -3,8 +3,8 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
-from masa.application.test_review import review_test_plan
-from masa.application.coordinator import WorkflowCoordinator
+from masa.application.review.test_review import review_test_plan
+from masa.application.orchestration.coordinator import WorkflowCoordinator
 from masa.application.planning import ProjectPlanning
 from masa.infrastructure.store import Store
 from masa.infrastructure.jobs import Jobs

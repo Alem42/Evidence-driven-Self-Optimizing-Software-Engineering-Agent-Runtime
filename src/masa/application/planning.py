@@ -1,4 +1,5 @@
 from masa.domain.proposals import text, validate_spec, validate_checks
+from masa.application.checks.contract import wanted as contract_wanted, validate_contract
 """项目规划契约与角色编排。 Project planning contracts and role orchestration."""
 
 import time
@@ -8,19 +9,27 @@ from masa.runtime.engine import Runtime
 from masa.runtime.graph import harness_policy
 from masa.runtime.roles import RoleRuntime
 from masa.domain.clarification import validate_question, validate_answers
-from masa.application.test_review import review_test_plan
+from masa.application.review.test_review import review_test_plan
+from masa.languages.registry import DEFAULT_LANGUAGE, registry
 
 
 
 
 
 
+
+
+AUDIT_SAMPLES = 3  # 用例审计的样本数；每个样本 2 次调用（推导 + 等价判断），规划 run 的模型调用预算相应增加 / audit samples; each takes 2 calls, and the planning run's call budget grows accordingly
 
 
 class ProjectPlanning:
     def __init__(self, store, executor):
         """复用运行记录和 artifact，不引入新调度器。 Reuse runs and artifacts without a new scheduler."""
         self.store, self.executor = store, executor
+
+    def _pack_of(self, rid):
+        """这个运行的语言包（缺省是默认语言）。 The pack of this run (absent means the default language)."""
+        return registry.for_run(self.store.run(rid)['data'])
 
     def update(self, rid, plan, status, event):
         """原子发布规划状态和引用。 Publish plan state and references atomically."""
@@ -38,9 +47,12 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None):
+                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None, examples=False, examples_as_tests=True):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
+        # 语言：显式给出的优先；续跑/重试/复用沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry/reuse follow the original run; else the default language.
+        origin = resume_id or retry_of or reuse
+        pack = registry.for_run({'language': language} if language else (self.store.run(origin)['data'] if origin else {}))
         if resume_id:
             run=self.store.run(resume_id)
             plan=run['data'].get('project_plan',{})
@@ -50,22 +62,26 @@ class ProjectPlanning:
         else:
             seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
             seed.mkdir(parents=True)
-            (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
-            plan = {'status':'planning', 'provider':provider.profile, 'template':'go-cli', 'dependencies':[]}
+            for name, content in pack.planning_seed().items():
+                (seed/name).write_text(content, encoding='utf-8')
+            plan = {'status':'planning', 'provider':provider.profile, 'template':pack.layout['template'], 'dependencies':[]}
             plan['clarification_enabled']=True
             if triage:plan['triage']=triage
             if retry_of:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
                 for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0), deadline_seconds=86400),
-                                                           graph=harness_policy(), project_plan=plan, parent_run_id=reuse or retry_of)
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0)+(1 if contract_provider is not None else 0), deadline_seconds=86400),
+                                                           graph=harness_policy(pack.id), project_plan=plan, parent_run_id=reuse or retry_of, language=pack.id)
         if on_created:
             on_created(rid)
         # 本地模型复核可行性：只能升级为“有风险”，失败也不影响规划。Local review may only raise a warning; failures never block planning.
         if triage_provider is not None and not resume_id and not reuse and not retry_of:
             try:
-                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal})
+                # 复核用自己的冻结键：它常常是本地模型，而规划者可能随路由换成云端——共用 model_snapshot_ref 会把“换模型”误判成“有人改了配置”（真实任务因此失败过两次）。
+                # Triage freezes under its own key: it is usually the local model while the planner may be routed to the cloud - sharing model_snapshot_ref made that
+                # switch look like "someone changed the configuration" (two real tasks failed that way).
+                opinion=RoleRuntime(self.store).call(rid,triage_provider,'project_triage',{'goal':goal},freeze_key='triage_snapshot_ref')
                 plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{**opinion,'by':triage_provider.profile.get('model')}}
                 if opinion['verdict']=='risky' and plan['triage'].get('verdict')=='ok':plan['triage']['verdict']='risky'
             except Exception as exc:  # 预检只是建议：任何失败都不能影响规划 / advisory only: no failure may block planning
@@ -80,6 +96,9 @@ class ProjectPlanning:
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
             else:
                 values={'goal':goal}
+                if examples or plan.get('examples_required'):
+                    values['examples_required']=True  # Planner 示例（策略 planner_examples）/ Planner examples (policy planner_examples)
+                    plan['examples_required']=True
                 # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
                 # A received-but-rejected response is retried once with the concrete rejection reason.
                 if retry_feedback:values['previous_attempt_error']=str(retry_feedback)[:1000]
@@ -100,29 +119,47 @@ class ProjectPlanning:
                                 clarification_id=self.store.put(spec))
                     self.update(rid,plan,'paused','clarification_requested')
                     return rid
-            validate_spec(spec)
+            validate_spec(spec, pack.id)
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
             tester_values = {'goal':goal, 'spec':spec}
+            if spec.get('examples') and not examples_as_tests:
+                tester_values['examples_as_tests'] = False  # 示例只作参考，不并入用例 / the examples are guidance only, not merged into the cases
+            # 多包项目的包间契约（策略 package_contract，默认关闭）：规格里至少有 3 个内部包才需要；失败就忽略契约，规划照常。 Package contract for multi-package projects (policy package_contract, off by default): wanted only with three or more internal packages; a failure ignores it and planning goes on.
+            if contract_provider is not None and contract_wanted(spec, pack):
+                try:
+                    contract = validate_contract(self.call(rid, contract_provider, 'package_contract', {'goal':goal, 'spec':spec}), spec, pack)
+                    plan['contract'] = contract
+                    tester_values['contract'] = contract
+                    self.store.event(rid, 'package_contract', {'packages': len(contract['packages']), 'exports': sum(len(p['exports']) for p in contract['packages']), 'rules': len(contract['rules'])})
+                except Exception as exc:
+                    self.store.event(rid, 'package_contract_failed', {'error': str(exc)[:200]})
             # 复用 Planner 结果重试 Tester 时，带上上次被拒绝的原因：否则上下文和第一次完全一样，同样的输出会连续被拒三次（评测里 hello 因此失败）。
             # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
             if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
             checks = self.call(rid, provider, 'project_tester', tester_values)
-            validate_checks(checks,spec,require_coverage=False)
+            # Planner 示例确定性地并入测试检查（放在最前面），模型不转抄 / the Planner's examples are merged into the test check deterministically (first), no model re-types them
+            from masa.domain.examples import merge_into_checks
+            checks = merge_into_checks(checks, spec, pack.op_id('test')) if examples_as_tests else checks
+            if spec.get('examples'):
+                self.store.event(rid, 'planner_examples', {'count': len(spec['examples']), 'names': [e['name'] for e in spec['examples']]})
+            validate_checks(checks,spec,require_coverage=False,language=pack.id)
+            if audit_provider is not None:
+                self._audit_cases(rid,audit_provider,goal,spec,checks,plan)
             # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
-            plan['test_review']=review_test_plan(spec,checks)
+            plan['test_review']=review_test_plan(spec,checks,pack.id)
             covered={i for c in checks for i in c['acceptance_indices']}
             missing=sorted(set(range(len(spec['acceptance'])))-covered)
             if missing:
                 # 补的是待审核计划而不是验证结果；明确暴露模型遗漏。
                 # Supplement a reviewable plan, never evidence; expose the model's omissions.
-                test=next(c for c in checks if c['operation']=='go_test')
+                test=next(c for c in checks if c['operation']==pack.op_id('test'))
                 test['acceptance_indices']=sorted(set(test['acceptance_indices'])|set(missing))
                 test['purpose']+='\nRuntime review required: add verification for criteria '+', '.join(str(i+1) for i in missing)+'. Coverage is not proof; manually review non-testable constraints.'
                 plan['coverage_warning']='Tester 遗漏验收项 '+', '.join(str(i+1) for i in missing)+'；Runtime 已补入待审核验证计划，请确认策略是否足够。'
                 self.store.event(rid,'check_plan_supplemented',{'missing_indices':missing,'policy':'human review required; not verification evidence'})
-            Runtime.compile_project_checks(spec, checks)
+            Runtime.compile_project_checks(spec, checks, pack.id)
             plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
             self.update(rid, plan, 'paused', 'project_review_requested')
             return rid
@@ -132,19 +169,53 @@ class ProjectPlanning:
             self.update(rid, plan, 'failed', 'project_planning_failed')
             raise stage_error(exc, f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
 
-    def record_triage_block(self, goal, triage):
+    def record_triage_block(self, goal, triage, language=None):
         """确定会失败的需求：不调用任何模型，只留下一条带原因和改写建议的失败记录，方便在历史里看到为什么。
         A requirement that is certain to fail: no model call, just a failed record with reasons and rewrites for the history."""
         text(goal, 16000)
         seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
         seed.mkdir(parents=True)
-        (seed/'go.mod').write_text('module example.com/planning\n\ngo 1.27.0\n', encoding='utf-8')
+        pack = registry.for_run({'language': language})
+        for name, content in pack.planning_seed().items():
+            (seed/name).write_text(content, encoding='utf-8')
         reasons='; '.join(f['reason'] for f in triage['findings'] if f['level']=='infeasible')
-        plan={'status':'failed','provider':{},'template':'go-cli','dependencies':[],'triage':triage,'error':'infeasible: '+reasons[:600]}
-        rid=Runtime(self.store,self.executor).create(seed,goal,Budget(model_calls=1,deadline_seconds=86400),graph=harness_policy(),project_plan=plan)
+        plan={'status':'failed','provider':{},'template':pack.layout['template'],'dependencies':[],'triage':triage,'error':'infeasible: '+reasons[:600]}
+        rid=Runtime(self.store,self.executor).create(seed,goal,Budget(model_calls=1,deadline_seconds=86400),graph=harness_policy(pack.id),project_plan=plan,language=pack.id)
         self.store.event(rid,'triage_blocked',{'rules':[f['rule'] for f in triage['findings'] if f['level']=='infeasible']})
         self.update(rid,plan,'failed','project_triage_blocked')
         return rid
+
+    def _audit_cases(self, rid, provider, goal, spec, checks, plan, samples=None):
+        """Tester 用例审计（策略 test_audit，默认关闭）：便宜的模型只看输入盲推导，再与 Tester 的期望比较，多数认为不一致的用例被丢弃。
+        每次调用都经过持久角色层（计入预算、可恢复），结果写进计划和账本事件。任何失败都保持原用例不变。
+        Tester case audit (policy test_audit, off by default): a cheap model derives blindly from the inputs, the result is compared with the Tester's expectation and cases a majority finds suspect are dropped.
+        Every call goes through the durable role layer (budgeted, recoverable); the outcome is stored in the plan and as a ledger event. Any failure leaves the cases untouched."""
+        from masa.application.checks.case_audit import audit_cases, apply
+        pack=self._pack_of(rid)
+        test=next((c for c in checks if c['operation']==pack.op_id('test')),None)
+        if test is None or not test.get('cases'):return
+        counter={'case_deriver':0,'case_judge':0}
+        def ask(purpose,values):
+            n=counter[purpose];counter[purpose]+=1
+            return RoleRuntime(self.store).call(rid,provider,purpose,values,invocation_id='initial' if n==0 else f's{n}',freeze_key='audit_snapshot_ref')
+        def derive(views):
+            return {a['index']:a['result'] for a in ask('case_deriver',{'goal':goal,'acceptance':spec['acceptance'],'cases':views})['answers']}
+        def judge(pairs):
+            return {a['index']:a['same'] for a in ask('case_judge',{'pairs':pairs})['answers']}
+        try:
+            status=audit_cases(test['cases'],derive,judge,samples=samples or AUDIT_SAMPLES)
+            kept,dropped=apply(test['cases'],status)
+            if dropped:
+                trial=[dict(c,cases=kept) if c is test else c for c in checks]
+                validate_checks(trial,spec,require_coverage=False,language=pack.id)  # 丢弃之后仍须是合法计划 / the plan must stay valid after dropping
+                test['cases']=kept
+        except Exception as exc:  # 审计只是增强：失败不能挡住规划 / the audit is an enhancement: a failure must not block planning
+            plan['case_audit']={'error':str(exc)[:200]}
+            self.store.event(rid,'case_audit_failed',{'error':str(exc)[:200]})
+            return
+        plan['case_audit']={'status':{str(i):s for i,s in status.items()},'dropped':dropped}
+        self.store.event(rid,'case_audit',{'cases':len(status),'dropped':dropped,'suspect':sum(1 for s in status.values() if s=='disagree'),
+                                           'agree':sum(1 for s in status.values() if s=='agree'),'abstain':sum(1 for s in status.values() if s=='abstain')})
 
     def call(self, rid, provider, purpose, values):
         """角色调用交给持久执行层，恢复时复用已保存响应。 Delegate calls to durable execution and reuse saved responses."""
@@ -178,14 +249,16 @@ class ProjectPlanning:
                 raise MasaError('project plan is not awaiting review')
             if body.get('spec_ref') != plan.get('spec_ref') or body.get('checks_ref') != plan.get('checks_ref'):
                 raise MasaError('stale project proposal')
-            spec = validate_spec(body.get('spec'))
+            pack = registry.for_run(run['data'])
+            spec = validate_spec(body.get('spec'), pack.id)
             checks = body.get('checks')
-            graph = Runtime.compile_project_checks(spec, checks)
-            review=review_test_plan(spec,checks)
+            graph = Runtime.compile_project_checks(spec, checks, pack.id)
+            review=review_test_plan(spec,checks,pack.id)
             if review['status']=='blocked':
                 raise MasaError('test plan review blocked: '+next(f['message'] for f in review['findings'] if f['severity']=='blocking'))
             plan['test_review']=review
             approval = {'spec':spec, 'checks':checks, 'graph':graph.to_dict()}
+            if plan.get('contract'):approval['contract'] = plan['contract']  # Developer / Repair 的上下文会带上同一份契约 / the Developer and Repair contexts carry the same contract
             plan.update(status='approved', approval_ref=self.store.put(approval))
             if body.get('review_mode')=='automatic':plan['review_mode']='automatic'
             # 状态和审批事件一起提交，不能形成部分批准。

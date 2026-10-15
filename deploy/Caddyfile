@@ -1,0 +1,12 @@
+# 公网部署的反向代理：自动 HTTPS（Let's Encrypt）+ 基本认证 + 把请求转给 masa 容器。
+# Reverse proxy for a public host: automatic HTTPS (Let's Encrypt), basic auth, and forwarding to the masa container.
+# 生成密码哈希 / make the password hash:  docker run --rm caddy:2 caddy hash-password --plaintext 'your-password'
+{$MASA_DOMAIN} {
+	basic_auth {
+		{$MASA_BASIC_USER} {$MASA_BASIC_HASH}
+	}
+	encode zstd gzip
+	# 保留原始 Host：后端按它判断是否允许访问（MASA_ALLOWED_HOSTS 里要有这个域名）。
+	# The original Host is preserved: the backend allows access by it (the domain must be in MASA_ALLOWED_HOSTS).
+	reverse_proxy masa:8765
+}

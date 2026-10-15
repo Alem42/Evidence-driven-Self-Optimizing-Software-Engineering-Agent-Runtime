@@ -11,7 +11,7 @@ from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
 from masa.intelligence.context import ContextBuilder
 from masa.domain.models import Budget, MasaError
-from masa.intelligence.index import Intelligence
+from masa.languages.go.index import Intelligence
 from masa.intelligence.memory import Memory
 from masa.runtime.patches import Patches
 from masa.runtime.engine import Runtime

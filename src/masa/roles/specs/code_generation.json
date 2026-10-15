@@ -1,0 +1,16 @@
+{
+  "id": "code_generation",
+  "label": "单文件代码提案",
+  "description": "（历史）为单个文件生成替换内容",
+  "order": 90,
+  "level": null,
+  "routable": false,
+  "config_allowed": true,
+  "legacy": true,
+  "permissions": {
+    "reads": [],
+    "writes": "none"
+  },
+  "validator": "code_proposal",
+  "prompt": "code_generation.prompt.md"
+}

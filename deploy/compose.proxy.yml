@@ -1,0 +1,23 @@
+# Standalone hosts only. Do not use on a server whose 80/443 already belong to Caddy.
+# docker compose -f docker-compose.yml -f deploy/compose.proxy.yml up -d --build
+services:
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      masa:
+        condition: service_healthy
+    environment:
+      MASA_DOMAIN: "${MASA_DOMAIN:?set MASA_DOMAIN}"
+      MASA_BASIC_USER: "${MASA_BASIC_USER:-demo}"
+      MASA_BASIC_HASH: "${MASA_BASIC_HASH:?set MASA_BASIC_HASH}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+volumes:
+  caddy-data:
+  caddy-config:

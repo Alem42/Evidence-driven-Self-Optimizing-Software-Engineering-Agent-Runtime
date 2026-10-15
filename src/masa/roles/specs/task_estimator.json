@@ -1,0 +1,52 @@
+{
+  "id": "task_estimator",
+  "label": "任务规模估计",
+  "description": "新任务页里，用户一边写需求，本地模型一边快速估计任务规模（难度等级、文件数、系统能不能处理）；只用本地模型，不写账本，只给建议",
+  "order": 71,
+  "level": null,
+  "optional": true,
+  "routable": false,
+  "config_allowed": false,
+  "permissions": {
+    "reads": [
+      "goal"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "task_estimator.prompt.md",
+  "max_output_tokens": 300,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "level",
+      "files",
+      "fits",
+      "reason"
+    ],
+    "properties": {
+      "level": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      },
+      "files": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "fits": {
+        "enum": [
+          "yes",
+          "risky",
+          "no"
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "maxLength": 200
+      }
+    }
+  }
+}

@@ -35,3 +35,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $projectRoot '.venv\Scripts\python.e
 . (Join-Path $PSScriptRoot 'activate.ps1')
 python --version
 if ($LASTEXITCODE -ne 0) { throw 'Python verification failed.' }
+# 生成项目用的 Python 环境（和 masa 自己的 .venv 分开）：.tools/pyenv。已存在就跳过；第三方包只会装进这里，永远不碰系统环境。
+# The Python environment generated projects run on (separate from masa's own .venv): .tools/pyenv. Skipped when it exists; third-party packages only ever go in here, never into the system environment.
+$pyEnv = Join-Path $toolsDir 'pyenv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $pyEnv)) {
+    python -m venv (Join-Path $toolsDir 'pyenv')
+    if ($LASTEXITCODE -ne 0) { throw 'Project Python environment creation failed.' }
+}
+& $pyEnv --version

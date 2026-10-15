@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from masa.application.coordinator import WorkflowCoordinator
-from masa.application.router import Router
-from masa.application.routing import DEFAULT_POLICY, validate_policy
+from masa.application.orchestration.coordinator import WorkflowCoordinator
+from masa.application.orchestration.router import Router
+from masa.application.orchestration.routing import DEFAULT_POLICY, validate_policy
 from masa.domain.models import MasaError, TransportFailure
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.llm import ChatProvider
@@ -206,3 +206,37 @@ class WaitTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReachableButSilentTests(CoordinatorTransportTests):
+    """服务器可达却一直没有响应（大模型冷加载超时）：不能原地重复，要升级。 A reachable server that stays silent (a big model's cold load timing out): escalate instead of repeating."""
+
+    def test_two_silent_failures_on_a_reachable_local_server_escalate_to_the_next_candidate(self):
+        executor = FakeExecutor(exit_code=1)
+        local = FlakyLocal('small', fail_first=99)
+        local.config = {'model_type': 'local'}
+        local.reachable = lambda: True  # 探测立刻成功 / the probe succeeds at once
+
+        class Strong(Cloud):
+            def respond(self, context):
+                if context['purpose'] == 'project_repair':
+                    executor.exit_code = 0
+                    return {'internal/app/app.go': 'package app\n\nfunc Value() int { return 42 } // fixed\n'}
+                return FlakyLocal.respond(self, context)
+        providers = {'local': local, 'cloud': Strong()}
+        providers['cloud'].config = {'model_type': 'cloud'}
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = Store(Path(temp.name))
+        self.addCleanup(store.close)
+        snapshot = {'version': 1, 'mode': 'ladder', 'policy': validate_policy({**DEFAULT_POLICY, 'prefer_highest_roles': ['project_diagnoser']}), 'budget': dict(BUDGET),
+                    'candidates': [fake_entry('local', 1, 'small', 'local'), fake_entry('cloud', 2, 'big', 'cloud')]}
+        jobs = Jobs(Path(temp.name))
+        jobs['job'] = {'status': 'running', 'run_id': None, 'mode': 'auto', 'phase': 'planning', 'attempt': 0, 'started': 0, 'request': {'goal': 'Build a CLI'}}
+        router = Router(store, snapshot, lambda entry: providers[entry['id']])
+        with patch('masa.intelligence.repair_context.build_repair_context', lambda s, e, r, f, ev, fb: (f, None)):
+            WorkflowCoordinator(store, executor, None, jobs['job'], router=router).run()
+        self.assertEqual(local.calls, 2)  # 只试两次，不是 transport_retries（6）次 / two tries, not the six of transport_retries
+        decisions = [e['payload'] for r in store.all_runs() for e in store.events(r['id']) if e['type'] == 'route_decided' and e['payload']['role'] == 'project_repair']
+        self.assertTrue(any(d['escalated'] and d['model'] == 'big' for d in decisions), decisions)
+        self.assertEqual(store.run(jobs['job']['result']['id'])['status'], 'succeeded')

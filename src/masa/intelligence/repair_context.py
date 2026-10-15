@@ -1,8 +1,9 @@
 """按失败位置选择修复材料。 Select repair context from failures and syntax evidence."""
 import re
-from masa.intelligence.index import Intelligence
+from masa.languages.go.index import Intelligence
 from masa.intelligence.context import ContextBuilder
 from masa.domain.models import canonical
+from masa.languages.registry import registry
 
 
 def build_repair_context(store, executor, rid, files, evidence, feedback):
@@ -19,7 +20,7 @@ def build_repair_context(store, executor, rid, files, evidence, feedback):
     # 没有定位证据时回退完整输入，不能仅因预算把实现猜掉。
     # Fall back to full input when there is no useful localization evidence.
     if not directly_named:selected=set(files)
-    selected.update(path for path in files if path=='go.mod' or path.endswith('_test.go'))
+    selected.update(registry.for_run(store.run(rid)['data']).keep_paths(files))  # 清单与测试永远保留 / the manifest and tests are always kept
     chosen={path:value for path,value in files.items() if path in selected}
     report={'policy':'diagnostic-and-ast-v1','snapshot_id':store.run(rid)['data']['snapshot_id'],
             'selected':list(chosen),'omitted':[p for p in files if p not in chosen],

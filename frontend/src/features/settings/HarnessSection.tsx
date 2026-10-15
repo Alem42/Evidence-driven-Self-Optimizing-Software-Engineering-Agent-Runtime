@@ -12,7 +12,10 @@ export function HarnessSection() {
         <dl className="facts">
           <dt>后端 API</dt><dd><code>{API_BASE}</code> <Badge tone={online ? 'ok' : 'bad'} dot>{online ? '已连接' : '未连接'}</Badge></dd>
           <dt>Console 版本</dt><dd>{bootstrap?.console_version ?? '—'}</dd>
-          <dt>Go runner</dt><dd><Badge tone={bootstrap?.runner_ready ? 'ok' : 'bad'} dot>{bootstrap?.runner_ready ? '就绪' : '未就绪'}</Badge></dd>
+          <dt>runner（沙箱执行器）</dt><dd><Badge tone={(bootstrap?.runner_exists ?? bootstrap?.runner_ready) ? 'ok' : 'bad'} dot>{(bootstrap?.runner_exists ?? bootstrap?.runner_ready) ? '就绪' : '未就绪'}</Badge></dd>
+          {(bootstrap?.languages ?? []).map((l) => (
+            <span key={l.id} style={{ display: 'contents' }}><dt>{l.title ?? l.id} 工具链</dt><dd><Badge tone={l.ready ? 'ok' : 'bad'} dot>{l.ready ? '就绪' : '未就绪'}</Badge></dd></span>
+          ))}
         </dl>
       </Card>
       <Card title="后端能力" subtitle="来自 /api/bootstrap 的真实标记。未实现的能力显示为关闭，不做假状态。">
@@ -22,7 +25,7 @@ export function HarnessSection() {
           ))}
         </div>
       </Card>
-      <Card title="检查策略（预留）" subtitle="未来在此配置检查白名单、超时、语言/工具链（Go 之外的项目）。需要后端提供配置接口。" />
+      <Card title="检查策略（预留）" subtitle="语言与工具链的配置在「语言」分区；检查白名单与超时目前由各语言包的操作表固定。" />
     </div>
   );
 }

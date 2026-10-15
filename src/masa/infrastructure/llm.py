@@ -8,11 +8,15 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
+from masa.languages.registry import registry as languages
 from masa.domain.models import CallCancelled, MasaError, TransportFailure, canonical, ContextOverflow
 from masa.infrastructure.streaming import (StreamAssembler, StreamCancelled, StreamError, StreamStalled, StreamTimeout, StreamTooLarge,
                                            abandon, read_stream)
+from masa.domain.prompt_layout import render as render_prompt
 from masa.domain.tokens import estimate_tokens_lower
 from masa.agents.protocol import instruction_for, validate_response
+from masa.roles import registry
+from masa.infrastructure import capability
 from masa.agents.schemas import response_schema
 
 
@@ -45,7 +49,7 @@ def validate_config(config):
         if type(value) is not int or not low<=value<=high:raise MasaError('invalid '+name)
         values[name]=value
     roles=config.get('roles',[])
-    allowed={'project_planner','project_tester','project_developer','project_repair','project_test_revision','project_test_reviewer','project_triage','project_diagnoser','code_generation','verifier'}
+    allowed=registry.current().config_roles()  # 来自 RoleSpec 注册表 / from the RoleSpec registry
     if not isinstance(roles,list) or any(not isinstance(r,str) or r not in allowed for r in roles) or len(set(roles))!=len(roles):
         raise MasaError('invalid model roles')
     values['roles']=roles
@@ -106,10 +110,45 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+# 工人角色每步只执行一个动作：模型按它自己的“原生工具调用”习惯，常在第一个 JSON 之后再追加第二个动作或一段标记（真实运行里 Flash 就是这样）。只对这些角色接受“第一个完整 JSON 对象 + 其后的杂质”，其余角色仍然严格。
+# A worker role executes ONE action per step: following its native tool-calling habit the model often appends a second action or some markup after the first JSON (that is what Flash did in real runs). Only these roles accept
+# "the first complete JSON object followed by trailing junk"; every other role stays strict.
+LENIENT_TRAILING = frozenset({'package_worker', 'project_repair', 'project_test_revision', 'project_developer', 'project_tester', 'project_planner', 'project_diagnoser'})
+
+
+def decode_action(content, purpose=None):
+    """把模型的回答解码成 JSON 动作；工人角色容忍第一个对象之后的多余内容。 Decode the model's answer into a JSON action; worker roles tolerate junk after the first object."""
+    try:
+        return json.loads(content, strict=False)  # strict=False：字符串里的原始换行/制表符不算错（模型写代码时常见）/ raw newlines and tabs inside strings are accepted (common when a model writes code)
+    except json.JSONDecodeError as exc:
+        if purpose in LENIENT_TRAILING and exc.msg.startswith('Extra data'):
+            first, _end = json.JSONDecoder(strict=False).raw_decode(content.lstrip())
+            if isinstance(first, dict):
+                return first
+        raise
+
+
+def cache_usage(usage):
+    """服务端报告的提示缓存命中情况（DeepSeek：prompt_cache_hit/miss_tokens；OpenAI 兼容：prompt_tokens_details.cached_tokens）。没有报告就返回空：旧账本与默认用量一字不变，未知不是零。
+    Prompt-cache hits as reported by the server; empty when not reported, so existing usage records stay identical and unknown never becomes zero."""
+    valid = lambda n: type(n) is int and n >= 0
+    hit, miss = usage.get('prompt_cache_hit_tokens'), usage.get('prompt_cache_miss_tokens')
+    if valid(hit) and valid(miss):
+        return {'prompt_cache_hit_tokens': hit, 'prompt_cache_miss_tokens': miss}
+    details = usage.get('prompt_tokens_details')
+    cached, prompt = (details.get('cached_tokens') if isinstance(details, dict) else None), usage.get('prompt_tokens')
+    if valid(cached) and valid(prompt) and cached <= prompt:
+        return {'prompt_cache_hit_tokens': cached, 'prompt_cache_miss_tokens': prompt - cached}
+    return {}
+
+
 class ChatProvider:
     def __init__(self, config, key=''):
         """固定本次运行配置，密钥不进入 profile。 Freeze run configuration without exposing credentials."""
         self.config = validate_config(config)
+        if not capability.local_allowed() and (self.config['model_type'] == 'local'
+                or urlsplit(self.config['base_url']).hostname in {'localhost', '127.0.0.1', '::1'}):
+            raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
         if not self.config["base_url"] or not self.config["model"] or (self.config['model_type']=='cloud' and not key):
             raise MasaError("provider requires Base URL, model and API key")
         if not isinstance(key, str) or len(key) > 8192 or "\n" in key or "\r" in key:
@@ -137,6 +176,7 @@ class ChatProvider:
         # Streaming hooks set by RoleRuntime before every call: should_cancel() true aborts the connection; on_progress(info) receives live progress.
         self.should_cancel = None
         self.on_progress = None
+        self.on_text = None  # 实时输出：RoleRuntime 在每次调用前设置 / live output: set by RoleRuntime before every call
 
     def unload(self):
         """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
@@ -189,10 +229,12 @@ class ChatProvider:
             self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
         )
         instruction = instruction_for(context)
-        if self.config['protocol']=='ollama' and purpose=='project_tester':
-            instruction+=' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
-        if self.config['protocol']=='ollama' and purpose=='project_developer' and context.get('generation_mode')!='files-v1':
-            instruction+=' Copy this exact go.mod value: '+json.dumps(f"module {context['spec']['module']}\n\ngo 1.27.0\n")+'. Keep implementation concise. Avoid repetitive comments.'
+        if context.get('user_notes'):  # 只有用户追加了提示时才出现，默认的提示词逐字节不变 / only when the user added notes, so default prompts stay byte-identical
+            from masa.runtime.user_input import NOTES_INSTRUCTION
+            instruction += NOTES_INSTRUCTION
+        if self.config['protocol']=='ollama':
+            # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
+            instruction+=languages.for_run(context).transport_hint(context)
         # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
         # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
         streaming = bool(self.config.get('streaming', True))
@@ -200,7 +242,7 @@ class ChatProvider:
             "model": self.config["model"],
             "messages": [
                 {"role": "system", "content": instruction},
-                {"role": "user", "content": canonical(context)},
+                {"role": "user", "content": render_prompt(context)},  # 稳定内容在前，利于服务端前缀缓存（见 domain/prompt_layout.py）/ stable content first for the server's prefix cache
             ],
             "response_format": {"type": "json_object"},
             self.config["token_parameter"]: self.config["max_output_tokens"],
@@ -246,13 +288,16 @@ class ChatProvider:
             # 不读取错误响应正文，避免上游回显密钥或请求内容进入日志。
             # Never expose upstream error bodies, which may echo credentials or request contents.
             response = urllib.request.build_opener(NoRedirect()).open(
-                request, timeout=max(0.1, min(30.0, deadline - time.monotonic()))  # 连接阶段的时限；读取阶段由流式读取循环自己控制 / connect-phase limit; the read phase is governed by the stream loop
+                # 连接阶段的时限；读取阶段由流式读取循环自己控制。本地模型要等到加载完成才会有响应头（冷加载可达几十秒到几分钟），所以用“首字”时限而不是 30 秒——30 秒会把加载掐断，下一次再从头加载（真实运行里连续失败 4 次）。
+                # Connect-phase limit; the read phase is governed by the stream loop. A local model sends no response headers until it has loaded (a cold load takes tens of seconds to minutes), so it gets the first-token limit instead of 30 s:
+                # 30 s aborted the load and the next try started cold again (four failures in a row in a real run).
+                request, timeout=max(0.1, min(float(self.config.get('first_token_seconds', 900)) if self.config['model_type'] == 'local' else 30.0, deadline - time.monotonic()))
             )
             try:
                 local = self.config['model_type'] == 'local'
                 assembler = StreamAssembler(self.config['protocol'])
                 try:
-                    read_stream(response, assembler, deadline=deadline, should_cancel=self.should_cancel, on_progress=self.on_progress,
+                    read_stream(response, assembler, deadline=deadline, should_cancel=self.should_cancel, on_progress=self.on_progress, on_text=self.on_text,
                                 first_token_seconds=float(self.config.get('first_token_seconds', 900 if local else 240)),
                                 stall_seconds=float(self.config.get('stall_seconds', 180 if local else 90)))
                 except StreamCancelled:
@@ -323,6 +368,7 @@ class ChatProvider:
                     else None
                     for k in ("prompt_tokens", "completion_tokens", "total_tokens")
                 }
+                self.usage.update(cache_usage(usage))
             choice = decoded["choices"][0]
             if choice.get("finish_reason") != "stop" or choice["message"].get(
                 "refusal"
@@ -335,13 +381,14 @@ class ChatProvider:
             if not isinstance(content, str):
                 raise MasaError("model content must be text JSON")
             try:
-                action = json.loads(content.replace(self.key, "[REDACTED]") if self.key else content)
+                action = decode_action(content.replace(self.key, "[REDACTED]") if self.key else content, purpose)
             except json.JSONDecodeError as exc:
                 # 已收到响应但契约无效，与结果不确定的网络失败区分；不输出原文。
                 # Distinguish a received invalid response from uncertain transport, without exposing content.
                 # 标记“已收到”，协调器才会带原因重试/升级，而不是把它当成网络失败直接中止（真实模拟中 DeepSeek 返回截断 JSON 即因此中止）。
                 # Mark it as RECEIVED so the coordinator retries/escalates instead of aborting as if it were a transport failure.
-                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[]}
+                # sample：出错位置附近的一小段原文（密钥已替换），只进本地账本，方便定位“模型到底写坏了什么”。 A short excerpt around the error (key redacted), stored only in the local ledger, to see what exactly the model broke.
+                self.contract_diagnostic={'action_type':'invalid_json','top_keys':[],'reason':exc.msg,'position':exc.pos,'length':len(content),'sample':content.replace(self.key,'[REDACTED]')[max(0,exc.pos-160):exc.pos+60] if self.key else content[max(0,exc.pos-160):exc.pos+60]}
                 raise MasaError(f'model action JSON invalid at line {exc.lineno}, column {exc.colno}; no automatic retry') from None
             # 只记录结构，不记录源码、思考或异常原文，用于定位收到后的契约失败。
             # Record response shape only, never code, thinking or raw exception text.
@@ -357,4 +404,12 @@ class ChatProvider:
                 if not isinstance(check,dict) or 'operation' in check:raise MasaError('invalid local check object')
                 checks.append({'operation':operation,**check})
             action={**action,'checks':checks}
-        return validate_response(context, action, self.key)
+        try:
+            return validate_response(context, action, self.key)
+        except MasaError:
+            # 被校验拒绝的计划类回答（规格、检查计划、诊断）留一小段原文在本地账本里：以前只留“被拒绝”三个字，没法知道模型到底写了什么（只有本地账本，密钥已替换；代码类角色不存）。
+            # Keep a short excerpt of a rejected planning-type answer (spec, check plan, diagnosis) in the local ledger: before, only "rejected" survived and nobody could see what the model wrote (local ledger only, key redacted; code roles are not stored).
+            if purpose in ('project_planner', 'project_tester', 'project_diagnoser', 'project_triage') and isinstance(self.contract_diagnostic, dict):
+                raw = json.dumps(action, ensure_ascii=False)[:1500]
+                self.contract_diagnostic['rejected'] = raw.replace(self.key, '[REDACTED]') if self.key else raw
+            raise

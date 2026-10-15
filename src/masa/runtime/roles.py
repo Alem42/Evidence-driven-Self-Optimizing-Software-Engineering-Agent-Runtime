@@ -3,7 +3,7 @@ import time
 from masa.domain.models import MasaError, TransportFailure
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure.llm import ChatProvider
-from masa.runtime import live
+from masa.runtime import live, user_input
 
 
 class RoleRuntime:
@@ -32,15 +32,29 @@ class RoleRuntime:
                     SELECT run_id,purpose,'initial',1,input_ref,route_ref,status,output_ref,started,finished FROM role_calls""")
                 store.db.execute("INSERT INTO schema_migrations VALUES('role_invocations_v1')")
 
-    def call(self, rid, provider, purpose, values, *, invocation_id="initial", freeze_key="model_snapshot_ref"):
+    def call(self, rid, provider, purpose, values, *, invocation_id="initial", freeze_key="model_snapshot_ref", continue_after_failure=False):
         """完成的调用不再付费重放；未知调用要求显式处理。 Reuse completed calls; never silently replay uncertain requests.
         freeze_key：同一个 run 里由不同模型承担的“职位”（如更强的测试作者）各自冻结自己的配置，互不冲突。
+        continue_after_failure：上一次调用明确失败（已有结论，不是结果不明）时允许继续下一次调用——自主循环里一步写坏了不该让整个循环作废。
+        continue_after_failure: allow the next call after a previous call that definitely failed (a known outcome, not an uncertain one): in an autonomous loop one bad step must not void the loop.
         freeze_key: a distinct role slot in one run (e.g. a stronger test author) freezes its own configuration without clashing."""
         if not isinstance(invocation_id,str) or not invocation_id or len(invocation_id)>100:
             raise MasaError('invalid role invocation id')
         if 'purpose' in values:
             raise MasaError('role values cannot override purpose')
         context = {'purpose': purpose, **values}
+        # 非默认语言的运行把语言写进每次角色调用的上下文：提示词与校验据此选语言包；默认语言的上下文保持原样（逐字节相同）。
+        # A run in a non-default language puts it into every role context so prompts and validators pick the pack; default-language contexts stay byte-identical.
+        language = self.store.run(rid)['data'].get('language')
+        if language and 'language' not in values:
+            context['language'] = language
+        # 用户在任务运行中追加的提示：只进入“之后才开始”的调用；已存在的调用沿用它当时的提示（否则输入身份对不上）。
+        # User notes added while the task runs: only calls that start later get them; an existing invocation keeps the notes it was created with (or its input identity would change).
+        if 'user_notes' not in values:
+            existing = self.store.db.execute('SELECT input_ref FROM role_invocations WHERE run_id=? AND purpose=? AND invocation_id=?', (rid, purpose, invocation_id)).fetchone()
+            notes = self.store.read(existing['input_ref']).get('user_notes') if existing else user_input.notes_for(self.store, rid)
+            if notes:
+                context['user_notes'] = notes
         context_ref = self.store.put(context)
         route_ref = self.store.put(provider.profile)
         with owner_lock(self.store.root/'role-locks'/f'{rid}.lock'):
@@ -61,7 +75,7 @@ class RoleRuntime:
                 retry_same = True
             previous=self.store.db.execute('SELECT * FROM role_invocations WHERE run_id=? AND purpose=? ORDER BY attempt_no DESC LIMIT 1',(rid,purpose)).fetchone()
             if not retry_same:
-                if previous and previous['status']!='completed':
+                if previous and previous['status']!='completed' and not (continue_after_failure and previous['status']=='failed'):
                     raise MasaError('previous role result unavailable; cannot bypass unresolved invocation')
                 if invocation_id!='initial' and not previous:
                     raise MasaError('role continuation requires an initial invocation')
@@ -103,7 +117,9 @@ class RoleRuntime:
                 if isinstance(provider,ChatProvider):
                     # 流式：每个数据块之间检查取消标志，并上报实时进度。 Streaming: check the cancel flag between chunks and report live progress.
                     provider.should_cancel=lambda:bool(self.store.run(rid)['cancel_requested'])
+                    live.begin(rid,purpose,invocation_id,(provider.profile or {}).get('model'))
                     provider.on_progress=lambda info:live.update(rid,purpose,(provider.profile or {}).get('model'),info)
+                    provider.on_text=lambda text:live.append(rid,text)
                     remaining=run['data']['deadline_at']-time.time()
                     if remaining<=0:
                         raise MasaError('role run cancelled or deadline expired')

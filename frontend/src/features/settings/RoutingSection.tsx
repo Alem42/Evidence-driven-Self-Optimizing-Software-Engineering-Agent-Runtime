@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { qk, useProfiles } from '../../api/queries';
+import { qk, useProfiles, useRoles } from '../../api/queries';
 import type { RoutingBudget, RoutingPolicy } from '../../api/types';
 import { useActivity } from '../../app/activity';
 import { byRouting, profileLabel, profileLevel, profileReady } from '../../entities/profiles';
+import { CONDUCTOR_RISK } from '../../entities/roles';
 import { stageLabels } from '../../entities/status';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 
-const ROLES = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision'];
+const FALLBACK_ROLES = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision'];
 const CHAIN_NAMES: Record<string, string> = { planning: '规划', generation: '生成', fix: '修复' };
 
 type Draft = { policy: RoutingPolicy; budget: RoutingBudget };
@@ -19,6 +20,9 @@ type Draft = { policy: RoutingPolicy; budget: RoutingBudget };
 export function RoutingSection() {
   const qc = useQueryClient();
   const profiles = useProfiles();
+  // 起步等级可按角色设置：角色清单来自 RoleSpec 注册表（新增角色自动出现）。 Per-role start levels: the list comes from the RoleSpec registry (new roles appear automatically).
+  const roles = useRoles().data;
+  const ROLES = roles?.length ? roles.filter((r) => r.routable).map((r) => r.id) : FALLBACK_ROLES;
   const defaults = useActivity().bootstrap?.routing_defaults;
   const [draft, setDraft] = useState<Draft | null>(null);
   useEffect(() => {
@@ -45,7 +49,8 @@ export function RoutingSection() {
             step={step}
             disabled={value == null}
             value={value == null ? '' : value / scale}
-            onChange={(e) => setBudget(key, e.target.value === '' ? null : Number(e.target.value) * scale)}
+            // 清空输入框得到 0 而不是“不限”（不限只由右边的勾选控制）；否则删光再输入会被误当作取消限制。 Clearing the box gives 0, not "unlimited" (only the checkbox controls that); otherwise erasing and retyping toggled the limit off.
+            onChange={(e) => setBudget(key, e.target.value === '' ? 0 : Number(e.target.value) * scale)}
           />
           <span className="muted">{unit}</span>
           <label className="check">
@@ -98,6 +103,59 @@ export function RoutingSection() {
           </Field>
           <Field label="规划重试次数">
             <input type="number" min={1} max={4} value={draft.policy.planner_retries} onChange={(e) => setPolicy({ planner_retries: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <h4>Tester 用例审计（实验，默认关闭）</h4>
+        <Notice tone="warn">真实配对评测（3 轮，17 个有效配对）：开启后 5 个更好、0 个更差、12 个持平；通过 16/21 对 11/20，平均费用 −36%。但样本仍小、噪声大，且发现一个共同的假通过（wc）。想试用时再开，细节见“实验结果”页。</Notice>
+        <p className="hint">规划阶段，便宜的云端模型（Flash）只看用例的输入、不看期望，独立推导 3 次，再与 Tester 写的期望比较；多数认为不一致的用例被丢弃（最少保留 3 个）。每个任务约多 6 次廉价调用（≈ ¥0.01）。只在天梯模式且有云端模型时生效。</p>
+        <div className="grid2">
+          <Field label="启用 Tester 用例审计">
+            <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
+          </Field>
+        </div>
+        {/* 经验库已停用（留出任务上命中 0 次），设置项暂时隐藏；代码保留在 intelligence/library.py。 The experience library is switched off; its setting is hidden for now. */}
+        <h4>多包项目的三个实验开关（默认关闭）</h4>
+        <Notice tone="warn">来自第一次 10 文件项目（bank）的失败分析：跨包契约不一致、测试期望收敛不了。这三项只做了单元测试和 1 次受预算限制的真实运行，还没有配对评测，不要指望它们已经被证明有效。“导入检查”（生成时就地重写导入了规格里不存在的内部包的文件）是确定性的、零 token，已默认开启。</Notice>
+        <div className="grid2">
+          <Field label="包间接口契约（规格里至少 3 个内部包时，写代码前先写结构化契约）">
+            <input type="checkbox" checked={!!draft.policy.package_contract} onChange={(e) => setPolicy({ package_contract: e.target.checked })} />
+          </Field>
+          <Field label="Planner 示例（Planner 额外写 3–8 个“参数/标准输入 → 逐字节输出/退出码”的示例，作为唯一的精确期望来源；Tester 自动并入，任务成功后用真实程序再核对一遍，只记录不改变裁决）">
+            <input type="checkbox" checked={!!draft.policy.planner_examples} onChange={(e) => setPolicy({ planner_examples: e.target.checked })} />
+          </Field>
+          <Field label="断言裁判（失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为 Diagnoser 的独立证据）">
+            <input type="checkbox" checked={!!draft.policy.assertion_referee} onChange={(e) => setPolicy({ assertion_referee: e.target.checked })} />
+          </Field>
+        </div>
+        <h4>规模自适应的分层上下文（实验，默认关闭）</h4>
+        <p className="hint">任务小（全部内容放得进窗口的 35%）时原样全给，什么都不改；只有放不下窗口的大项目，才把与当前文件无关的已生成文件降级为“只有声明的轮廓”，同目录文件、测试和清单文件永远完整，并把决定写进账本。云端大窗口模型几乎不会触发；对 16k 窗口的本地模型更有意义。</p>
+        <div className="grid2">
+          <Field label="启用分层上下文">
+            <input type="checkbox" checked={!!draft.policy.context_budget} onChange={(e) => setPolicy({ context_budget: e.target.checked })} />
+          </Field>
+        </div>
+        <h4>多次尝试（best-of-N，实验，默认 1 = 关）</h4>
+        <p className="hint">修复实现失败时，让最便宜的合格模型再生成 N-1 个候选，逐个真实验证，选通过的（或未解决条目最少的）。第一个候选通过就不再多花钱；只对“修复实现”生效，不对修订测试生效。真实评测（6 个任务配对）里通过率没有变化（4/6 对 4/6）、费用约 +15%，额外采样只在 1 个任务里触发且没有改善；主要失败（测试期望算错）不是它能解决的。</p>
+        <div className="grid2">
+          <Field label="每次修复的候选数 N（1–5）">
+            <input type="number" min={1} max={5} value={draft.policy.best_of_n ?? 1} onChange={(e) => setPolicy({ best_of_n: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <h4>指挥者（实验，默认关闭）</h4>
+        <Notice tone="warn">{CONDUCTOR_RISK}</Notice>
+        <p className="hint">只在补丁停滞或同一失败反复出现时，才让最强模型在已注册的候选步骤里选一个（它不能终止任务）；不合法的提议会被拒绝并回到规则。默认流程就是之前测试正常的那一套，不受这个开关影响。</p>
+        <div className="grid2">
+          <Field label="启用指挥者">
+            <input type="checkbox" checked={!!draft.policy.conductor} onChange={(e) => {
+              if (e.target.checked && !window.confirm('开启实验性的指挥者？ ' + CONDUCTOR_RISK)) return;
+              setPolicy({ conductor: e.target.checked });
+            }} />
+          </Field>
+          <Field label="每个任务最多询问次数">
+            <input type="number" min={1} max={12} value={draft.policy.conductor_max_calls ?? 6} onChange={(e) => setPolicy({ conductor_max_calls: Number(e.target.value) })} />
+          </Field>
+          <Field label="级联（先低等级，提议不合法再升级）">
+            <input type="checkbox" checked={!!draft.policy.conductor_cascade} onChange={(e) => setPolicy({ conductor_cascade: e.target.checked })} />
           </Field>
         </div>
         <h4>按角色的起始等级</h4>

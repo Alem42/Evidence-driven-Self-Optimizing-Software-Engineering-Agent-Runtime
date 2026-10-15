@@ -1,0 +1,57 @@
+{
+  "id": "expectation_deriver",
+  "label": "期望值推导者",
+  "description": "独立推导测试用例的期望输出（只读）；多次采样取多数，用来审计测试期望是否算错",
+  "order": 120,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "cases"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "expectation_deriver.prompt.md",
+  "max_output_tokens": 3000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "stdout",
+            "exit_code"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stdout": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "exit_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        }
+      }
+    }
+  }
+}

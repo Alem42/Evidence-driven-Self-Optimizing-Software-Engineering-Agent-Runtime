@@ -2,9 +2,11 @@
 // CodeMirror 6 wrapper: Go highlighting, read-only/editable, line markers and jump-to-line.
 import { useEffect, useRef } from 'react';
 import { basicSetup } from 'codemirror';
-import { EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
+import { Annotation, EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { go } from '@codemirror/lang-go';
+import { python } from '@codemirror/lang-python';
+import { highlightOf } from '../../entities/languages';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
@@ -33,6 +35,8 @@ export interface Marker {
 }
 
 const setMarkers = StateEffect.define<Marker[]>();
+/** 标记“不是用户改的”：程序替换内容（切换文件、流式写入）不能当成用户编辑回写。 Marks a change that did not come from the user (switching files, streaming) so it is never saved as an edit. */
+const external = Annotation.define<boolean>();
 const markerField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, tr) {
@@ -58,9 +62,13 @@ interface Props {
   onChange?: (value: string) => void;
   markers?: Marker[];
   jumpTo?: number;
+  /** 文件路径：按后缀选语法高亮。 The file path: picks the syntax highlighting by extension. */
+  path?: string;
+  /** 流式写入中：新内容只是在末尾追加（不整体替换），并保持滚动到最新一行。 Streaming: new content is appended at the end (no whole replacement) and the view follows the last line. */
+  tail?: boolean;
 }
 
-export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo }: Props) {
+export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo, path = '', tail = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -69,27 +77,36 @@ export function CodeEditor({ value, readOnly, onChange, markers = [], jumpTo }: 
   useEffect(() => {
     const extensions: Extension[] = [
       basicSetup,
-      go(),
+      ...(highlightOf(path) === 'python' ? [python()] : highlightOf(path) === 'go' ? [go()] : []),
       syntaxHighlighting(highlight),
       theme,
       markerField,
       EditorState.readOnly.of(readOnly),
       EditorView.editable.of(!readOnly),
       EditorView.updateListener.of((u) => {
-        if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
+        if (u.docChanged && !u.transactions.some((tr) => tr.annotation(external))) onChangeRef.current?.(u.state.doc.toString());
       }),
     ];
     view.current = new EditorView({ parent: host.current!, state: EditorState.create({ doc: value, extensions }) });
     return () => view.current?.destroy();
     // 只读状态变化时重建；内容同步见下方 effect。 Rebuild only when read-only changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, path]);
 
-  // 外部内容变化（切换文件）才整体替换，用户输入不回写，光标不跳动。
+  // 外部内容变化（切换文件）才整体替换，用户输入不回写，光标不跳动；流式写入时新内容以旧内容开头，只追加差额。
+  // Whole replacement only when the content changes from outside (switching files); while streaming the new text starts with the old, so only the difference is appended.
   useEffect(() => {
     const v = view.current;
-    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
-  }, [value]);
+    if (!v) return;
+    const current = v.state.doc.toString();
+    if (current === value) return;
+    const append = value.startsWith(current);
+    v.dispatch({
+      changes: append ? { from: current.length, insert: value.slice(current.length) } : { from: 0, to: current.length, insert: value },
+      annotations: external.of(true),
+      ...(tail ? { effects: EditorView.scrollIntoView(value.length, { y: 'end' }) } : {}),
+    });
+  }, [value, tail]);
 
   useEffect(() => {
     view.current?.dispatch({ effects: setMarkers.of(markers) });

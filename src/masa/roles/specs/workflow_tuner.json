@@ -1,0 +1,77 @@
+{
+  "id": "workflow_tuner",
+  "label": "工作流调优提议者",
+  "description": "离线调优：看评测摘要，提出一个小补丁（至多 3 条操作）去调路由策略或去掉可选的边；只提议，不执行",
+  "order": 110,
+  "level": "top",
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "space",
+      "current_result",
+      "tried"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "workflow_tuner.prompt.md",
+  "max_output_tokens": 800,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "rationale",
+      "patch"
+    ],
+    "properties": {
+      "rationale": {
+        "type": "string",
+        "maxLength": 300
+      },
+      "patch": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 3,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op"
+          ],
+          "properties": {
+            "op": {
+              "enum": [
+                "set",
+                "drop_edge",
+                "keep_edge"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "value": {
+              "type": [
+                "integer",
+                "boolean"
+              ]
+            },
+            "from": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "to": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "when": {
+              "type": "string",
+              "maxLength": 40
+            }
+          }
+        }
+      }
+    }
+  }
+}

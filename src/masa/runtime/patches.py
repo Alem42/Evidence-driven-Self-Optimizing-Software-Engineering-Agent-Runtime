@@ -9,6 +9,7 @@ import time
 from masa.domain.models import MasaError, canonical, digest
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure.workspaces import MAX_BYTES, manifest
+from masa.languages.registry import registry
 
 
 def content_hash(raw: bytes) -> str:
@@ -38,6 +39,7 @@ class Patches:
         files = body["files"]
         if not isinstance(files, list) or not 1 <= len(files) <= 20:
             raise MasaError("patch must contain 1..20 files")
+        pack = registry.for_run(data)
         before = self.store.read(data["manifest_ref"])
         workspace = Path(data["workspace"])
         if digest(before) != data["snapshot_id"] or manifest(workspace) != before:
@@ -47,13 +49,13 @@ class Patches:
             if not isinstance(change, dict) or set(change) != {"path", "before_sha256", "content"}:
                 raise MasaError("invalid patch file fields")
             path, content = change["path"], change["content"]
-            # 只写已跟踪的 Go 实现文件，拒绝路径别名、测试及模块配置。
-            # Restrict writes to tracked Go implementation files; reject aliases and policy files.
+            # 只写已跟踪的实现文件（语言包判定什么是实现文件），拒绝路径别名、测试及模块配置。
+            # Restrict writes to tracked implementation files (the language pack decides what that is); reject aliases and policy files.
             if (not isinstance(path, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", path)
                     or any(p in {"", ".", ".."} or p.endswith(".") for p in path.split("/"))
-                    or path not in before or not path.endswith(".go") or path.endswith("_test.go")
+                    or path not in before or not pack.is_source(path)
                     or path in paths):
-                raise MasaError("patch path must be a unique tracked Go implementation file")
+                raise MasaError(f"patch path must be a unique tracked {pack.title} implementation file")
             if not isinstance(content, str) or "\x00" in content:
                 raise MasaError("patch content must be UTF-8 text without NUL")
             raw = content.encode("utf-8")

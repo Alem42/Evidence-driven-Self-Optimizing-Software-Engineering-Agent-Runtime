@@ -1,0 +1,19 @@
+{
+  "id": "project_developer",
+  "label": "Developer 生成",
+  "description": "按批准的规格生成实现与测试文件",
+  "order": 30,
+  "level": "low",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "spec",
+      "previous_files"
+    ],
+    "writes": "implementation"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

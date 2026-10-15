@@ -7,8 +7,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from masa.application.router import build_snapshot
-from masa.application.routing import Candidate, DEFAULT_POLICY, route, validate_policy
+from masa.application.orchestration.router import build_snapshot
+from masa.application.orchestration.routing import Candidate, DEFAULT_POLICY, route, validate_policy
 from masa.domain.models import MasaError
 from masa.infrastructure import providers
 from masa.infrastructure.settings import Settings

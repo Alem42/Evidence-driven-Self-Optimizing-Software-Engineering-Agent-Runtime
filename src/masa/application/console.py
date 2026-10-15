@@ -11,27 +11,29 @@ import re
 
 from masa.infrastructure.runner import Runner
 from masa.infrastructure.store import Store
-from masa.domain.models import Budget, Graph, MasaError, OPERATIONS
+from masa.domain.models import Budget, Graph, MasaError
+from masa.languages.registry import registry
 from masa.application.reports import render
 from masa.runtime.engine import Runtime
 from masa.infrastructure.settings import Settings
 from masa.runtime.graph import full_verification_policy, collaboration_policy, harness_policy
-from masa.application.single_file import CodeGeneration
+from masa.languages.go.single_file import CodeGeneration
 from masa.infrastructure.workspaces import verify_snapshot
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
 from masa.application.projects import Projects
 from masa.application.usage import task_report
-from masa.application.router import Router, build_snapshot
-from masa.application.routing import DEFAULT_BUDGET, DEFAULT_POLICY
+from masa.application.orchestration.router import Router, build_snapshot
+from masa.application.orchestration.routing import DEFAULT_BUDGET, DEFAULT_POLICY
 from masa.runtime.roles import RoleRuntime
 from masa.infrastructure.jobs import Jobs
 from masa.infrastructure.ollama import OllamaControl
 from masa.infrastructure.hardware import HardwareMonitor
+from masa.infrastructure import capability
 from masa.infrastructure.diagnostics import DiagnosticLog
 
 
-from masa.application.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature
+from masa.application.checks.check_policy import test_revision_needed, repair_advice, test_format_only, format_only, repeated_assertion_signature  # noqa: F401 (re-exported)
 
 
 class Console:
@@ -44,7 +46,7 @@ class Console:
             Path(project),
         )
         self.settings = Settings(self.root)
-        # 如果跑过 scripts/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
+        # 如果跑过 scripts/eval/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
         from masa.domain.tokens import configure as configure_tokens
         configure_tokens(self.root / 'token-calibration.json')
         self.hardware = HardwareMonitor()
@@ -62,6 +64,68 @@ class Console:
         self.bench_thread = None
         Store(self.root).close()
 
+    def _runner(self):
+        """执行器；语言的工具链属于各自的语言包，缺失时只影响那种语言的任务（探测会告诉用户）。 The executor; a language's toolchain belongs to its pack, so a missing one only affects tasks in that language (the probe tells the user)."""
+        return Runner(self.runner_path, self.go_path if self.go_path.is_file() else None)
+
+    def languages(self):
+        """每个语言包的说明、就绪状态与当前配置（设置页用）。 Every pack's description, readiness and current configuration (for the Settings page)."""
+        return {'default': registry.default_id(), 'languages': registry.describe(self._probe_executor()), 'extra_dirs': self.settings.load_languages().get('extra_dirs', [])}
+
+    # ───────────── Python 项目环境（设置 → 语言 → Python）/ the Python project environment ─────────────
+    def _environment(self, language):
+        environment = registry.get(language).environment() if language in registry.ids() else None
+        if environment is None:
+            raise MasaError('this language has no project environment')
+        return environment
+
+    def project_env(self, language='python'):
+        """项目环境的状态、策略、本机能选的其它解释器。 Status of the project environment, the policy and the other interpreters that can be chosen."""
+        return self._environment(language).status()
+
+    def project_env_action(self, language, body):
+        action = body.get('action')
+        if action not in ('create', 'reset'):
+            raise MasaError('action must be create or reset')
+        environment = self._environment(language)
+        with self.lock:
+            (environment.reset if action == 'reset' else environment.create)()
+        return environment.status()
+
+    def project_env_install(self, language, body):
+        """装第三方包到项目环境。策略 ask：没有 approve 就只返回“需要批准”；allow：直接装；deny：拒绝。你在设置页手动点“安装”本身就是批准。
+        Install third-party packages into the project environment. Policy ask: without approve only "needs approval" comes back; allow installs at once; deny refuses. Clicking Install in Settings is the approval."""
+        environment = self._environment(language)
+        with self.lock:
+            done = environment.install(body.get('packages'), approve=body.get('approve') is True)
+        return done if done.get('needs_approval') else {**done, 'env': environment.status()}
+
+    def pick_file(self, body):
+        """在运行 masa 的这台电脑上弹出系统“打开文件”对话框（设置页的“浏览…”）。 Opens the system file dialog on the machine running masa (the Settings page's Browse button)."""
+        return {'path': self._environment(body.get('language') or 'python').pick_interpreter()}
+
+    def save_languages(self, body):
+        self.settings.save_languages(body)
+        return self.languages()
+
+    def _language_of(self, body):
+        """任务的语言：请求里的优先，否则默认语言；必须已注册且工具链就绪。 The task's language: the request's, else the default; it must be registered and its toolchain ready."""
+        language = body.get('language') or registry.default_id()
+        pack = registry.get(language)
+        # 没有运行器时（测试/开发替身）不做就绪检查，真正的错误会在执行时明确报出 / without a runner (a test or dev harness) readiness is not checked; the real error is reported at execution
+        ready = pack.probe(self._probe_executor()) if self.runner_path.is_file() else None
+        if ready is not None and not ready.ok:
+            raise MasaError(f'language {pack.title} is not ready: ' + '; '.join(ready.details))
+        return pack.id
+
+    def _probe_executor(self):
+        """给语言包探测工具链用的执行器；运行器不存在时给一个空对象（探测会如实说缺什么）。 The executor language packs probe their toolchains with; an empty object when there is no runner (the probe then says what is missing)."""
+        import types
+        try:
+            return self._runner()
+        except MasaError:
+            return types.SimpleNamespace()
+
     def bootstrap(self):
         """返回前端配置与真实能力标记。 Return frontend defaults and actual capability flags."""
         # 持久 running 不足以代表活着；以当前进程的 worker 为准。
@@ -75,10 +139,16 @@ class Console:
                     break
         return {
             "console_version": "workspace-console-v2",
+            "local_models": dict(capability.STATE),  # 本机能否跑本地模型（启动时检测）/ whether this host can run local models (checked at start)
+            "demo": bool(getattr(self, "demo", False)),  # 只读演示部署：前端据此显示提示条 / read-only demo deployment: the UI shows a banner
             # 路由默认值：前端据此显示默认预算与策略。 Routing defaults shown by the frontend.
             "routing_defaults": self.settings.routing(),
             "default_repo": str(self.project / "tests/fixtures/go-pass"),
             "runner_ready": self.runner_path.is_file() and self.go_path.is_file(),
+            "runner_exists": self.runner_path.is_file(),
+            "language": registry.default_id(),
+            "languages": [{"id": i["id"], "title": i.get("title"), "ready": bool((i.get("readiness") or {}).get("ok")), "ui": i.get("ui", {}), "default": bool(i.get("default"))}
+                          for i in registry.describe(self._probe_executor()) if "error" not in i],
             "active_run": self.active,
             "active_job": active_job,
             "interrupted_jobs": [{'job_id':ident,'run_id':job.get('run_id'),'phase':job.get('phase')}
@@ -115,8 +185,73 @@ class Console:
         goal = body.get('goal')
         if not isinstance(goal, str) or len(goal) > 16000:
             raise MasaError('goal must be text up to 16000 characters')
-        from masa.application.triage import assess
-        return assess(goal)
+        from masa.application.checks.triage import assess
+        pack = registry.get(body.get('language') or registry.default_id())  # 规则属于所选语言的包 / the rules belong to the chosen language's pack
+        result = assess(goal, pack)
+        environment = pack.environment()
+        if environment is not None:  # 点名了第三方包：告诉页面要装什么、按什么策略 / the goal names third-party packages: tell the page what to install and under which policy
+            wanted = environment.required_packages(goal)
+            if wanted['named']:
+                result = {**result, 'packages': {**wanted, **environment.summary()}}
+        return result
+
+    # ───────────── 新任务页的“开跑前估计” / the pre-run estimate of the New Task page ─────────────
+    ESTIMATE_IDLE_SECONDS = 45  # 估计完后本地模型最多再驻留这么久（用户还在打字时不必反复冷加载），之后释放显存 / how long the local model may stay loaded after an estimate (no cold load per keystroke), then the VRAM is freed
+
+    def estimate(self, body):
+        """估计这个需求大概多难、云端 API 要多少 token、多少钱，以及系统能不能处理。mode=rules：确定性规则，立刻返回；mode=model：再让本地模型看一眼（只用本地模型，不写账本，没有本地模型或正在跑任务就退回规则）。
+        Estimate how hard the goal is, how many cloud API tokens and how much money it needs, and whether the system can handle it. mode=rules: deterministic and instant; mode=model: the local model looks as well (local only, no ledger entry; without one, or while a task runs, the rules answer)."""
+        from masa.application import estimate as sizing
+        from masa.application.checks.triage import assess
+        goal = body.get('goal')
+        if not isinstance(goal, str) or not goal.strip() or len(goal) > 16000:
+            raise MasaError('goal must be text up to 16000 characters')
+        pack = registry.get(body.get('language') or registry.default_id())
+        cloud = [p for _i, p in self.settings.ready_profiles() if p.get('model_type') == 'cloud']
+        ready = pack.probe(self._probe_executor()).ok if self.runner_path.is_file() else True
+        rules = assess(goal, pack)
+        answer, note, name = None, '', ''
+        if body.get('mode') == 'model':
+            answer, note, name = self._ask_local_estimator(goal, pack.id)
+        result = sizing.build(goal, rules, answer, cloud, ready, source='local-model' if answer else 'rules')
+        return {**result, 'model': name, 'note': note, 'mode': 'model' if body.get('mode') == 'model' else 'rules'}
+
+    def _ask_local_estimator(self, goal, language):
+        """(回答 | None, 说明, 模型名)。同一个目标 10 分钟内只问一次；任务在跑时不动本地模型。 (answer | None, note, model name). The same goal is asked once per 10 minutes; the local model is left alone while a task runs."""
+        import time as _time
+        import threading
+        key = (goal.strip(), language)
+        cache = self.__dict__.setdefault('_estimates', {})
+        hit = cache.get(key)
+        if hit and _time.time() - hit[0] < 600:
+            return hit[1], hit[2], hit[3]
+        if self.job_thread and self.job_thread.is_alive():
+            return None, '有任务正在运行，本地模型留给它，这里按规则估计。', ''
+        local = [(i, p) for i, p in self.settings.ready_profiles() if p.get('model_type') == 'local']
+        if not local:
+            return None, '没有可用的本地模型，按规则估计。', ''
+        ident, profile = local[0]
+        try:
+            provider = self.settings.provider(ident)
+            answer = provider.respond({'purpose': 'task_estimator', 'goal': goal, 'language': language, 'reason_language': '中文' if any('一' <= ch <= '鿿' for ch in goal) else 'English'}, timeout=90)
+        except Exception as exc:  # 估计只是建议：任何失败都退回规则 / advisory: any failure falls back to the rules
+            return None, '本地模型没能给出估计（' + str(exc)[:80] + '），按规则估计。', profile.get('model', '')
+        finally:
+            timer = self.__dict__.get('_estimate_timer')
+            if timer:
+                timer.cancel()
+            timer = threading.Timer(self.ESTIMATE_IDLE_SECONDS, self._release_if_idle)
+            timer.daemon = True
+            timer.start()
+            self._estimate_timer = timer
+        if len(cache) >= 64:
+            cache.clear()
+        cache[key] = (_time.time(), answer, '', profile.get('model', ''))
+        return answer, '', profile.get('model', '')
+
+    def _release_if_idle(self):
+        if not (self.job_thread and self.job_thread.is_alive()):
+            self._release_local_models()
 
     def project_report(self, rid):
         """任务级用量/耗时/工具调用报告。 Task-level usage, timing and tool-call report."""
@@ -255,14 +390,15 @@ class Console:
             try:
                 source = body.get("repo", "")
                 goal = body.get("goal", "")
-                operation = body.get("operation", "go_test")
+                language = body.get("language") or registry.default_id()
+                operation = body.get("operation") or registry.get(language).op_id("test")
                 if (
                     not isinstance(source, str)
                     or not source.strip()
                     or not isinstance(goal, str)
                 ):
                     raise MasaError("repository and goal are required")
-                if operation not in OPERATIONS:
+                if operation not in registry.get(language).operation_ids():
                     raise MasaError("unsupported operation")
                 budget = self._budget(body)
                 provider = (
@@ -271,17 +407,18 @@ class Console:
                     else None
                 )
                 runtime = Runtime(
-                    store, Runner(self.runner_path, self.go_path), provider
+                    store, self._runner(), provider
                 )
-                graph = full_verification_policy() if body.get("full_checks") else None
+                graph = full_verification_policy(language) if body.get("full_checks") else None
                 if body.get('role_demo'):
-                    graph = collaboration_policy(operation)
+                    graph = collaboration_policy(operation, language)
                 rid = runtime.create(
                     Path(source),
                     goal,
                     budget,
                     operation,
                     parent_run_id=parent,
+                    language=language,
                     intelligence=body.get("intelligence") is True,
                     graph=graph,
                 )
@@ -294,16 +431,16 @@ class Console:
         """读取工具账本中的实际输出。 Read actual outputs from the tool ledger."""
         store = Store(self.root)
         try:
-            store.run(rid)
+            pack = registry.for_run(store.run(rid)['data'])
             checks = [
                 {'id': row['id'], 'step_id': row['step_id'],
                  'operation': store.read(row['request_ref'])['operation'],
                  'result': store.read(row['result_ref']) if row['result_ref'] else None}
                 for row in store.tools(rid)]
             completed=[(c['operation'],c['result']) for c in checks if c['result']]
-            from masa.application import ownership
-            analysis=ownership.analyse(completed)
-            return {'checks':checks,'repair_advice':repair_advice(completed),
+            from masa.application.checks import ownership
+            analysis=ownership.analyse(completed,pack)
+            return {'checks':checks,'repair_advice':repair_advice(completed,pack),
                     'ownership':{'primary':analysis['primary'],'lines':ownership.describe(analysis)}}
         finally:
             store.close()
@@ -324,7 +461,7 @@ class Console:
                     raise MasaError('human review required before rerunning generated code')
                 source = Path(data['workspace'])
                 verify_snapshot(source, data['snapshot_id'])
-                runtime = Runtime(store, Runner(self.runner_path, self.go_path))
+                runtime = Runtime(store, self._runner())
                 # 项目重验保留已批准 Agent 图，旧演示继续使用完整固定检查。
                 # Preserve approved agent graphs on reruns; legacy demos retain full checks.
                 graph=Graph.from_dict(data['graph']) if data['graph'].get('policy_version')=='agent-check-plan-v1' else harness_policy()
@@ -449,7 +586,7 @@ class Console:
                 provider=self.settings.provider(snapshot=snapshot) if snapshot else self.settings.provider(body.get('api_profile_id'))
                 if plan.get('provider')!=provider.profile:
                     raise MasaError('select the original API profile to resume')
-                runner=Runner(self.runner_path,self.go_path)
+                runner=self._runner()
                 if plan.get('repair_of'):
                     if on_created:on_created(rid)
                     result=ProjectGeneration(store,runner).resume_revision(rid,provider)
@@ -471,7 +608,7 @@ class Console:
                 store=Store(self.root)
                 try:
                     from masa.application.applications import run_application
-                    result=run_application(store,Runner(self.runner_path,self.go_path),rid,body.get('argv',[]),self.app_cancel.is_set)
+                    result=run_application(store,self._runner(),rid,body.get('argv',[]),self.app_cancel.is_set,body.get('stdin',''))
                     self.jobs[ident].update(status='completed',result={'id':rid,'app_result':result})
                 except Exception as exc:
                     self.diagnostics.record('worker:application',exc)
@@ -499,6 +636,41 @@ class Console:
                     except Exception:pass
         except Exception:pass
 
+    @staticmethod
+    def _v2_policy(body):
+        """V2 的生成阶段每个等级只试一次：同一个等级的第二次尝试从第一次写了一半的文件接着做，真实运行里 6 次里 6 次都以同样的方式卡住（本地模型反复 finish），白白多花 5–10 分钟；卡住后直接升级。用户显式给的 attempts_per_level 不改。
+        A V2 generation stage tries each level once: the second attempt at the same level continues from the first one's half-written files and in real runs it got stuck the same way every time (the local model finishing over and over), costing 5-10 minutes for nothing; after being stuck it escalates at once. An explicit attempts_per_level is left alone."""
+        policy=body.get('policy')
+        if body.get('runtime')=='v2' and not (isinstance(policy,dict) and 'attempts_per_level' in policy):
+            return {'assertion_referee':True,**(policy if isinstance(policy,dict) else {}),'attempts_per_level':{'generation':1}}
+        if body.get('runtime')=='v2' and isinstance(policy,dict) and 'assertion_referee' not in policy:
+            return {**policy,'assertion_referee':True}  # 工人的测试期望常常算错，断言裁判便宜且实测有效 / worker-written test expectations are often wrong; the referee is cheap and measured to work
+        return policy
+
+    def _runtime_policy(self, body):
+        """V2 与“V1 生成 + V2 修复”的工人从最低的云端等级起步：本地 glm-4.7-flash 在真实运行里当不了包工人（7 次本地先试只封过 1 个很小的包，一次失败的尝试 1–12 分钟）。用户显式给的 start_level_by_role 不改；没有云端模型时不加。
+        Workers of V2 and of "V1 generation + V2 repair" start at the lowest cloud level: the local glm-4.7-flash could not be a package worker in real runs (7 local-first tries sealed one tiny package, a failed try took 1-12 minutes). An explicit start_level_by_role is left alone; nothing is added without a cloud model."""
+        policy=self._v2_policy(body)
+        runtime=body.get('runtime')
+        if runtime in ('v2','v2repair'):
+            wanted=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None
+            levels=[p['level'] for i,p in self.settings.ready_profiles() if p['model_type']=='cloud' and (wanted is None or i in wanted)]
+            if levels:
+                start=dict((policy or {}).get('start_level_by_role') or {})
+                for role in ('project_repair',)+(('project_developer',) if runtime=='v2' else ()):
+                    start.setdefault(role,min(levels))
+                policy={**(policy or {}),'start_level_by_role':start}
+        return policy
+
+    @staticmethod
+    def _v2_budget(body):
+        """V2 的工人循环每一步都是一次模型调用（10 文件的项目一次运行要 80–150 次，而默认的 40 次上限会在中途把任务停掉）：V2 默认放宽到 150，用户显式给的预算不改。
+        Every step of a V2 worker loop is a model call (a 10-file project takes 80-150 per run and the default limit of 40 would stop it half way): V2 defaults to 150, an explicit user budget is left alone."""
+        budget=body.get('budget')
+        if body.get('runtime') in ('v2','v2repair') and not (isinstance(budget,dict) and 'max_model_calls' in budget):
+            return {**(budget if isinstance(budget,dict) else {}),'max_model_calls':150}
+        return budget
+
     def auto_fix(self, rid, body):
         """从一次失败的验证继续自动修复：跳过规划与生成，沿用任务的路由与预算设置。
         Continue the automatic repair from a failed verification (no re-planning); history is rebuilt from the version lineage."""
@@ -511,7 +683,7 @@ class Console:
         request.update(goal=goal,continue_from=rid,auto_verify=True)
         return self.start_autonomous_project_job(request)
 
-    def start_autonomous_project_job(self, body, resume_job=None):
+    def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
             self._available()
@@ -533,7 +705,7 @@ class Console:
             # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
             routing=previous.get('routing') if resume_job else None
             if not resume_job and body.get('routing')=='ladder':
-                routing=build_snapshot(self.settings,mode='ladder',budget=body.get('budget'),policy=body.get('policy'),
+                routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._runtime_policy(body),
                                        profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
             snapshot=previous.get('model_snapshot') if resume_job else None
             if routing:
@@ -545,17 +717,21 @@ class Console:
             goal=body.get('goal')
             if not isinstance(goal,str) or not goal.strip():
                 raise MasaError('project goal required')
+            if workflow:
+                from masa.application.orchestration import flow
+                flow.validate(workflow)  # 图只能引用已注册的 guard 与动作 / the graph may only reference registered guards and actions
             ident=resume_job or uuid.uuid4().hex
             if resume_job:self.jobs[ident].update(status='running',note=None)
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
-                              'request':{'goal':goal,'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True}}
-            from masa.application.coordinator import WorkflowCoordinator
+                              'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':body['runtime']} if body.get('runtime') in ('v2','v2repair') else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                                         **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
+            from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():
                 store=Store(self.root)
-                runner=Runner(self.runner_path,self.go_path)
+                runner=self._runner()
                 try:
                     router=None
                     if routing:
@@ -608,7 +784,7 @@ class Console:
             job['stage']=job.get('phase') if job.get('mode')=='auto' else requested[-1]['payload']['step_id'] if requested else 'preparing'
             # 流式传输的实时进度：正在生成的字符数与用时（只在内存里）。 Live streaming progress: characters generated so far and elapsed time (memory only).
             from masa.runtime import live as live_calls
-            job['live']=live_calls.get(job['run_id'])
+            job['live']={k:v for k,v in (live_calls.get(job['run_id']) or {}).items() if k!='text'} or None  # 完整文本只走 /live，不放进每秒一次的任务轮询 / the full text travels only via /live, not in the per-second job poll
             # 顶栏显示“此刻真正在用的模型”，而不是选择框里的默认模型。 Show the model actually in use, not the default in a selector.
             if requested:
                 route=requested[-1]['payload'].get('route') or {}
@@ -634,6 +810,7 @@ class Console:
     def ollama_action(self,body):
         """受控动作共用单后台槽，避免与项目推理争抢。 Use one worker slot for local controls and project inference."""
         action=body.get('action');model=body.get('model');control=OllamaControl()
+        if not capability.local_allowed():raise MasaError('local models are disabled on this host: '+capability.STATE['reason'])
         if action=='show':return control.show(model)
         if action not in {'select','load','unload','test'}:raise MasaError('unsupported Ollama action')
         with self.lock:
@@ -665,11 +842,11 @@ class Console:
 
     def review_project_sources(self, rid, body):
         """解析可见草稿，结果只用于审查而不替代 Gate。 Parse the visible draft without replacing Gate verification."""
-        from masa.application.source_review import review_sources
+        from masa.application.review.source_review import review_sources
         with self.lock:
             self._available()
             store=Store(self.root)
-            try:return review_sources(store,Runner(self.runner_path,self.go_path),rid,body)
+            try:return review_sources(store,self._runner(),rid,body)
             finally:store.close()
 
     def answer_clarification(self, rid, body):
@@ -678,7 +855,7 @@ class Console:
             self._available()
             store=Store(self.root)
             try:
-                ProjectPlanning(store,Runner(self.runner_path,self.go_path)).answer(
+                ProjectPlanning(store,self._runner()).answer(
                     rid,body.get('question_id'),body.get('answers'))
                 status=store.run(rid)['data']['project_plan']['status']
             finally:store.close()
@@ -703,6 +880,80 @@ class Console:
             raise MasaError('folder opening currently supports Windows; copy the workspace path')
         os.startfile(str(path))
         return {'path':str(path)}
+
+    def user_input(self, rid, body):
+        """人在回路：任务运行中追加提示（第 1 级）或控制（第 2 级：暂停/继续/停止）。都先写账本，再生效；只在节点边界生效，不打断正在进行的调用。
+        Human in the loop: add a note (level 1) or a control (level 2: pause / resume / stop) while a task runs. Ledger first, then effect; only at node boundaries, never interrupting a call in flight."""
+        from masa.runtime import user_input
+        body=body or {}
+        kind=body.get('kind')
+        store=Store(self.root)
+        try:
+            store.run(rid)  # 不存在就抛错 / raises when the run does not exist
+            if kind=='note':
+                text=user_input.clean_note(body.get('text'))
+                user_input.record(store,rid,'note',text=text)
+                return {'ok':True,'kind':'note','applies':'the next model call that starts'}
+            action=body.get('action')
+            if kind!='control' or action not in {'pause','resume','stop'}:
+                raise MasaError('input needs kind=note with text, or kind=control with action pause/resume/stop')
+            job=self._job_for(store,rid)
+            if action=='stop':
+                user_input.record(store,rid,'control',action='stop')
+            elif job is None:
+                raise MasaError('there is no running automatic task to '+action)
+            else:
+                job['paused']=(action=='pause')
+                user_input.record(store,rid,'control',action=action)
+        finally:
+            store.close()
+        if action=='stop':
+            return self.control(rid,'cancel')
+        return {'ok':True,'kind':'control','action':action}
+
+    def _job_for(self, store, rid):
+        """这个 run 所在任务（同一条版本链）当前正在运行的自动任务；没有返回 None。 The running automatic job of the task (same version chain) this run belongs to, or None."""
+        def root(run_id):
+            seen=set()
+            while run_id and run_id not in seen:
+                seen.add(run_id)
+                try:parent=store.run(run_id)['data'].get('parent_run_id')
+                except Exception:return run_id
+                if not parent:return run_id
+                run_id=parent
+            return run_id
+        target=root(rid)
+        for job in self.jobs.values():
+            if job.get('status')=='running' and job.get('mode')=='auto' and job.get('run_id') and root(job['run_id'])==target:
+                return job
+        return None
+
+    def call_list(self, rid):
+        """这个任务（整条版本链）的每一次模型调用。 Every model call of the task (the whole version chain)."""
+        from masa.application import call_inspector
+        store=Store(self.root)
+        try:return call_inspector.call_list(store,rid)
+        finally:store.close()
+
+    def call_detail(self, rid, step, invocation):
+        """一次调用的检视：模型看到了什么、各部分大小、省略项、缓存命中、响应摘要。 Inspect one call: what the model saw, section sizes, omissions, cache hits, response summary."""
+        from masa.application import call_inspector
+        store=Store(self.root)
+        try:return call_inspector.call_detail(store,rid,step,invocation)
+        finally:store.close()
+
+    def live_view(self, rid):
+        """这个 run 此刻正在进行的模型调用：哪个角色、哪个模型、写了多少，以及正在写的文件内容（从还没写完的 JSON 里解出）。只在内存里，没有调用时返回 None。
+        The model call in flight for this run: role, model, progress, and the file content being written (decoded from the unfinished JSON). Memory only; None when idle."""
+        from masa.runtime import live as live_calls
+        from masa.runtime.streamfiles import extract_files
+        entry=live_calls.get(rid)
+        if not entry or not entry.get('step'):
+            return {'live':None}
+        text=entry.get('text','')
+        return {'live':{'step':entry['step'],'invocation':entry.get('invocation'),'model':entry.get('model'),'chars':entry.get('chars',0),'seconds':entry.get('seconds',0),
+                        'seq':entry.get('seq',0),'truncated':bool(entry.get('truncated')),'files':extract_files(text),'tail':entry.get('tail','')[-600:],
+                        'idle_seconds':round(time.time()-entry.get('updated',time.time()),1)}}
 
     def project_logs(self, rid):
         """汇总来源链的角色事件与工具输出，便于复制。 Collect lineage events and tool outputs for copying."""
@@ -738,7 +989,7 @@ class Console:
                     if old['status']!='failed' or not old['data'].get('project_plan',{}).get('spec_ref'):
                         raise MasaError('only failed plans with saved Planner output can retry Tester')
                     goal=old['data']['goal']
-                rid = ProjectPlanning(store, Runner(self.runner_path, self.go_path)).generate(provider, goal,on_created,reuse)
+                rid = ProjectPlanning(store, self._runner()).generate(provider, goal,on_created,reuse,language=None if reuse else self._language_of(body))
                 return {'id':rid}
             finally:
                 store.close()
@@ -749,7 +1000,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                ProjectPlanning(store, Runner(self.runner_path, self.go_path)).approve(rid, body)
+                ProjectPlanning(store, self._runner()).approve(rid, body)
                 return {'id':rid}
             finally:
                 store.close()
@@ -761,7 +1012,7 @@ class Console:
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                return {'id':ProjectGeneration(store, Runner(self.runner_path,self.go_path)).generate(rid,provider,on_created)}
+                return {'id':ProjectGeneration(store, self._runner()).generate(rid,provider,on_created)}
             finally:
                 store.close()
 
@@ -772,7 +1023,7 @@ class Console:
             provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).repair(rid,provider,body.get('feedback',''),on_created,use_intelligence=True)}
+                return {'id':ProjectGeneration(store,self._runner()).repair(rid,provider,body.get('feedback',''),on_created,use_intelligence=True)}
             finally:store.close()
 
     def revise_project_tests(self, rid, body, on_created=None):
@@ -782,7 +1033,7 @@ class Console:
             provider=self.settings.provider(body.get('api_profile_id'))
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).revise_tests(
+                return {'id':ProjectGeneration(store,self._runner()).revise_tests(
                     rid,provider,body.get('feedback',''),on_created)}
             finally:store.close()
 
@@ -792,7 +1043,7 @@ class Console:
             self._available()
             store=Store(self.root)
             try:
-                return {'id':ProjectGeneration(store,Runner(self.runner_path,self.go_path)).format_test_files(rid)}
+                return {'id':ProjectGeneration(store,self._runner()).format_test_files(rid)}
             finally:store.close()
 
     def approve_project_code(self, rid, body):
@@ -801,7 +1052,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                child = ProjectGeneration(store, Runner(self.runner_path,self.go_path)).approve(rid,body)
+                child = ProjectGeneration(store, self._runner()).approve(rid,body)
                 status = store.run(child)['status']
             finally:
                 store.close()
@@ -816,7 +1067,7 @@ class Console:
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                rid = CodeGeneration(store, Runner(self.runner_path, self.go_path)).generate(
+                rid = CodeGeneration(store, self._runner()).generate(
                     provider, body.get('goal',''), body.get('repo',''), body.get('target','solution.go'),
                     body.get('tests',''), body.get('parent_run_id'))
                 return {'id':rid}
@@ -829,7 +1080,7 @@ class Console:
             self._available()
             store = Store(self.root)
             try:
-                service = CodeGeneration(store, Runner(self.runner_path, self.go_path))
+                service = CodeGeneration(store, self._runner())
                 if body.get('action') == 'reject':
                     service.reject(rid)
                     return {'id':rid}
@@ -860,7 +1111,7 @@ class Console:
             try:
                 store = Store(self.root)
                 Runtime(
-                    store, Runner(self.runner_path, self.go_path), provider
+                    store, self._runner(), provider
                 ).execute(rid, pause_after)
             except Exception as exc:
                 # Provider failures are sanitized; never expose credentials in worker diagnostics.

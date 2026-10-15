@@ -49,7 +49,9 @@ def digest(value: Any) -> str:
 
 
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "skipped"})
-OPERATIONS = frozenset({"go_test", "go_vet", "go_fmt_check"})
+# 可用的操作 id 由语言包注册表给出（masa.languages.registry）；这里不再写死。 The available operation ids come from the language-pack registry.
+# 没有显式给出操作的节点（gate、角色节点）沿用旧账本里的默认值，以保持已有数据逐字节相同。 Nodes without an explicit operation (gate, role nodes) keep the historical default so existing ledgers stay byte-identical.
+LEGACY_DEFAULT_OPERATION = "go_test"
 
 
 @dataclass(frozen=True)
@@ -58,7 +60,7 @@ class Node:
     type: str
     dependencies: tuple[str, ...] = ()
     trigger: str = "all_succeeded"
-    operation: str = "go_test"
+    operation: str = LEGACY_DEFAULT_OPERATION
     role: str = "verifier"
 
 

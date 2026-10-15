@@ -1,0 +1,85 @@
+{
+  "id": "project_diagnoser",
+  "label": "Diagnoser 诊断",
+  "description": "判断失败是实现、测试还是规格的问题，并逐条核对测试期望",
+  "order": 60,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "files",
+      "failure_evidence"
+    ],
+    "writes": "none"
+  },
+  "validator": "diagnosis",
+  "prompt": "project_diagnoser.prompt.md",
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "expectation_checks",
+      "owner",
+      "rationale",
+      "implementation_instructions",
+      "test_instructions"
+    ],
+    "properties": {
+      "expectation_checks": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "case",
+            "requirement_says",
+            "test_expects",
+            "matches"
+          ],
+          "properties": {
+            "case": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "requirement_says": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "test_expects": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "matches": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "owner": {
+        "enum": [
+          "implementation",
+          "test",
+          "both",
+          "spec",
+          "unclear"
+        ]
+      },
+      "rationale": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "implementation_instructions": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "test_instructions": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    }
+  }
+}
