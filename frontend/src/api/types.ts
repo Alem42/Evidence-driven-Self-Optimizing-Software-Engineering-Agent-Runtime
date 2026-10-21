@@ -540,6 +540,9 @@ export interface CallRow {
   cache_miss_tokens: number | null;
   notes: number;
   error: string | null;
+  /** 该模型的上下文窗口（token）与这次提示占它的比例；未知为 null。 The model's context window and the share this prompt took; null when unknown. */
+  window: number | null;
+  window_percent: number | null;
 }
 
 export interface CallSection {
@@ -550,6 +553,37 @@ export interface CallSection {
   share: number;
   preview: string;
   entries: { name: string; chars: number; est_tokens: number }[];
+}
+
+/** 上下文的类别（与 Claude Code 的“上下文”面板同一种读法）。 A context category (read like Claude Code's context panel). */
+export interface CallCategory {
+  id: 'system' | 'task' | 'tests' | 'code' | 'memory' | 'evidence' | 'conventions' | 'human' | 'control' | 'other';
+  label: string;
+  english: string;
+  tokens: number;
+  share: number;
+  sections: string[];
+}
+
+export interface CallWindow {
+  limit: number | null;
+  used: number;
+  source: 'server' | 'estimate';
+  output_reserve: number | null;
+  percent: number | null;
+  free: number | null;
+}
+
+/** 包工人的“最近结果”窗口：保留几条、更早的几条已离开窗口、笔记与摘要多长。 A package worker's recent-results window. */
+export interface WorkingMemory {
+  step: number | null;
+  max_steps: number | null;
+  kept: number;
+  dropped: number | null;
+  notes_chars: number;
+  summary_chars: number;
+  at_risk: boolean;
+  kept_items: { tool: string | null; ok: boolean | null; path: string | null; chars: number }[];
 }
 
 export interface CallDetail {
@@ -564,6 +598,10 @@ export interface CallDetail {
   layout: 'stable_first' | 'sorted';
   instruction: { chars: number; est_tokens: number };
   sections: CallSection[];
+  categories: CallCategory[];
+  window: CallWindow;
+  working_memory: WorkingMemory | null;
+  delta_vs_previous: { against: string; by_category: Record<string, number>; total: number } | null;
   est_total_tokens: number;
   usage: { prompt_tokens: number | null; completion_tokens: number | null; cache_hit_tokens: number | null; cache_miss_tokens: number | null };
   omitted: { section: string; id: string; reason: string }[];

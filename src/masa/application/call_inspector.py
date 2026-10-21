@@ -22,6 +22,93 @@ MAX_ENTRIES = 40  # 一个分段里最多列出的条目（文件）数 / entrie
 MAX_OMITTED = 40
 
 
+# 上下文分类：每个顶层字段归入一个类别，类别用专业名称（与 Claude Code 的“上下文”面板同一种读法：各类占用 + 窗口占用 + 剩余）。
+# Context categories: every top-level field belongs to one category with a professional name (read like Claude Code's context panel: usage per category, window usage, free space).
+CATEGORIES = (
+    ('system', '系统提示词', 'System prompt'),
+    ('task', '任务与验收', 'Task & acceptance'),
+    ('tests', '测试规格', 'Test specification'),
+    ('code', '代码上下文', 'Code context'),
+    ('memory', '工作记忆', 'Working memory'),
+    ('evidence', '失败证据与反馈', 'Failure evidence & feedback'),
+    ('conventions', '语言约定', 'Language conventions'),
+    ('human', '人工输入', 'Human input'),
+    ('control', '调度元数据', 'Control metadata'),
+    ('other', '其它', 'Other'),
+)
+FIELD_CATEGORY = {
+    'goal': 'task', 'summary': 'task', 'acceptance': 'task', 'spec': 'task', 'contract': 'task', 'module': 'task', 'package': 'task', 'own_files': 'task',
+    'examples': 'tests', 'spec_examples': 'tests', 'checks': 'tests', 'cases': 'tests', 'pairs': 'tests',
+    'files': 'code', 'interfaces': 'code', 'original_files': 'code', 'all_files': 'code', 'previous_files': 'code', 'other_files_outline_readonly': 'code', 'context_selection': 'code',
+    'last_results': 'memory', 'notes': 'memory', 'history': 'memory', 'progress_summary': 'memory', 'fix_log': 'memory', 'noop_streak': 'memory',
+    'repair': 'evidence', 'failure_evidence': 'evidence', 'feedback': 'evidence', 'ownership': 'evidence', 'independent_evidence': 'evidence', 'previous_attempt_error': 'evidence',
+    'language_notes': 'conventions', 'language': 'conventions', 'reason_language': 'conventions',
+    'user_notes': 'human',
+    'purpose': 'control', 'step': 'control', 'max_steps': 'control', 'allowed_tools': 'control', 'generation_mode': 'control', 'target_path': 'control', 'clarification_allowed': 'control',
+    'examples_required': 'control', 'omitted': 'control',
+}
+
+
+def category_of(field):
+    return FIELD_CATEGORY.get(field, 'other')
+
+
+def categories_of(instruction_tokens, sections):
+    """按类别汇总：[{id, label, english, tokens, share, sections:[字段名]}]；没有内容的类别也列出（tokens=0），读的人才知道“没有”。 Per-category totals; empty categories are listed too (tokens 0) so the reader sees "none"."""
+    buckets = {cid: {'id': cid, 'label': label, 'english': english, 'tokens': 0, 'sections': []} for cid, label, english in CATEGORIES}
+    buckets['system']['tokens'] = instruction_tokens
+    for section in sections:
+        bucket = buckets[category_of(section['name'])]
+        bucket['tokens'] += section['est_tokens']
+        bucket['sections'].append(section['name'])
+    total = sum(b['tokens'] for b in buckets.values()) or 1
+    for bucket in buckets.values():
+        bucket['share'] = round(bucket['tokens'] / total, 4)
+    return [buckets[cid] for cid, _l, _e in CATEGORIES]
+
+
+def limits_of(store, members):
+    """{模型名: 上下文窗口}：来自任务开始时记下的 task_budget 事件（云端模型的调用记录里没有窗口大小）。 {model: context window} from the task_budget events (a cloud call's route does not carry the window)."""
+    out = {}
+    for run in members:
+        for event in store.events(run['id']):
+            if event['type'] == 'task_budget':
+                for candidate in (event['payload'].get('candidates') or []):
+                    if candidate.get('model') and isinstance(candidate.get('context_limit'), int):
+                        out[candidate['model']] = candidate['context_limit']
+    return out
+
+
+def window_of(limit, used_estimate, used_server, output_reserve):
+    """窗口占用：已用 / 窗口、输出预留、剩余。已用优先取服务端报告的提示 token，没有就取本地估算（并标明来源）。 Window usage: used / window, the output reserve and what is free; the server-reported prompt tokens win over the local estimate (the source is named)."""
+    used = used_server if isinstance(used_server, int) else used_estimate
+    out = {'limit': limit, 'used': used, 'source': 'server' if isinstance(used_server, int) else 'estimate', 'output_reserve': output_reserve}
+    if isinstance(limit, int) and limit > 0:
+        out['percent'] = round(used / limit, 4)
+        out['free'] = max(0, limit - used - (output_reserve or 0))
+    else:
+        out['percent'], out['free'] = None, None
+    return out
+
+
+def working_memory_of(context):
+    """工作记忆状态（只对带“最近结果”窗口的上下文，也就是包工人）：窗口里保留几条、更早的几条已经离开窗口、笔记有多长、有没有摘要。
+    被丢掉的结果不会自动并入笔记——这一点要让人看见：没有笔记又有结果离开窗口，就标成“有风险”。
+    Working-memory status (only for contexts with a recent-results window, i.e. package workers): how many results are kept, how many older ones left the window, how long the notes are, whether a summary exists.
+    Results that leave the window are NOT folded into the notes automatically; that must be visible: results gone with no notes is flagged as a risk."""
+    results = context.get('last_results')
+    if not isinstance(results, list):
+        return None
+    step = context.get('step') if isinstance(context.get('step'), int) else None
+    kept = len(results)
+    dropped = max(0, step - 1 - kept) if step is not None else None
+    notes = context.get('notes') if isinstance(context.get('notes'), str) else ''
+    summary = context.get('progress_summary') if isinstance(context.get('progress_summary'), str) else ''
+    return {'step': step, 'max_steps': context.get('max_steps') if isinstance(context.get('max_steps'), int) else None, 'kept': kept, 'dropped': dropped,
+            'notes_chars': len(notes), 'summary_chars': len(summary), 'at_risk': bool(dropped) and not notes and not summary,
+            'kept_items': [{'tool': r.get('tool'), 'ok': r.get('ok'), 'path': r.get('path'), 'chars': len(str(r.get('result', '')))} for r in results[-8:] if isinstance(r, dict)]}
+
+
 def _members(store, rid):
     """同一任务（版本链）的所有 run，最新的在后。 Every run of the task (version chain), oldest first."""
     runs = {r['id']: r for r in store.all_runs()}
@@ -48,16 +135,20 @@ def _context(store, row):
 def call_list(store, rid):
     """沿版本链列出每次模型调用（旧的在前）。 Every model call along the version chain, oldest first."""
     rows = []
-    for run in _members(store, rid):
+    members = _members(store, rid)
+    limits = limits_of(store, members)
+    for run in members:
         for call in _model_calls(store, run):
             row = _invocation(store, run['id'], call['step_id'], call['invocation_id'])
             context = _context(store, row) if row else None
+            limit = limits.get(call['model']) or call.get('reserved_tokens')
             rows.append({
                 'run_id': run['id'], 'step': call['step_id'], 'invocation': call['invocation_id'], 'attempt': call['attempt_no'],
                 'status': call['status'], 'model': call['model'], 'kind': call['kind'], 'started': call['started'], 'duration_ms': call['duration_ms'],
                 'prompt_tokens': call['prompt_tokens'], 'completion_tokens': call['completion_tokens'],
                 'cache_hit_tokens': call['cache_hit_tokens'], 'cache_miss_tokens': call['cache_miss_tokens'],
                 'notes': len(context.get('user_notes') or []) if context else 0, 'error': call['error'],
+                'window': limit, 'window_percent': round(call['prompt_tokens'] / limit, 4) if limit and isinstance(call['prompt_tokens'], int) else None,
             })
     rows.sort(key=lambda r: r['started'] or 0)
     return {'calls': rows}
@@ -127,6 +218,11 @@ def _plans_before(store, run_id, started):
             for e in store.events(run_id) if e['type'] == 'context_plan' and previous <= e['created'] <= started]
 
 
+def _role_spec(step):
+    from masa.roles import registry
+    return registry.get(step)
+
+
 def _instruction(context):
     """系统指令（与发送时相同的构造，除本地传输提示外）。 The system instruction (same construction as when sent, minus the local-transport hint)."""
     from masa.agents.protocol import instruction_for
@@ -178,13 +274,21 @@ def call_detail(store, rid, step, invocation):
     sections = sections_of(context)
     instruction = _instruction(context)
     user_message = render(context)
-    est_total = estimate_tokens(instruction) + sum(s['est_tokens'] for s in sections)
+    instruction_tokens = estimate_tokens(instruction)
+    est_total = instruction_tokens + sum(s['est_tokens'] for s in sections)
+    categories = categories_of(instruction_tokens, sections)
+    limit = limits_of(store, members).get((route or {}).get('model') or call.get('model')) or (route or {}).get('context_limit') or call.get('reserved_tokens')
+    spec = _role_spec(step)
+    output_reserve = min([n for n in ((spec.max_output_tokens if spec is not None else None), (route or {}).get('max_output_tokens')) if isinstance(n, int)] or [0]) or None
 
-    prefix = None
+    prefix, delta = None, None
     earlier = _previous_same_step(store, members, run_id, step, row['started'])
     if earlier is not None:
         before = _context(store, earlier)
         if before is not None:
+            before_cats = categories_of(estimate_tokens(_instruction(before)), sections_of(before))
+            delta = {'against': earlier['invocation_id'], 'by_category': {a['id']: a['tokens'] - b['tokens'] for a, b in zip(categories, before_cats)},
+                     'total': sum(a['tokens'] for a in categories) - sum(b['tokens'] for b in before_cats)}
             a, b = _instruction(before) + render(before), instruction + user_message
             common = _common_prefix(a, b)
             prefix = {'against': {'step': step, 'invocation': earlier['invocation_id']}, 'common_chars': common, 'of_chars': len(b),
@@ -202,7 +306,8 @@ def call_detail(store, rid, step, invocation):
         'model': (route or {}).get('model') or call.get('model'), 'provider': (route or {}).get('provider'),
         'started': row['started'], 'finished': row['finished'], 'duration_ms': call.get('duration_ms'),
         'instruction': {'chars': len(instruction), 'est_tokens': estimate_tokens(instruction)},
-        'layout': layout_name(), 'sections': sections, 'est_total_tokens': est_total,
+        'layout': layout_name(), 'sections': sections, 'est_total_tokens': est_total, 'categories': categories,
+        'window': window_of(limit, est_total, call.get('prompt_tokens'), output_reserve), 'working_memory': working_memory_of(context), 'delta_vs_previous': delta,
         'usage': {'prompt_tokens': call.get('prompt_tokens'), 'completion_tokens': call.get('completion_tokens'),
                   'cache_hit_tokens': call.get('cache_hit_tokens'), 'cache_miss_tokens': call.get('cache_miss_tokens')},
         'omitted': omitted_of(context), 'context_plans': _plans_before(store, run_id, row['started']),

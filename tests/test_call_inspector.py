@@ -127,3 +127,23 @@ class ConsoleTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ContextPanelTests(unittest.TestCase):
+    def test_every_field_lands_in_a_category_and_unknown_ones_in_other(self):
+        sections = [{'name': 'goal', 'est_tokens': 10}, {'name': 'files', 'est_tokens': 40}, {'name': 'last_results', 'est_tokens': 30}, {'name': 'brand_new_field', 'est_tokens': 5}]
+        cats = {c['id']: c for c in call_inspector.categories_of(15, sections)}
+        self.assertEqual((cats['system']['tokens'], cats['task']['tokens'], cats['code']['tokens'], cats['memory']['tokens'], cats['other']['tokens'], cats['human']['tokens']), (15, 10, 40, 30, 5, 0))
+        self.assertAlmostEqual(sum(c['share'] for c in cats.values()), 1.0, places=2)
+
+    def test_the_window_prefers_the_server_count_and_names_its_source(self):
+        self.assertEqual(call_inspector.window_of(1000, 300, 250, 100), {'limit': 1000, 'used': 250, 'source': 'server', 'output_reserve': 100, 'percent': 0.25, 'free': 650})
+        self.assertEqual(call_inspector.window_of(None, 300, None, None)['source'], 'estimate')
+        self.assertIsNone(call_inspector.window_of(None, 300, None, None)['percent'])
+
+    def test_results_that_left_the_window_without_notes_are_flagged_as_a_risk(self):
+        ctx = {'step': 8, 'max_steps': 12, 'last_results': [{'tool': 'run_check', 'ok': False, 'result': 'x' * 10}] * 3, 'notes': ''}
+        memory = call_inspector.working_memory_of(ctx)
+        self.assertEqual((memory['kept'], memory['dropped'], memory['at_risk']), (3, 4, True))
+        self.assertFalse(call_inspector.working_memory_of({**ctx, 'notes': 'remember this'})['at_risk'])
+        self.assertIsNone(call_inspector.working_memory_of({'goal': 'x'}))
