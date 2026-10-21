@@ -1,6 +1,6 @@
 """Planner 的具体示例：输入 → 输出，是整个项目里唯一的“精确期望”来源。 The Planner's concrete examples: input -> output, the single source of exact expected values in a project.
 
-为什么（见 docs/progress/PROGRESS_2026-10-13_002）：一次真实运行里，Planner 的 summary 写“原样保留行尾换行符”，验收条款写“最后一行没有换行符时仍作为一行输出”，Tester 与实现者各读到一句，
+为什么（见 docs/EVIDENCE.md 的 E15）：一次真实运行里，Planner 的 summary 写“原样保留行尾换行符”，验收条款写“最后一行没有换行符时仍作为一行输出”，Tester 与实现者各读到一句，
 结果一个期望 `HELLO\\n`、一个输出 `HELLO`。规格里的规则散在三处（summary、验收、模型脑中的约定），没有一个“具体到字节”的地方。示例就是那个地方：每个示例写明参数、标准输入、**逐字节**的标准输出和退出码。
 Why: in a real run the Planner's summary said "keep line endings as they are" while an acceptance item said "a last line without a newline is still output as a line"; the Tester and the implementer each read one sentence and one expected `HELLO\\n`
 while the other produced `HELLO`. The rules were spread over three places and none was byte-exact. An example is that place: arguments, stdin, the byte-exact stdout and the exit code.

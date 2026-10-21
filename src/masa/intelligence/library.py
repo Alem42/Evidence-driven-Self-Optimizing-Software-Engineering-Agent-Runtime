@@ -1,7 +1,7 @@
 """经验库（最小版）：记录“失败签名 → 被验证有效的做法”，有容量上限，按效用淘汰，命中才取。全部确定性，0 token。
 Experience library (minimal): "failure signature -> a remedy that was verified to help", bounded in size, evicted by utility, read only on a hit. Fully deterministic, zero tokens.
 
-设计要点 / design (docs/design/IDEA_EXPERIENCE_LIBRARY.md):
+设计要点 / design (原设计文档已删除，见 Git 历史 / the original design doc was removed, see git history):
   · 只存**有证据**的做法：修复之后未解决条目确实变少或验证通过，才记为成功；做法文本来自账本事实（改了哪些文件、Diagnoser 的结论），不让模型自由总结。
     Only evidence-backed remedies: a remedy counts as a success only when the unresolved items really dropped or verification passed; its text comes from ledger facts, never a free model summary.
   · 签名 = 失败类别 + 归一化后的错误信息（去掉路径、行号、数字、引号里的内容），所以不同任务里“同一种错”会落到同一条。
