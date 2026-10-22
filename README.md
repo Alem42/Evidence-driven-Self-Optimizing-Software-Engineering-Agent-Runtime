@@ -153,20 +153,21 @@ Verify in sandbox ──► Gate: real tests / static analysis / format, snapsho
 
 ```
 src/masa/
-  interfaces/     cli.py · mcp_server.py · http/server.py
-  application/    console.py (orchestration entry) · planning.py · generation.py
-                  orchestration/  coordinator.py · routing.py · flow.py · workflows.py · attempts.py
-                  v2/workers.py   package worker loop (tools: read/write/edit/run_check/finish)
-                  checks/         deterministic checks: contract, leaks, ownership, referee, case audit …
+  interfaces/     cli.py (serve · watch · ops · delivery …) · mcp_server.py · watchdog.py · http/server.py
+  application/    console.py + console_*.py (orchestration entry, views, jobs) · planning.py · generation.py
+                  orchestration/  coordinator.py · fixflow.py · prepare.py · routing.py · flow.py · workflows.py · attempts.py
+                  v2/             workers.py (package worker loop) · workspace.py (tools) · memory.py (window-adaptive memory strategies)
+                  checks/         deterministic checks: leaks, ownership, referee, case audit …
                   review/         source and test review
+                  ops.py          pending queue · event feed · webhook · stall rule · stop-all
+                  delivery.py     delivery report generated from the ledger
                   call_inspector.py   "what did this call see?"
   runtime/        engine.py (Gate) · roles.py (exactly-once) · tools.py · streamfiles.py · live.py · user_input.py
   roles/          registry.py · jsonschema.py · specs/*.json + *.prompt.md
   languages/      base.py · registry.py · conformance.py · go/ · python/
   agents/         protocol.py (prompts, validators) · schemas.py · handoffs.py
-  infrastructure/ store.py (ledger + artifacts) · llm.py · providers.py · settings.py · workspaces.py
+  infrastructure/ store.py (ledger + artifacts) · llm.py · providers.py · settings.py · windows.py (effective context window) · workspaces.py
   bench/          23-task benchmark, independent oracle, reports
-  tuning/         offline workflow tuner (search over data, not code)
   intelligence/   code index search, memory, repair context
 runner/           Go program: allow-listed operations, sandboxed execution
 frontend/         React + TypeScript workbench
@@ -181,7 +182,10 @@ All numbers are small samples and indicate direction, not statistical significan
 - **Benchmark:** 23 tasks in 10 levels with an independent oracle (hand-written reference implementations). The first run showed the system declared "pass" while the oracle disagreed on **17%** of tasks; after fixing 5 classes of defects, the cloud configuration passed **79–92%** of tasks with no false pass.
 - **Blind-derivation test audit:** asking a model "is this expected value right?" catches only **26–33%** of planted errors (it anchors on the claimed value), while deriving the answer blind and comparing catches **91%** (8% false alarms). In a small paired A/B the audit was better in 5 pairs, worse in 0, and cut cost per run by about **36%**.
 - **Prompt-cache layout:** server-reported cache hit rate rose from about **39% to 68%** in a 3-pair Go comparison.
-- **Experiments that did *not* pay off** (kept as opt-in switches, off by default): LLM "conductor" scheduling, best-of-N repair sampling, an experience library, tiered context budgeting, planner examples.
+- **Experiments that did *not* pay off** (removed in the 2026-10 pruning; tag `archive/pre-prune-2026-10` keeps them): LLM "conductor" scheduling (3/7 vs 6/7 passes, 24–96% dearer), best-of-N repair sampling, an experience library, planner examples, a package contract, an offline workflow tuner.
+- **Worker memory:** the latest failing check had already left the verbatim 3-step window on **21%** of late worker steps (replay over 264 ledgers); digest lines + pinned items + recall keep it at about +11% input; the strategy is chosen from the model's effective context window. A real A/B on two 10-file tasks passed with both strategies (n=1).
+- **Unattended operation (minimal):** crash recovery has three outcomes - reuse a stored result, pause an uncertain paid call as *pending* (never resent), or retry only when explicitly allowed; `masa watch` restarts the service after a crash (2 hard kills, 2 restarts) and an ops API/webhook exposes status, pending items and events.
+- **Honest status of the last end-to-end check:** bank, grades and 3 LCS runs passed with Flash only (about 1.4 CNY in total); one inventory run was a **false pass** (Gate passed, the independent oracle failed) - model-written tests from one family can be wrong together, which is what the next phase (property/differential checks) targets.
 - **Local models:** a 17.9 GB local model could not reliably act as a tool-using repair worker on a 16 GB GPU; today the local model is used for pre-checks and first drafts, and cloud Flash handles repair. The "local small model grinds, cloud model supervises" goal is the design direction; a local pass@k study is still to be done.
 
 ## Limitations / 做不到或没做的
