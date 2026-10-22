@@ -112,6 +112,13 @@ export function RoutingSection() {
             <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
           </Field>
         </div>
+        <h4>可执行的验收用例（实验，默认关闭，仅 Python）</h4>
+        <p className="hint">Architect 在规格里写结构化的黑盒用例（命令行参数、标准输入、期望的标准输出、退出码），程序<b>确定性地</b>生成 tests/test_acceptance.py：不经过模型翻译，Developer 和包工人改不了，失败时直接指出是哪个用例、什么输入。Go 暂不支持（保持原来的文本用例）。</p>
+        <div className="grid2">
+          <Field label="启用可执行的验收用例">
+            <input type="checkbox" checked={!!draft.policy.acceptance_cases} onChange={(e) => setPolicy({ acceptance_cases: e.target.checked })} />
+          </Field>
+        </div>
         <h4>断言裁判（实验，默认关闭）</h4>
         <div className="grid2">
           <Field label="断言裁判（失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为 Diagnoser 的独立证据）">

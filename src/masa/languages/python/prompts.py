@@ -23,11 +23,59 @@ def project_roles_prompt(context, default_instruction):
                 'Return {"kind":"clarification_request","reason":"brief reason","questions":[{"key":"range","title":"question",'
                 '"options":[{"id":"default","label":"suggested choice"}],"allow_text":true}]}. '
                 'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal answer. ')
-        instruction = common + ('You are Architect. In ONE answer you design the project AND the checks that will judge it, so the checks follow from exactly the requirements you wrote. '
+        structured = bool(context.get('acceptance_cases'))
+        shape = (
             'The top-level JSON MUST be {"spec":{"summary":"design rationale","module":"<short_name_for_this_task>",'
-            '"entrypoint":"<short_name_for_this_task>/__main__.py","files":[{"path":"pyproject.toml","purpose":"project metadata"}],"acceptance":["criterion"]},'
-            '"checks":[{"operation":"py_test","purpose":"verification strategy","acceptance_indices":[0],"cases":[{"name":"case","input":"literal input","expected":"exact output","level":"cli"}]},'
+            '"entrypoint":"<short_name_for_this_task>/__main__.py","files":[{"path":"pyproject.toml","purpose":"project metadata"}],"acceptance":["criterion"],'
+            '"cases":[{"name":"case","accepts":[0],"args":["--flag"],"stdin":"literal input","stdout":"exact stdout","exit_code":0}]},'
+            '"checks":[{"operation":"py_test","purpose":"verification strategy","acceptance_indices":[0]},'
             '{"operation":"py_static","purpose":"static checks","acceptance_indices":[1]}],"assumptions":["a convention you chose where the goal was silent"]}. '
+            if structured else (
+                'The top-level JSON MUST be {"spec":{"summary":"design rationale","module":"<short_name_for_this_task>",'
+                '"entrypoint":"<short_name_for_this_task>/__main__.py","files":[{"path":"pyproject.toml","purpose":"project metadata"}],"acceptance":["criterion"]},'
+                '"checks":[{"operation":"py_test","purpose":"verification strategy","acceptance_indices":[0],"cases":[{"name":"case","input":"literal input","expected":"exact output","level":"cli"}]},'
+                '{"operation":"py_static","purpose":"static checks","acceptance_indices":[1]}],"assumptions":["a convention you chose where the goal was silent"]}. '
+            ))
+        checks_text = (
+            'CHECKS. One to two objects chosen for this project: operation (py_test required; py_static recommended, each at most once), purpose (concrete verification strategy), '
+            'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
+            'Together the checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
+            'Assign behavior to py_test; syntax and static criteria may belong to py_static. '
+            'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
+            'Do NOT put cases inside checks: the executable cases are spec.cases. '
+            'CASES (spec.cases). 4..12 executable black-box acceptance cases. The harness generates tests/test_acceptance.py from them (it is listed in spec.files for you) and runs '
+            '`python -m <module> <args>` with the given stdin, then compares the standard output (trailing whitespace on lines and trailing blank lines are ignored) and the exit code; nobody translates them and nobody may edit them. '
+            'Each case is exactly {"name","accepts","args","stdin","stdout","exit_code"} (and optionally "stderr_nonempty":true when an error message on stderr is required): '
+            'name (a short description), accepts (zero-based indices of the acceptance items it demonstrates), args (list of strings, [] when there are none), '
+            'stdin (the exact text given on standard input, "" when none), stdout (the EXACT expected standard output, "" when the program prints nothing), '
+            'exit_code (the integer process status 0..255; an exit code is never text on stdout). '
+            'Every acceptance item that states an observable output or status must be accepted by at least one case. Include the happy path, malformed input, empty input, boundary cases and every error path with its exit code. '
+            'Test only what a user can observe through the command line, never internal functions. '
+            'Nobody will run the implementation to obtain an expected stdout, and a wrong one sends the whole project into a long, expensive repair loop: '
+            'choose inputs small enough that you can work the exact answer out by hand (a few lines, numbers below 100), derive it step by step before you write it, '
+            'and when a value needs a long computation use a smaller input instead. Keep fixtures tiny and deterministic. Do not assert on wording the goal never specified (an error message text): assert the empty stdout and the exit code, and use stderr_nonempty. '
+            'For optional numeric flags test explicit zero separately from omission when zero is within the specified domain. '
+            if structured else (
+                'CHECKS. One to two objects chosen for this project: operation (py_test required; py_static recommended, each at most once), purpose (concrete verification strategy), '
+                'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
+                'Together the checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
+                'Assign behavior to py_test; syntax and static criteria may belong to py_static. '
+                'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
+                'For py_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
+                'For py_static omit cases entirely; never return an empty cases array. '
+                'level (unit, integration or cli). Include happy path, malformed input, empty input, boundary cases and CLI behavior. '
+                'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
+                'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
+                'expected must contain a readable description, not only whitespace: write stdout empty / stdout newline and the exit code when needed. '
+                'Nobody will run the implementation to obtain an expected value, and a wrong expected value sends the whole project into a long, expensive repair loop: '
+                'choose inputs small enough that you can work the exact answer out by hand (a few lines, numbers below 100), derive it step by step before you write it, '
+                'and when a value needs a long computation use a smaller input instead. Keep fixtures tiny and deterministic. '
+                'Every acceptance item that states an observable output must be exercised by at least one case. '
+                'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
+                'when zero is within the specified domain. '
+            ))
+        instruction = common + ('You are Architect. In ONE answer you design the project AND the checks that will judge it, so the checks follow from exactly the requirements you wrote. '
+            + shape +
             'Return exactly spec, checks and assumptions. '
             # ── spec ──
             'SPEC. Explain a small practical architecture matching the goal. Populate spec.files with at least 4 entries. '
@@ -52,24 +100,7 @@ def project_roles_prompt(context, default_instruction):
             '(subpackages <module>/<name>/ each with its own __init__.py and <name>.py), tests live in tests/test_<name>.py and use unittest. '
             'Entry rule: <module>/__main__.py is a thin wrapper that only calls run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr) imported with the FULL dotted path of the file that defines it (for <module>/app/app.py: from <module>.app.app import run) and exits with its return value; its purpose line must say so and must never say it reads stdin. '
             'Reading input, dispatching commands and printing belong to run in an internal module; with three or more internal packages add <module>/app/__init__.py and <module>/app/app.py (and tests/test_app.py) as the package that owns run and wires the others. '
-            # ── checks ──
-            'CHECKS. One to two objects chosen for this project: operation (py_test required; py_static recommended, each at most once), purpose (concrete verification strategy), '
-            'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
-            'Together the checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
-            'Assign behavior to py_test; syntax and static criteria may belong to py_static. '
-            'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
-            'For py_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
-            'For py_static omit cases entirely; never return an empty cases array. '
-            'level (unit, integration or cli). Include happy path, malformed input, empty input, boundary cases and CLI behavior. '
-            'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
-            'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
-            'expected must contain a readable description, not only whitespace: write stdout empty / stdout newline and the exit code when needed. '
-            'Nobody will run the implementation to obtain an expected value, and a wrong expected value sends the whole project into a long, expensive repair loop: '
-            'choose inputs small enough that you can work the exact answer out by hand (a few lines, numbers below 100), derive it step by step before you write it, '
-            'and when a value needs a long computation use a smaller input instead. Keep fixtures tiny and deterministic. '
-            'Every acceptance item that states an observable output must be exercised by at least one case. '
-            'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
-            'when zero is within the specified domain. '
+            + checks_text +
             # ── assumptions ──
             'ASSUMPTIONS. 0..6 short strings: each names a point the goal left open and the convention you chose for it; the same fact must also appear as a concrete acceptance item. '
             'Never invent requirements the goal does not imply.')
@@ -109,6 +140,9 @@ def project_roles_prompt(context, default_instruction):
             'Test observable behavior, not implementation details. Prefer run(args, stdin, stdout, stderr) -> int returning the exit status, called directly in tests with io.StringIO objects. '
             'With unittest write assertEqual(actual, expected) with the ACTUAL value first. '
             'Use bilingual Chinese/English function docstrings. No placeholders. The human reviews before any write.')
+        if (context.get('spec') or {}).get('cases'):
+            instruction += (' The harness generates tests/test_acceptance.py from spec.cases and runs it against the real program: write a one-line placeholder for that file, '
+                            'do not copy those cases into your own tests, and write unit tests for your own modules instead.')
         if context.get('generation_mode') == 'files-v1':
             # 单次只生成一个批准文件；已生成源码约束后续接口与测试。
             # Generate one approved file per call; prior code binds later interfaces and tests.

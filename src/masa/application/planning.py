@@ -46,7 +46,7 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None, audit_provider=None, language=None):
+                 triage=None, triage_provider=None, audit_provider=None, language=None, acceptance_cases=False):
         """Architect 一次调用给出规格 + 检查计划 + 假设（取代原来 Planner、Tester 两次交接）；有界调用，无工具执行。
         One bounded Architect call yields the spec, the check plan and the assumptions (replacing the former Planner -> Tester handoff); no tool execution."""
         text(goal, 16000)
@@ -92,6 +92,7 @@ class ProjectPlanning:
                 spec, checks = self.store.read(plan['spec_ref']), self.store.read(plan['checks_ref'])
             else:
                 values={'goal':goal}
+                if acceptance_cases and pack.supports('acceptance'):values['acceptance_cases']=True  # 规格里写结构化的可执行验收用例 / structured executable acceptance cases in the spec
                 # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
                 # A received-but-rejected response is retried once with the concrete rejection reason.
                 if retry_feedback:values['previous_attempt_error']=str(retry_feedback)[:1000]
@@ -122,6 +123,10 @@ class ProjectPlanning:
             validate_checks(checks,spec,require_coverage=False,language=pack.id)
             if audit_provider is not None:
                 self._audit_cases(rid,audit_provider,goal,spec,checks,plan)
+                dropped=(plan.get('case_audit') or {}).get('dropped') or []
+                if dropped and spec.get('cases'):  # 审计丢掉的用例也要从规格里的结构化用例中去掉（两份按下标一一对应）/ cases the audit dropped leave the spec's structured cases too (the two lists correspond by index)
+                    spec['cases']=[c for i,c in enumerate(spec['cases']) if i not in set(dropped)]
+                    plan['spec_ref']=self.store.put(spec)
             # 审查 Architect 原始的检查计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
             plan['test_review']=review_test_plan(spec,checks,pack.id)

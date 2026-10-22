@@ -3,7 +3,7 @@
   "title": "Python",
   "version": 1,
   "api_version": 1,
-  "capabilities": [],
+  "capabilities": ["acceptance"],
   "layout": {
     "source_exts": [".py"],
     "manifest_files": ["pyproject.toml"],

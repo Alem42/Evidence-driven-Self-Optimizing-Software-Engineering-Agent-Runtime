@@ -23,7 +23,7 @@ RULES = [
      '需要网络或外部服务（数据库、远程 API、爬虫）。检查环境没有网络，无法验证。',
      '把外部输入换成命令行参数或标准输入，把外部服务抽象成接口并用内存实现。'),
     ('gui', INFEASIBLE,
-     r'\bgui\b|图形界面|图形化|窗口程序|桌面(?:应用|程序)|网页|web\s*页面|前端|\bhtml\b|\bcss\b|\btkinter\b|\bpygame\b|\bqt\b|小程序|android|ios\s*应用|手机\s*app|摄像头|麦克风|语音识别|opengl|游戏画面',
+     r'\bgui\b|图形界面|图形化|窗口程序|桌面(?:应用|程序)|网页|web\s*页面|前端|\btkinter\b|\bpygame\b|\bqt\b|小程序|android|ios\s*应用|手机\s*app|摄像头|麦克风|语音识别|opengl|游戏画面',
      '需要图形界面、网页或硬件。验证只能靠 unittest 与命令行输出，无法检查画面或设备。',
      '改成命令行程序，把界面逻辑拆成可测试的纯函数。'),
     ('library_shape', INFEASIBLE,
@@ -34,6 +34,11 @@ RULES = [
 
 # 只给出警告：很可能反复失败，或者验证不了。 Warnings only: likely to need many attempts or hard to verify.
 RISKS = [
+    # HTML/CSS 只是**输出的文本格式**时（例如 Markdown 转 HTML）完全可测；以前整条按“要图形界面”拦下（VagueBench 的 Markdown 任务因此在零调用时被判不可行）。
+    # HTML/CSS as the OUTPUT TEXT format (e.g. Markdown to HTML) is perfectly testable; it used to be blocked as "needs a GUI" (the VagueBench Markdown task was ruled infeasible before any call).
+    ('markup_output', r'\bhtml\b|\bcss\b',
+     '涉及 HTML/CSS：只能验证生成的文本，无法检查浏览器里的渲染效果。',
+     '把验收写成对输出文本的检查（包含哪些标签、属性、转义），不要求“看起来对”。'),
     ('interactive', r'交互式|实时|键盘(?:输入|控制|事件)|终端(?:界面|动画)|\bcurses\b|倒计时|动画|游戏',
      '涉及交互/实时/终端界面：自动测试只能通过标准输入输出验证，容易出现“能跑但测不到”。',
      '把游戏/界面逻辑做成纯函数（状态 → 新状态），用测试覆盖；主程序只做输入输出。'),

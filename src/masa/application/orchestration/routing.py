@@ -37,6 +37,8 @@ DEFAULT_POLICY = {
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
     # Tester 用例审计（默认关闭）：规划后让便宜的云端模型盲推导用例期望，丢弃多数认为可疑的用例。 Tester case audit (off by default): a cheap cloud model derives expectations blindly; suspect cases are dropped.
     'test_audit': False,
+    # 可执行的验收用例（默认关闭）：Architect 在规格里写结构化的黑盒用例，程序确定性地生成 tests/test_acceptance.py（只有声明了 acceptance 能力的语言包，目前是 Python）。 Executable acceptance cases (off by default): the Architect writes structured black-box cases and the harness generates tests/test_acceptance.py (only for packs with the acceptance capability, currently Python).
+    'acceptance_cases': False,
     # 规模自适应的分层上下文（默认关闭）：小任务原样全给；放不下窗口的大任务才把无关文件降级为轮廓。 Scale-adaptive tiered context (off by default): small tasks get everything; only a task that does not fit the window has unrelated files degraded to outlines.
     'context_budget': False,
     # 断言裁判（默认关闭）：失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为独立证据交给 Diagnoser；并在“测试修订没改动失败断言”时给出明确提示。 Assertion referee (off by default).
@@ -309,7 +311,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'test_audit', 'context_budget', 'assertion_referee'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'test_audit', 'acceptance_cases', 'context_budget', 'assertion_referee'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value

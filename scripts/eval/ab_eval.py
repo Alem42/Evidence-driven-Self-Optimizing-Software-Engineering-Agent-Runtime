@@ -23,6 +23,7 @@ from masa.infrastructure.store import Store  # noqa: E402
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
 ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}}, 'v2r': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}}},  # 修复的工人直接用 Flash（本地 glm 当不了工人）/ the repair workers start at Flash (the local glm cannot be a worker)
         'v2rm': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}, 'memory_strategy': 'auto'}},  # 同 v2r，但包工人用按窗口自动选择的记忆策略 / like v2r, but the workers use the window-adaptive memory strategy
+        'v2ra': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}, 'acceptance_cases': True}},  # 同 v2r，但 Architect 写结构化的可执行验收用例 / like v2r, but the Architect writes structured executable acceptance cases
         'v2m': {'runtime': 'v2', 'policy': {'memory_strategy': 'auto'}},  # 全程 V2 + 按窗口自动选择的记忆策略（长循环才看得出差别）/ full V2 + the window-adaptive memory strategy (only long loops show a difference)
         'v2s': {'runtime': 'v2', 'policy': {}, 'layout': 'sorted'},  # 与 v2 相同，只是提示用旧的字母序排布（缓存命中率对照）/ same as v2 but with the old alphabetical prompt layout (cache hit-rate comparison)
 }

@@ -52,7 +52,8 @@ class PrepareMixin:
                                        retry_of=retry_of,retry_feedback=planner_feedback,
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
-                                       language=self.language)
+                                       language=self.language,
+                                       acceptance_cases=bool(self._ladder and self.router.policy.get('acceptance_cases')))
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

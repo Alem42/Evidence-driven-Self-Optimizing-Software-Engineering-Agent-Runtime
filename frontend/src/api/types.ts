@@ -383,6 +383,7 @@ export interface RoutingPolicy {
   planner_retries: number;
   start_level_by_role: Record<string, number>;
   test_audit?: boolean;
+  acceptance_cases?: boolean;
   context_budget?: boolean;
   assertion_referee?: boolean;
   memory_strategy?: 'auto' | 'window' | 'digest_wide' | 'digest' | 'digest_tight';

@@ -119,7 +119,7 @@ def _validate_project_roles(context, action, key):
             from masa.domain.clarification import validate_question
             return validate_question(action)
         from masa.domain.proposals import validate_architect
-        return validate_architect(action, context.get('language'))
+        return validate_architect(action, context.get('language'), structured=bool(context.get('acceptance_cases')))
     if context['purpose'] in ('project_planner', 'project_tester'):
         raise MasaError(f"{context['purpose']} was merged into project_architect; it is no longer called")
     if context['purpose'] == 'project_developer':
