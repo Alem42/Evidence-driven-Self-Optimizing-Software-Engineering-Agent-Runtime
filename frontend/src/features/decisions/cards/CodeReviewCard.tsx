@@ -41,7 +41,7 @@ export function CodeReviewCard({ detail }: { detail: Detail }) {
     () => api<{ findings: { path: string; line?: number; message: string }[] }>('/runs/' + detail.run.id + '/review-project-sources', { files_ref: plan.files_ref, files: code.files }),
     (r) => review.set(r),
   );
-  const title = plan.revision_scope === 'tests' ? 'Tester · 测试修订审核' : plan.repair_of ? 'Developer · 修复版本审核' : 'Developer · 代码审核';
+  const title = plan.revision_scope === 'tests' ? 'Architect · 测试修订审核' : plan.repair_of ? 'Developer · 修复版本审核' : 'Developer · 代码审核';
   const names = Object.keys(code.files ?? {});
   const generating = plan.status === 'generating';
 

@@ -19,8 +19,8 @@ class UsageReportTests(unittest.TestCase):
                 report = task_report(store, rid)
                 self.assertEqual(report['outcome'], 'waiting')
                 self.assertEqual(report['project_id'], rid)
-                self.assertGreaterEqual(report['totals']['calls'], 2)
-                self.assertEqual({c['step_id'] for c in report['calls']} >= {'project_planner', 'project_tester'}, True)
+                self.assertGreaterEqual(report['totals']['calls'], 1)
+                self.assertEqual({c['step_id'] for c in report['calls']} >= {'project_architect'}, True)
                 # 汇总必须等于逐次调用之和；缺用量的调用不计入也不被当成 0。
                 known = [c['total_tokens'] for c in report['calls'] if c['total_tokens'] is not None]
                 self.assertEqual(report['totals']['total_tokens'], sum(known))

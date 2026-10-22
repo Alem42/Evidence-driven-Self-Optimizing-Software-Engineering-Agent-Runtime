@@ -50,10 +50,8 @@ class FakeModel:
 
     def respond(self, context):
         self.contexts.append(copy.deepcopy(context))
-        if context['purpose'] == 'project_planner':
-            return copy.deepcopy(SPEC)
-        if context['purpose'] == 'project_tester':
-            return copy.deepcopy(CHECKS)
+        if context['purpose'] == 'project_architect':
+            return {'spec': copy.deepcopy(SPEC), 'checks': copy.deepcopy(CHECKS)}
         return validate_response(context, {'files': {context['target_path']: self.files[context['target_path']]}}, '')
 
 
@@ -111,10 +109,10 @@ class ChecksTests(unittest.TestCase):
 
     def test_empty_cases_arrays_are_dropped_from_a_check_plan_instead_of_rejecting_the_answer(self):
         from masa.agents.protocol import validate_response
-        context = {'purpose': 'project_tester', 'spec': SPEC, 'language': 'python'}
+        context = {'purpose': 'project_architect', 'language': 'python'}
         plan = [{**CHECKS[0]}, {**CHECKS[1], 'cases': []}]
-        self.assertEqual(len(validate_response(context, {'checks': plan}, '')), 2)
-        self.assertNotIn('cases', validate_response(context, {'checks': plan}, '')[1])
+        self.assertEqual(len(validate_response(context, {'spec': SPEC, 'checks': plan}, '')['checks']), 2)
+        self.assertNotIn('cases', validate_response(context, {'spec': SPEC, 'checks': plan}, '')['checks'][1])
 
     def test_an_entry_that_reads_input_itself_is_refused(self):
         bad = 'import sys' + NL + 'for line in sys.stdin:' + NL + '    print(line)' + NL
@@ -433,12 +431,12 @@ class PlannerSpecShapeTests(unittest.TestCase):
         # 真实运行：三次规划分别是“只有 summary”“多了 acceptance_note”“缺 acceptance”，旧消息只说“字段无效”，任务在规划阶段失败。
         # Real run: three planning attempts were "summary only", "an extra acceptance_note" and "acceptance missing"; the old message only said "invalid fields" and the task died in planning.
         from masa.agents.protocol import validate_response
-        context = {'purpose': 'project_planner', 'language': 'python'}
-        spec = validate_response(context, {**SPEC, 'acceptance_note': 'why'}, '')
+        context = {'purpose': 'project_architect', 'language': 'python'}
+        spec = validate_response(context, {'spec': {**SPEC, 'acceptance_note': 'why'}, 'checks': CHECKS}, '')['spec']
         self.assertNotIn('acceptance_note', spec)
         without = {k: v for k, v in SPEC.items() if k != 'acceptance'}
         with self.assertRaisesRegex(MasaError, r"missing: \['acceptance'\]"):
-            validate_response(context, without, '')
+            validate_response(context, {'spec': without, 'checks': CHECKS}, '')
 
 
 class AssertionDiffsTests(unittest.TestCase):

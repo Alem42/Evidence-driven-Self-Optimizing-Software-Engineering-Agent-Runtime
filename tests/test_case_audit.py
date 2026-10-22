@@ -58,7 +58,7 @@ class LogicTests(unittest.TestCase):
 
 
 class Provider:
-    """规划阶段用的假模型：Planner/Tester 返回固定计划，审计角色按脚本回答，并记录每次调用的用途。 A fake for planning: fixed Planner/Tester output, scripted audit answers, and a log of purposes."""
+    """规划阶段用的假模型：Architect 返回固定计划，审计角色按脚本回答，并记录每次调用的用途。 A fake for planning: fixed Architect output, scripted audit answers, and a log of purposes."""
     profile = {'provider': 'test', 'model': 'fake'}
     usage = {'total_tokens': 10}
 
@@ -68,12 +68,10 @@ class Provider:
     def respond(self, context):
         purpose = context['purpose']
         self.log.append(purpose)
-        if purpose == 'project_planner':
-            return copy.deepcopy(SPEC)
-        if purpose == 'project_tester':
+        if purpose == 'project_architect':
             checks = copy.deepcopy(CHECKS)
             checks[0]['cases'] = [{'name': f'c{i}', 'input': f'in{i}', 'expected': f'out{i}', 'level': 'unit'} for i in range(5)]
-            return checks
+            return {'spec': copy.deepcopy(SPEC), 'checks': checks}
         if self.fail:
             raise RuntimeError('audit model down')
         if purpose == 'case_deriver':
@@ -94,7 +92,7 @@ class PlanningHookTests(unittest.TestCase):
     def test_off_by_default_nothing_extra_is_called(self):
         provider = Provider()
         store, rid = self.plan(provider, audit=False)
-        self.assertEqual(provider.log, ['project_planner', 'project_tester'])
+        self.assertEqual(provider.log, ['project_architect'])
         self.assertNotIn('case_audit', store.run(rid)['data']['project_plan'])
         self.assertFalse(validate_policy({})['test_audit'])
 

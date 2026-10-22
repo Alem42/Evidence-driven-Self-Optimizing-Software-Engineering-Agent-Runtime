@@ -35,7 +35,7 @@ class RoutePolicyTests(unittest.TestCase):
     def test_by_default_spec_and_tests_use_the_strongest_level_while_code_starts_low(self):
         # 规格与测试决定下游一切，token 少 → 最高等级；实现从低等级起步再上推。
         # Spec and tests decide everything downstream and are cheap -> top level; implementation starts low and climbs.
-        for role in ('project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'):
+        for role in ('project_architect', 'project_test_revision', 'project_diagnoser'):
             with self.subTest(role=role):
                 d = route(role, 'planning', [LOCAL, CLOUD], [], SPEND, BUDGET, DEFAULT_POLICY, 1000)
                 self.assertEqual((d.candidate, d.reason), ('cloud', 'start_lowest_eligible'))  # 起步等级 = 最高等级 / the start level is the top level
@@ -62,8 +62,16 @@ class RoutePolicyTests(unittest.TestCase):
         spend = {**SPEND, 'cloud_tokens': 199_000}
         d = decide([{'candidate': 'local', 'level': 1}], spend=spend)
         self.assertEqual((d.action, d.reason), ('stop', 'budget_cloud_tokens'))
-        d = decide([], spend={**SPEND, 'calls': 40})
-        self.assertEqual((d.action, d.reason), ('stop', 'budget_calls'))
+        # 付费的云端调用用完：只有云端候选被挡住，免费的本地模型照常可用（本地调用不占这一项）。 Paid cloud calls used up: only the cloud candidates are blocked, the free local model is not.
+        d = decide([], spend={**SPEND, 'calls': 40, 'cloud_calls': 40})
+        self.assertEqual((d.action, d.candidate), ('use', 'local'))
+        d = decide([{'candidate': 'local', 'level': 1}], spend={**SPEND, 'calls': 40, 'cloud_calls': 40})
+        self.assertEqual((d.action, d.reason), ('stop', 'budget_calls'))  # 想升级到云端，但云端调用次数已满 / escalation needs a cloud call that is no longer allowed
+        # 本地调用默认不限次数；显式设了 max_local_calls 才受约束。 Local calls are unlimited by default; only an explicit max_local_calls bounds them.
+        d = decide([], spend={**SPEND, 'calls': 500, 'local_calls': 500})
+        self.assertEqual((d.action, d.candidate), ('use', 'local'))
+        d = decide([], spend={**SPEND, 'local_calls': 500}, budget={**BUDGET, 'max_local_calls': 500})
+        self.assertEqual((d.action, d.candidate), ('use', 'cloud'))
         d = decide([], spend={**SPEND, 'active_seconds': 3600})
         self.assertEqual((d.action, d.reason), ('stop', 'budget_time'))
 
@@ -101,7 +109,7 @@ class RoutePolicyTests(unittest.TestCase):
         self.assertEqual((d.action, d.reason), ('stop', 'budget_cost'))
 
     def test_role_restrictions_and_unavailable_candidates(self):
-        only_cloud_plans = Candidate('cloud', 2, 0, 'cloud', 'big', roles=('project_planner',), context_limit=65536, max_output=4096)
+        only_cloud_plans = Candidate('cloud', 2, 0, 'cloud', 'big', roles=('project_architect',), context_limit=65536, max_output=4096)
         d = decide([], (LOCAL, only_cloud_plans))
         self.assertEqual(d.candidate, 'local')
         d = decide([{'candidate': 'local', 'level': 1}], (LOCAL, only_cloud_plans))
@@ -156,7 +164,7 @@ class ScriptedProvider:
             self.repairs += 1
             self.on_repair()
             return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // by {self.profile["model"]} #{self.repairs}\n'}
-        return {'project_diagnoser': {'owner': 'implementation', 'rationale': 'the implementation does not compile', 'implementation_instructions': 'fix the reported compile error', 'test_instructions': ''}, 'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_diagnoser': {'owner': 'implementation', 'rationale': 'the implementation does not compile', 'implementation_instructions': 'fix the reported compile error', 'test_instructions': ''}, 'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_architect': {'spec': SPEC, 'checks': CHECKS}, 'project_developer': FILES}[purpose]
 
 
 class EscalationIntegrationTests(unittest.TestCase):
@@ -351,10 +359,10 @@ class RealRunRegressionTests(unittest.TestCase):
                 self.repairs = 0
 
             def respond(self, context):
-                if context['purpose'] == 'project_tester':
+                if context['purpose'] == 'project_architect':
                     self.testers += 1
                     if self.testers < 3:
-                        return [{'invalid': 'shape'}]
+                        return {'spec': SPEC, 'checks': [{'invalid': 'shape'}]}
                 if context['purpose'] == 'project_repair':
                     self.repairs += 1
                     return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // try {self.repairs}\n'}

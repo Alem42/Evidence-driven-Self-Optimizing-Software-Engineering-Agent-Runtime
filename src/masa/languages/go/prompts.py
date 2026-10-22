@@ -18,16 +18,19 @@ def project_roles_prompt(context, default_instruction):
               'NEVER copy them into source code, comments or string literals. '
               'If the input contains previous_attempt_error (or feedback saying a previous attempt was rejected), your last response '
               'was rejected by validation for exactly that reason: return a complete corrected response that fixes it. ')
-    if context['purpose'] == 'project_planner':
+    if context['purpose'] == 'project_architect':
         if context.get('clarification_allowed'):
             common += ('If a missing business requirement affects interfaces or test expectations, ask before planning. '
                 'Return {"kind":"clarification_request","reason":"brief reason","questions":[{"key":"range","title":"question",'
                 '"options":[{"id":"default","label":"suggested choice"}],"allow_text":true}]}. '
-                'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal spec. ')
-        instruction = common + ('You are Planner. Explain a small practical architecture matching the goal. '
-            'The top-level JSON MUST be {"summary":"design rationale","module":"example.com/task",'
-            '"entrypoint":"cmd/app/main.go","files":[{"path":"go.mod","purpose":"module"}],"acceptance":["criterion"]}. '
-            'Do not wrap it in spec, project, result or type. Populate files with at least 3 entries. '
+                'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal answer. ')
+        instruction = common + ('You are Architect. In ONE answer you design the project AND the checks that will judge it, so the checks follow from exactly the requirements you wrote. '
+            'The top-level JSON MUST be {"spec":{"summary":"design rationale","module":"example.com/task",'
+            '"entrypoint":"cmd/app/main.go","files":[{"path":"go.mod","purpose":"module"}],"acceptance":["criterion"]},'
+            '"checks":[{"operation":"go_test","purpose":"verification strategy","acceptance_indices":[0],"cases":[{"name":"case","input":"literal input","expected":"exact output","level":"cli"}]},'
+            '{"operation":"go_vet","purpose":"static checks","acceptance_indices":[1]}],"assumptions":["a convention you chose where the goal was silent"]}. '
+            'Return exactly spec, checks and assumptions. '
+            'SPEC. Explain a small practical architecture matching the goal. Populate spec.files with at least 3 entries. '
             'Return exactly summary (brief design rationale and tradeoffs), module (e.g. example.com/task), '
             'entrypoint (exactly cmd/app/main.go), files (3..20 objects with path and purpose), '
             'acceptance (prefer 4..8 concise, concrete requirements; never exceed 12 for a small task). '
@@ -39,6 +42,7 @@ def project_roles_prompt(context, default_instruction):
             'cannot disagree: empty input, a header row (is it data or skipped?), input without a trailing newline, byte vs character counts, '
             'ties and ordering, invalid or missing values and what is printed or returned for them, exit codes. Choose the common convention '
             'and state it explicitly (for example: the first CSV row is a header and is skipped; a missing trailing newline still counts the last line). '
+            'Every acceptance item is a complete sentence that states the concrete expected value or behaviour; never end one with a colon, an equals sign or a trailing space. '
             'End summary with 2 or 3 short implementation hints that avoid fragile designs (for example: read all input with io.ReadAll; do not count bytes line by line). '
             'Keep summary under 500 characters. Include go.mod, cmd/app/main.go, '
             'implementation and _test.go files. Paths are relative and portable. Only .go files and go.mod. '
@@ -46,12 +50,10 @@ def project_roles_prompt(context, default_instruction):
             'Layout rule: NEVER put .go files at the module root; only go.mod lives there. cmd/app/main.go is the only package main; '
             'put logic in subdirectories such as internal/<name>/<name>.go and tests next to it as <name>_test.go (same package). '
             'Entry rule: cmd/app/main.go is a thin wrapper that only calls <pkg>.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr) and exits; its purpose line must say so and must never say it reads stdin. '
-            'Reading input, dispatching commands and printing belong to Run in an internal package; with three or more internal packages add internal/app (app.go, app_test.go) as the package that owns Run and wires the others.')
-    elif context['purpose'] == 'project_tester':
-        instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
-            'one to three objects chosen for this project: operation (go_test required; go_vet and go_fmt_check recommended, each at most once), purpose (concrete verification strategy), '
+            'Reading input, dispatching commands and printing belong to Run in an internal package; with three or more internal packages add internal/app (app.go, app_test.go) as the package that owns Run and wires the others. '
+            'CHECKS. One to three objects chosen for this project: operation (go_test required; go_vet and go_fmt_check recommended, each at most once), purpose (concrete verification strategy), '
             'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
-            'Together the three checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
+            'Together the checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
             'Assign behavior to go_test; static and formatting criteria may belong to go_vet or go_fmt_check. '
             'A coverage reference is a verification plan, NOT proof. State any limits of automatic verification in purpose. '
             'For go_test include cases: 4..12 objects with name, input (literal fixture/arguments), expected (exact output/error/exit code), '
@@ -60,9 +62,14 @@ def project_roles_prompt(context, default_instruction):
             'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
             'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
             'expected must contain a readable description, not only whitespace: write stdout empty / stdout newline and the exit code when needed. '
-            'Compute expected values independently, not by calling the implementation. Keep fixtures tiny and deterministic. '
+            'Nobody will run the implementation to obtain an expected value, and a wrong expected value sends the whole project into a long, expensive repair loop: '
+            'choose inputs small enough that you can work the exact answer out by hand (a few lines, numbers below 100), derive it step by step before you write it, '
+            'and when a value needs a long computation use a smaller input instead. Keep fixtures tiny and deterministic. '
+            'Every acceptance item that states an observable output must be exercised by at least one case. '
             'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
-            'when zero is within the specified domain. Do not change the spec or invent results.')
+            'when zero is within the specified domain. '
+            'ASSUMPTIONS. 0..6 short strings: each names a point the goal left open and the convention you chose for it; the same fact must also appear as a concrete acceptance item. '
+            'Never invent requirements the goal does not imply.')
     elif context['purpose']=='project_test_revision':
         instruction=common+('You are Tester revising broken tests after a real failed check. '
             'Return exactly {"files":{existing_test_path:complete_replacement_content}}. '
@@ -154,8 +161,8 @@ def transport_hint(context):
     """本地（ollama）传输的补充说明：本地模型对结构化输出的支持较弱，需要明确的键与固定的 go.mod 原文。 Extra text for the local (ollama) transport: local models need explicit keys and the exact go.mod text."""
     import json
     purpose = context.get('purpose')
-    if purpose == 'project_tester':
-        return ' Local transport override: checks MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
+    if purpose == 'project_architect':
+        return ' Local transport override: the top-level "checks" MUST be an OBJECT keyed by go_test (required), go_vet and/or go_fmt_check (optional), not an array. Each value has purpose, acceptance_indices and for go_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
     if purpose == 'project_developer' and context.get('generation_mode') != 'files-v1':
         return ' Copy this exact go.mod value: ' + json.dumps("module " + context['spec']['module'] + chr(10) + chr(10) + "go 1.27.0" + chr(10)) + '. Keep implementation concise. Avoid repetitive comments.'
     return ''

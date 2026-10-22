@@ -119,7 +119,7 @@ class AccountTests(unittest.TestCase):
 
     def test_routing_defaults_roundtrip_validate_and_feed_snapshots(self):
         saved = self.settings.save_routing({'policy': {'max_escalations': 1, 'attempts_per_level': {'fix': 2},
-                                                        'start_level_by_role': {'project_planner': 2}},
+                                                        'start_level_by_role': {'project_architect': 2}},
                                             'budget': {'max_cloud_tokens': 5000, 'max_cost': None}})
         self.assertEqual(saved['policy']['attempts_per_level']['planning'], 2)  # 未给的项取默认 / unspecified keep defaults
         self.assertEqual(Settings(self.root).routing()['budget']['max_cloud_tokens'], 5000)
@@ -132,7 +132,7 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(snapshot['budget']['max_cloud_tokens'], 5000)  # 保存的默认 / saved default
         self.assertEqual(snapshot['budget']['max_model_calls'], 7)  # 任务覆盖 / per-task override
         self.assertEqual(snapshot['policy']['attempts_per_level'], {'planning': 2, 'generation': 3, 'fix': 2})
-        self.assertEqual(snapshot['policy']['start_level_by_role'], {'project_planner': 2})
+        self.assertEqual(snapshot['policy']['start_level_by_role'], {'project_architect': 2})
 
     def test_snapshot_honours_the_models_selected_for_the_task(self):
         a = self.add('a')['active_id']
@@ -210,10 +210,10 @@ class RotationTests(unittest.TestCase):
 
     def test_a_role_can_start_at_a_higher_level_and_falls_back_when_that_is_unusable(self):
         cands = [cand('local', 1), cand('cloud', 2, kind='cloud')]
-        policy = {'start_level_by_role': {'project_planner': 2}}
-        self.assertEqual(self.decide('project_planner', [], cands, policy).candidate, 'cloud')
+        policy = {'start_level_by_role': {'project_architect': 2}}
+        self.assertEqual(self.decide('project_architect', [], cands, policy).candidate, 'cloud')
         self.assertEqual(self.decide('project_repair', [], cands, policy).candidate, 'local')
-        self.assertEqual(self.decide('project_planner', [], [cand('local', 1)], policy).candidate, 'local')
+        self.assertEqual(self.decide('project_architect', [], [cand('local', 1)], policy).candidate, 'local')
 
 
 if __name__ == '__main__':

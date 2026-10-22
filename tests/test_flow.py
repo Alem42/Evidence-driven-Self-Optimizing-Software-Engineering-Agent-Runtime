@@ -147,14 +147,54 @@ class FlowEngineTests(unittest.TestCase):
         self.assertEqual(route(needs_diagnosis=True, primary='implementation'), 'diagnose')
         self.assertEqual(route(primary='implementation'), 'repair')
         self.assertEqual(route(primary='test'), 'revise')
-        self.assertEqual(route(primary='ambiguous', arbitrate_due=True), 'arbitrate')
         self.assertEqual(route(primary='ambiguous'), 'repair')
         # 诊断过之后，走向由诊断结论决定而不是规则 primary。 After a diagnosis, the verdict decides.
         self.assertEqual(route(primary='implementation', diagnosed=True, needs_diagnosis=True), 'repair')
         diag = lambda owner: next_edge(FIX_V1, 'diagnose', {'diagnosis': {'owner': owner}})['to']  # noqa: E731
-        self.assertEqual((diag('test'), diag('spec'), diag('unclear'), diag('implementation'), diag('both')), ('revise', 'halt', 'halt', 'repair', 'repair'))
+        # 测试期望有错（含“两者都有问题”）时先改测试，再改实现。 A wrong expectation is corrected first, also when the implementation has defects too.
+        self.assertEqual((diag('test'), diag('spec'), diag('unclear'), diag('implementation'), diag('both')), ('revise', 'halt', 'halt', 'repair', 'revise'))
         self.assertEqual(next_edge(FIX_V1, 'repair', {'halted': True})['to'], 'halt')
         self.assertEqual(next_edge(FIX_V1, 'repair', {})['to'], 'drafted')
+
+    def test_a_stuck_repair_never_becomes_a_test_revision_without_evidence(self):
+        """“修不动实现”不能证明“测试错”（P0 复盘 §5.3）。有裁决者时，修不动 → 先裁决 → 已裁决过就停下交给人；只有独立证据才直接改测试。
+        “The implementation cannot be fixed” does not prove “the test is wrong”: with an adjudicator a stall yields a ruling, then a stop; only independent evidence revises the tests at once."""
+        after = lambda node, **facts: next_edge(FIX_V1, node, facts)['to']  # noqa: E731
+        stalled = {'halted': True, 'halt_kind': 'noop', 'adjudicator': True}
+        self.assertEqual(after('repair', **stalled, can_diagnose=True, diagnosed=False), 'diagnose')   # 先裁决 / adjudicate first
+        self.assertEqual(after('repair', **stalled, can_diagnose=False, diagnosed=True), 'halt')       # 裁决过了仍修不动 → 交给人 / already ruled, still stuck: a human
+        self.assertEqual(after('repair', **stalled, can_diagnose=False, diagnosed=False), 'halt')      # 裁决预算用完 → 交给人，不推断测试错 / budget gone: a human, no inference
+        wants_tests = {'halted': True, 'halt_kind': 'wants_tests', 'adjudicator': True, 'can_diagnose': True}
+        self.assertEqual(after('repair', **wants_tests), 'diagnose')                                    # 模型想改冻结的测试只是它的意见 / the model wanting to edit frozen tests is only its opinion
+        # 独立证据（裁判多数 + 实际值不变）直接转修订测试，即使还能裁决。 Independent evidence revises the tests at once, even when a ruling is still possible.
+        self.assertEqual(after('repair', halted=True, halt_kind='expectation_suspected', adjudicator=True, can_diagnose=True), 'revise')
+        self.assertEqual(after('rewrite', halted=True, halt_kind='expectation_suspected', adjudicator=True, can_diagnose=True), 'revise')
+        self.assertEqual(after('repair', halted=True, halt_kind='expectation_suspected', flipped=True), 'halt')  # 只转一次 / only once
+        # 没有任何裁决者（固定单模型、诊断被关）：保留旧捷径。 Without any adjudicator the old shortcut survives.
+        self.assertEqual(after('repair', halted=True, halt_kind='noop', adjudicator=False), 'revise')
+        self.assertEqual(after('repair', noop=True, noop_count=3, noop_limit=3, adjudicator=False), 'revise')
+        self.assertEqual(after('repair', noop=True, noop_count=1, noop_limit=3, adjudicator=False), 'repair')     # 先重试（路由器会升级模型）/ retry first (the router escalates)
+        # 有裁决者时，一次没有改动先请 Diagnoser 看；看过之后再重试，次数用完才停。 With an adjudicator, one unchanged fix first asks the Diagnoser; then retries; then a stop.
+        self.assertEqual(after('repair', noop=True, noop_count=1, noop_limit=3, adjudicator=True, can_diagnose=True), 'diagnose')
+        self.assertEqual(after('repair', noop=True, noop_count=1, noop_limit=3, adjudicator=True, diagnosed=True), 'repair')
+        self.assertEqual(after('repair', noop=True, noop_count=3, noop_limit=3, adjudicator=True, diagnosed=True), 'halt')
+
+    def test_every_node_is_reachable_under_the_default_configuration(self):
+        """默认配置（有裁决者）下每个节点都真的走得到：不再有被别的边永远抢先的“死节点”（旧的 arbitrate）。 Every node can fire under the default configuration."""
+        fired = set()
+        situations = [
+            ('classify', dict(format_only=True)), ('classify', dict(needs_diagnosis=True)), ('classify', dict(rewrite_due=True)),
+            ('classify', dict(primary='implementation')), ('classify', dict(primary='test')), ('classify', dict(primary='ambiguous')),
+            ('diagnose', dict(diagnosis={'owner': 'spec'})), ('diagnose', dict(diagnosis={'owner': 'test'})), ('diagnose', dict(rewrite_due=True, diagnosis={'owner': 'implementation'})),
+            ('diagnose', dict(diagnosis={'owner': 'implementation'})),
+            ('repair', dict(halted=True, halt_kind='expectation_suspected')), ('repair', dict(halted=True, halt_kind='noop', can_diagnose=True, adjudicator=True)),
+            ('repair', dict(halted=True, halt_kind='noop', adjudicator=True)), ('repair', dict(noop=True, noop_count=1, can_diagnose=True)),
+            ('repair', dict(noop=True, noop_count=1, noop_limit=3, diagnosed=True)), ('repair', dict(noop=True, noop_count=3, noop_limit=3, diagnosed=True)), ('repair', {}),
+            ('format', {}),
+        ]
+        for node, facts in situations:
+            fired.add(next_edge(FIX_V1, node, {'adjudicator': True, **facts})['to'])
+        self.assertEqual(fired, set(FIX_V1['nodes']) - {'classify'})
 
 
 if __name__ == '__main__':

@@ -93,7 +93,7 @@ class RouteAndReportTests(unittest.TestCase):
     def test_route_preview_is_the_pure_policy(self):
         first = mcp.route_preview('project_developer', candidates=self.CANDIDATES)
         self.assertEqual((first['action'], first['model'], first['reason']), ('use', 'qwen', 'start_lowest_eligible'))
-        top = mcp.route_preview('project_planner', candidates=self.CANDIDATES)  # 规划者默认直接用最高等级 / the planner starts at the top
+        top = mcp.route_preview('project_architect', candidates=self.CANDIDATES)  # 规划者默认直接用最高等级 / the planner starts at the top
         self.assertEqual(top['model'], 'pro')
         escalated = mcp.route_preview('project_developer', history=[{'candidate': 'small', 'level': 1}, {'candidate': 'small', 'level': 1}], candidates=self.CANDIDATES)
         self.assertEqual((escalated['model'], escalated['escalated']), ('pro', True))
@@ -152,7 +152,7 @@ class SdkTests(unittest.TestCase):
             with self.assertRaises(Exception) as caught:  # 缺 runner 时给出清晰的错误，而不是崩溃 / a clear error when the runner is missing, not a crash
                 asyncio.run(server.call_tool('verify_project', {'files': GOOD}))
             self.assertIn('runner', str(caught.exception))
-        result = asyncio.run(server.call_tool('route_preview', {'role': 'project_planner', 'candidates': RouteAndReportTests.CANDIDATES}))
+        result = asyncio.run(server.call_tool('route_preview', {'role': 'project_architect', 'candidates': RouteAndReportTests.CANDIDATES}))
         self.assertIn('pro', str(result))
 
 

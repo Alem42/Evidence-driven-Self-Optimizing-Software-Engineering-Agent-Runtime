@@ -36,12 +36,13 @@ class AcceptanceTests(unittest.TestCase):
         self.assertIn('item 0', acceptance_problem(['The total is:']))
         self.assertIn('item 0', acceptance_problem(['The result equals']))
 
-    def test_the_planner_contract_rejects_a_cut_off_acceptance_item(self):
+    def test_the_architect_contract_rejects_a_cut_off_acceptance_item(self):
+        CHECKS = [{'operation': 'py_test', 'purpose': 'behaviour', 'acceptance_indices': list(range(len(SPEC['acceptance'])))}]
         spec = {**SPEC, 'acceptance': [*SPEC['acceptance'], self.CUT]}
         with self.assertRaises(MasaError) as caught:
-            validate_response({'purpose': 'project_planner', 'language': 'python'}, spec, '')
+            validate_response({'purpose': 'project_architect', 'language': 'python'}, {'spec': spec, 'checks': CHECKS}, '')
         self.assertIn('looks cut off', str(caught.exception))
-        self.assertEqual(validate_response({'purpose': 'project_planner', 'language': 'python'}, SPEC, '')['module'], SPEC['module'])
+        self.assertEqual(validate_response({'purpose': 'project_architect', 'language': 'python'}, {'spec': SPEC, 'checks': CHECKS}, '')['spec']['module'], SPEC['module'])
 
 
 class PolicyTests(unittest.TestCase):
@@ -84,9 +85,11 @@ class NoopLimitTests(unittest.TestCase):
         from masa.application.orchestration.flow import GUARDS
         stuck_twice = {'noop': True, 'noop_count': 2, 'can_diagnose': False}
         self.assertTrue(GUARDS['noop_retry']({**stuck_twice}, {}))  # 默认：还可以再试一次 / default: one more try
-        self.assertFalse(GUARDS['flip_to_tests']({**stuck_twice}, {}))
+        self.assertFalse(GUARDS['legacy_flip']({**stuck_twice}, {}))
         self.assertFalse(GUARDS['noop_retry']({**stuck_twice, 'noop_limit': 2}, {}))
-        self.assertTrue(GUARDS['flip_to_tests']({**stuck_twice, 'noop_limit': 2}, {}))
+        self.assertTrue(GUARDS['legacy_flip']({**stuck_twice, 'noop_limit': 2}, {}))
+        # 有裁决者时，次数用完也不直接改测试（交给裁决或停下）/ with an adjudicator the limit alone never revises the tests (a ruling or a stop instead)
+        self.assertFalse(GUARDS['legacy_flip']({**stuck_twice, 'noop_limit': 2, 'adjudicator': True}, {}))
 
 
 if __name__ == '__main__':

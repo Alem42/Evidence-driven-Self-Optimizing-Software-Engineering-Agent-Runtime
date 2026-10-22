@@ -17,16 +17,20 @@ def project_roles_prompt(context, default_instruction):
               'NEVER copy them into source code, comments or string literals. '
               'If the input contains previous_attempt_error (or feedback saying a previous attempt was rejected), your last response '
               'was rejected by validation for exactly that reason: return a complete corrected response that fixes it. ')
-    if context['purpose'] == 'project_planner':
+    if context['purpose'] == 'project_architect':
         if context.get('clarification_allowed'):
             common += ('If a missing business requirement affects interfaces or test expectations, ask before planning. '
                 'Return {"kind":"clarification_request","reason":"brief reason","questions":[{"key":"range","title":"question",'
                 '"options":[{"id":"default","label":"suggested choice"}],"allow_text":true}]}. '
-                'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal spec. ')
-        instruction = common + ('You are Planner. Explain a small practical architecture matching the goal. '
-            'The top-level JSON MUST be {"summary":"design rationale","module":"<short_name_for_this_task>",'
-            '"entrypoint":"<short_name_for_this_task>/__main__.py","files":[{"path":"pyproject.toml","purpose":"project metadata"}],"acceptance":["criterion"]}. '
-            'Do not wrap it in spec, project, result or type. Populate files with at least 4 entries. '
+                'At most 3 questions and 3 options each. Do not ask about facts already given. Otherwise return the normal answer. ')
+        instruction = common + ('You are Architect. In ONE answer you design the project AND the checks that will judge it, so the checks follow from exactly the requirements you wrote. '
+            'The top-level JSON MUST be {"spec":{"summary":"design rationale","module":"<short_name_for_this_task>",'
+            '"entrypoint":"<short_name_for_this_task>/__main__.py","files":[{"path":"pyproject.toml","purpose":"project metadata"}],"acceptance":["criterion"]},'
+            '"checks":[{"operation":"py_test","purpose":"verification strategy","acceptance_indices":[0],"cases":[{"name":"case","input":"literal input","expected":"exact output","level":"cli"}]},'
+            '{"operation":"py_static","purpose":"static checks","acceptance_indices":[1]}],"assumptions":["a convention you chose where the goal was silent"]}. '
+            'Return exactly spec, checks and assumptions. '
+            # ── spec ──
+            'SPEC. Explain a small practical architecture matching the goal. Populate spec.files with at least 4 entries. '
             'Return exactly summary (brief design rationale and tradeoffs), module (the top-level Python package name: lowercase letters, digits and underscores, starting with a letter, a short name that describes THIS task, e.g. intsum for a sum of integers or linecount for counting lines; never a name copied from an example), '
             'entrypoint (exactly <module>/__main__.py), files (4..20 objects with path and purpose), '
             'acceptance (prefer 4..8 concise, concrete requirements; never exceed 12 for a small task). '
@@ -38,6 +42,7 @@ def project_roles_prompt(context, default_instruction):
             'cannot disagree: empty input, a header row (is it data or skipped?), input without a trailing newline, byte vs character counts, '
             'ties and ordering, invalid or missing values and what is printed or returned for them, exit codes. Choose the common convention '
             'and state it explicitly (for example: the first CSV row is a header and is skipped; a missing trailing newline still counts the last line). '
+            'Every acceptance item is a complete sentence that states the concrete expected value or behaviour; never end one with a colon, an equals sign or a trailing space. '
             'End summary with 2 or 3 short implementation hints that avoid fragile designs (for example: read all input with sys.stdin.read(); do not count bytes line by line). '
             'Keep summary under 500 characters. Include pyproject.toml, <module>/__init__.py, <module>/__main__.py, '
             'implementation modules and tests/test_<name>.py files. Paths are relative and portable. Only .py files and pyproject.toml. '
@@ -46,10 +51,9 @@ def project_roles_prompt(context, default_instruction):
             'Layout rule: NEVER put .py files at the project root; only pyproject.toml lives there. Code lives in the package directory <module>/ '
             '(subpackages <module>/<name>/ each with its own __init__.py and <name>.py), tests live in tests/test_<name>.py and use unittest. '
             'Entry rule: <module>/__main__.py is a thin wrapper that only calls run(sys.argv[1:], sys.stdin, sys.stdout, sys.stderr) imported with the FULL dotted path of the file that defines it (for <module>/app/app.py: from <module>.app.app import run) and exits with its return value; its purpose line must say so and must never say it reads stdin. '
-            'Reading input, dispatching commands and printing belong to run in an internal module; with three or more internal packages add <module>/app/__init__.py and <module>/app/app.py (and tests/test_app.py) as the package that owns run and wires the others.')
-    elif context['purpose'] == 'project_tester':
-        instruction = common + ('You are Tester. Given the validated spec, return exactly {"checks":[...]} with '
-            'one to two objects chosen for this project: operation (py_test required; py_static recommended, each at most once), purpose (concrete verification strategy), '
+            'Reading input, dispatching commands and printing belong to run in an internal module; with three or more internal packages add <module>/app/__init__.py and <module>/app/app.py (and tests/test_app.py) as the package that owns run and wires the others. '
+            # ── checks ──
+            'CHECKS. One to two objects chosen for this project: operation (py_test required; py_static recommended, each at most once), purpose (concrete verification strategy), '
             'acceptance_indices (zero-based indices into spec.acceptance; every index must be between 0 and len(spec.acceptance)-1). '
             'Together the checks must reference ALL acceptance indices; never use one-based numbering or an index outside that range. '
             'Assign behavior to py_test; syntax and static criteria may belong to py_static. '
@@ -60,9 +64,15 @@ def project_roles_prompt(context, default_instruction):
             'name, input, expected and level MUST all be JSON strings, never objects, arrays or numbers. '
             'Keep each string under 1000 characters. expected must be nonempty: describe stdout, stderr and exit code in one string. '
             'expected must contain a readable description, not only whitespace: write stdout empty / stdout newline and the exit code when needed. '
-            'Compute expected values independently, not by calling the implementation. Keep fixtures tiny and deterministic. '
+            'Nobody will run the implementation to obtain an expected value, and a wrong expected value sends the whole project into a long, expensive repair loop: '
+            'choose inputs small enough that you can work the exact answer out by hand (a few lines, numbers below 100), derive it step by step before you write it, '
+            'and when a value needs a long computation use a smaller input instead. Keep fixtures tiny and deterministic. '
+            'Every acceptance item that states an observable output must be exercised by at least one case. '
             'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
-            'when zero is within the specified domain. Do not change the spec or invent results.')
+            'when zero is within the specified domain. '
+            # ── assumptions ──
+            'ASSUMPTIONS. 0..6 short strings: each names a point the goal left open and the convention you chose for it; the same fact must also appear as a concrete acceptance item. '
+            'Never invent requirements the goal does not imply.')
     elif context['purpose'] == 'project_test_revision':
         instruction = common + ('You are Tester revising broken tests after a real failed check. '
             'Return exactly {"files":{existing_test_path:complete_replacement_content}}. '
@@ -135,8 +145,8 @@ def project_roles_prompt(context, default_instruction):
 def transport_hint(context):
     """本地（ollama）传输的补充说明。 Extra text for the local (ollama) transport."""
     purpose = context.get('purpose')
-    if purpose == 'project_tester':
-        return ' Local transport override: checks MUST be an OBJECT keyed by py_test (required) and/or py_static (optional), not an array. Each value has purpose, acceptance_indices and for py_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
+    if purpose == 'project_architect':
+        return ' Local transport override: the top-level "checks" MUST be an OBJECT keyed by py_test (required) and/or py_static (optional), not an array. Each value has purpose, acceptance_indices and for py_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
     if purpose == 'project_developer' and context.get('generation_mode') != 'files-v1':
         return ' Keep implementation concise. Avoid repetitive comments.'
     return ''

@@ -26,8 +26,8 @@ class RoleCancellationTests(unittest.TestCase):
         (source/'main.go').write_text('package demo\n',encoding='utf-8')
         return Runtime(store,FakeExecutor()).create(source,'Build CLI',Budget())
 
-    def test_cancel_during_planner_preserves_response_without_review_or_tester(self):
-        """另一连接取消阻塞中的 Planner：输出保留，但不发布待审方案或调用 Tester。 Keep a received response without applying it after concurrent cancellation."""
+    def test_cancel_during_architect_preserves_response_without_review(self):
+        """另一连接取消阻塞中的 Architect：输出保留，但不发布待审方案。 Keep a received response without applying it after concurrent cancellation."""
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);entered=threading.Event();release=threading.Event()
             ids=[];errors=[];purposes=[]
@@ -52,7 +52,7 @@ class RoleCancellationTests(unittest.TestCase):
             thread=threading.Thread(target=worker)
             thread.start()
             try:
-                self.assertTrue(entered.wait(5),'Planner never reached the blocking provider')
+                self.assertTrue(entered.wait(5),'Architect never reached the blocking provider')
                 control=Store(root)
                 try:
                     control.cancel(ids[0])
@@ -61,7 +61,7 @@ class RoleCancellationTests(unittest.TestCase):
             finally:
                 release.set();thread.join(5)
             self.assertFalse(thread.is_alive())
-            self.assertEqual(purposes,['project_planner'])
+            self.assertEqual(purposes,['project_architect'])
             self.assertEqual(len(errors),1)
             self.assertIsInstance(errors[0],MasaError)
             store=Store(root)
@@ -72,7 +72,7 @@ class RoleCancellationTests(unittest.TestCase):
                 self.assertEqual(run['model_calls'],1)
                 row=RoleRuntime(store).states(ids[0])[0]
                 self.assertEqual(row['status'],'completed')
-                self.assertEqual(store.read(row['output_ref']),SPEC)
+                self.assertEqual(store.read(row['output_ref'])['spec'],SPEC)
                 self.assertNotIn('project_review_requested',[e['type'] for e in store.events(ids[0])])
             finally:
                 store.close()
@@ -117,7 +117,7 @@ class RoleCancellationTests(unittest.TestCase):
                 self.assertEqual(run['data']['project_plan']['error'],'project deadline expired')
                 row=RoleRuntime(store).states(ids[0])[0]
                 self.assertEqual(row['status'],'completed')
-                self.assertEqual(store.read(row['output_ref']),SPEC)
+                self.assertEqual(store.read(row['output_ref'])['spec'],SPEC)
                 self.assertEqual(run['model_calls'],1)
             finally:
                 store.close()

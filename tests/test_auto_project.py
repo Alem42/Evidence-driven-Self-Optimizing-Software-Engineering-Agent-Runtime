@@ -18,7 +18,7 @@ class CompositeProvider:
 
     def respond(self, context):
         """三个角色返回合法确定性结果。 Return deterministic valid responses for three roles."""
-        return {'project_planner':SPEC,'project_tester':CHECKS,'project_developer':FILES}[context['purpose']]
+        return {'project_architect':{'spec':SPEC,'checks':CHECKS},'project_developer':FILES}[context['purpose']]
 
 
 class AutomaticProjectTests(unittest.TestCase):
@@ -55,19 +55,18 @@ class AutomaticProjectTests(unittest.TestCase):
                          repeated_assertion_signature(check('79','second')))
         self.assertEqual(repeated_assertion_signature([('go_test',{'exit_code':0,'stdout':''})]),())
 
-    def test_auto_retries_tester_without_repeating_planner(self):
-        """复用已验证规格，只重试失败的 Tester 响应。 Reuse a validated spec and retry only Tester failures."""
-        class FlakyTester(CompositeProvider):
-            def __init__(self):self.planner_calls=0;self.tester_calls=0;self.tester_contexts=[]
+    def test_auto_retries_a_rejected_architect_answer_with_the_reason(self):
+        """Architect 的回答被契约拒绝时，带着原因重来（规格 + 检查计划一次调用）。 A rejected Architect answer is redone with the reason."""
+        class FlakyArchitect(CompositeProvider):
+            def __init__(self):self.calls=0;self.contexts=[]
             def respond(self,context):
-                if context['purpose']=='project_planner':self.planner_calls+=1
-                if context['purpose']=='project_tester':
-                    self.tester_calls+=1
-                    self.tester_contexts.append(dict(context))
-                    if self.tester_calls<3:return [{'invalid':'shape'}]
+                if context['purpose']=='project_architect':
+                    self.calls+=1
+                    self.contexts.append(dict(context))
+                    if self.calls<3:return {'spec':SPEC,'checks':[{'invalid':'shape'}]}
                 return super().respond(context)
         with tempfile.TemporaryDirectory() as temp:
-            provider=FlakyTester()
+            provider=FlakyArchitect()
             console=Console(Path(temp),Path('fake-runner'),Path('fake-go'),Path.cwd())
             console.settings.provider=lambda profile_id=None:provider
             with patch('masa.application.console.Runner',lambda *args:FakeExecutor()):
@@ -75,13 +74,13 @@ class AutomaticProjectTests(unittest.TestCase):
                 console.job_thread.join(timeout=10)
             job=console.project_job(started['job_id'])
             self.assertEqual(job['status'],'completed')
-            self.assertEqual((provider.planner_calls,provider.tester_calls),(1,3))
-            # 重试时必须告诉 Tester 上次为什么被拒绝（评测里 hello 因为三次完全相同的上下文而连续失败）。
-            # A retry must tell the Tester why the last answer was rejected (a benchmark task failed on three identical contexts).
-            self.assertNotIn('previous_attempt_error',provider.tester_contexts[0])
-            for context in provider.tester_contexts[1:]:
+            self.assertEqual(provider.calls,3)
+            # 重试时必须告诉 Architect 上次为什么被拒绝（评测里 hello 因为三次完全相同的上下文而连续失败）。
+            # A retry must tell the Architect why the last answer was rejected (a benchmark task failed on three identical contexts).
+            self.assertNotIn('previous_attempt_error',provider.contexts[0])
+            for context in provider.contexts[1:]:
                 self.assertIn('previous_attempt_error',context)
-                self.assertIn('EXACTLY the fields operation, purpose',context['previous_attempt_error'])
+                self.assertIn('exactly operation, purpose',context['previous_attempt_error'])
 
     def test_failed_test_source_requires_test_revision(self):
         """冻结测试导致的编译错误不能反复交给实现修复。 A frozen test compile error cannot be fixed by implementation-only repair."""

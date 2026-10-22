@@ -142,7 +142,7 @@ class Router:
     def spend(self, anchor_run):
         """已花费 + 保守预留；固定模式不跟踪。 Settled spend plus reservations; not tracked in fixed mode."""
         if self.mode == 'fixed' or not anchor_run:
-            return {'calls': 0, 'cloud_tokens': 0, 'active_seconds': 0, 'cost': 0.0, 'cost_known': True, 'reserved_calls': 0}
+            return {'calls': 0, 'cloud_calls': 0, 'local_calls': 0, 'cloud_tokens': 0, 'active_seconds': 0, 'cost': 0.0, 'cost_known': True, 'reserved_calls': 0}
         from masa.application.usage import task_report
         return spend_from_report(task_report(self.store, anchor_run), self.prices)
 
@@ -150,9 +150,31 @@ class Router:
         """返回 (Decision, provider|None, spend)。stop 时 provider 为 None。 Provider is None on a stop decision."""
         need_tokens = need if isinstance(need, int) else (estimate_tokens(need) if need is not None else 0)
         spend = self.spend(anchor_run)
-        decision = route(role, chain, self.candidates, history, spend, self.budget, self.policy, need_tokens, self.unavailable)
+        decision = route(role, chain, self._admission_candidates(), history, spend, self.budget, self.policy, need_tokens, self.unavailable)
         provider = self.provider(decision.candidate) if decision.action == 'use' else None
         return decision, provider, spend
+
+    def _admission_candidates(self):
+        """准入用的候选：本地模型的窗口按**有效窗口**（配置值，不超过模型自己声明的上限，见 infrastructure/windows.py）而不是配置值本身——用户把 num_ctx 配得比模型能支持的大时，
+        准入会先挡住放不下的输入，而不是让本地服务静默截断。固定模式与云端候选不变；任何查询失败都退回配置值。
+        Candidates for admission: a local model's window is the EFFECTIVE window (configured, capped by what the model itself declares) and not the configured number - when num_ctx is configured above what the model supports,
+        admission blocks an input that does not fit instead of letting the local server truncate it silently. Fixed mode and cloud candidates are unchanged; any lookup failure falls back to the configured value."""
+        if self.mode == 'fixed':
+            return self.candidates
+        from dataclasses import replace
+        from masa.infrastructure import windows
+        out = []
+        for candidate in self.candidates:
+            if candidate.model_type == 'local' and candidate.id not in self.unavailable:
+                try:
+                    config = getattr(self.provider(candidate.id), 'config', None) or {}
+                    effective = windows.resolve({**config, 'context_limit': candidate.context_limit})['effective']
+                    if isinstance(effective, int) and 0 < effective < candidate.context_limit:
+                        candidate = replace(candidate, context_limit=effective)
+                except Exception:  # 查询只是更准确的信息：失败时用配置值 / the lookup only sharpens the number: on failure the configured value stands
+                    pass
+            out.append(candidate)
+        return out
 
     def describe(self):
         """写入 task_budget 事件的内容（无密钥）。 Content of the task_budget event (no secrets)."""
@@ -167,4 +189,4 @@ class Router:
         return {'action': decision.action, 'role': role, 'chain': chain, 'stage': stage, 'reason': decision.reason, 'detail': decision.detail,
                 'escalated': decision.escalated, 'candidate': decision.candidate, 'level': decision.level,
                 'model': entry['model'] if entry else None, 'model_type': entry['model_type'] if entry else None,
-                'spend': {k: spend[k] for k in ('calls', 'cloud_tokens', 'active_seconds', 'cost')}}
+                'spend': {k: spend[k] for k in ('calls', 'cloud_calls', 'local_calls', 'cloud_tokens', 'active_seconds', 'cost')}}

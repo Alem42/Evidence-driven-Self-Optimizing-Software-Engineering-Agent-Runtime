@@ -43,7 +43,7 @@ class FlakyLocal:
             if self.fixes:
                 self.fixes()
             return {'internal/app/app.go': 'package app\n\nfunc Value() int { return 42 } // fixed\n'}
-        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_architect': {'spec': SPEC, 'checks': CHECKS}, 'project_developer': FILES}[purpose]
 
 
 class Cloud:

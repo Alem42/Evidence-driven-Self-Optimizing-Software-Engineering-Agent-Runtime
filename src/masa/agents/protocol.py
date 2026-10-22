@@ -86,7 +86,6 @@ def _validate_semantic_review(context, action, key):
 
 
 def _validate_project_roles(context, action, key):
-    from masa.domain.proposals import validate_spec, validate_checks
     # 解码后递归脱敏，覆盖 Unicode 转义形式的凭据。
     # Redact decoded strings recursively, including Unicode-escaped credentials.
     def redact(value):
@@ -115,20 +114,14 @@ def _validate_project_roles(context, action, key):
             raise MasaError('invalid test revision proposal')
         validate_test_revision(action['files'],context['original_files'],context.get('language'))
         return action['files']
-    if context['purpose'] == 'project_planner':
+    if context['purpose'] == 'project_architect':
         if action.get('kind')=='clarification_request' and context.get('clarification_allowed'):
             from masa.domain.clarification import validate_question
             return validate_question(action)
-        # 多出来的顶层字段（真实运行里的 acceptance_note）从不被使用：丢掉，不为它拒绝整个规格。缺字段是实质错误，照样由校验拒绝并说明缺什么。
-        # Extra top-level fields (a real run had acceptance_note) are never used: drop them instead of rejecting the whole spec. A missing field is a substantive error and is still rejected, naming what is missing.
-        if isinstance(action, dict):
-            action = {k: v for k, v in action.items() if k in ('summary', 'module', 'entrypoint', 'files', 'acceptance')}
-        spec = validate_spec(action, context.get('language'))
-        from masa.domain.proposals import acceptance_problem
-        problem = acceptance_problem(spec['acceptance'])
-        if problem:
-            raise MasaError(problem)  # 被契约拒绝的 Planner 回答会带着这句原因重写一次 / a Planner answer rejected by the contract is rewritten once with this reason
-        return spec
+        from masa.domain.proposals import validate_architect
+        return validate_architect(action, context.get('language'))
+    if context['purpose'] in ('project_planner', 'project_tester'):
+        raise MasaError(f"{context['purpose']} was merged into project_architect; it is no longer called")
     if context['purpose'] == 'project_developer':
         from masa.domain.proposals import validate_files, validate_file_proposal
         if set(action) != {'files'}:
@@ -141,13 +134,7 @@ def _validate_project_roles(context, action, key):
         if pack.override_seeds and isinstance(files, dict):
             files = {**files, **pack.seed_files(context['spec'])}  # 清单与空的 __init__.py 以规格为准 / the spec decides the manifest and empty __init__.py files
         return validate_files(files, context['spec'], context.get('language'))
-    if set(action) != {'checks'}:
-        raise MasaError('invalid Tester proposal')
-    # 模型对静态检查常写 "cases": []：提示词要求省略，但空数组不携带信息，丢掉它比拒绝整次回答（再花一次调用）便宜。
-    # Models often write "cases": [] for static checks: the prompt says to omit it, but an empty array carries no information, and dropping it is cheaper than rejecting the whole answer (and paying again).
-    from masa.domain.proposals import normalize_checks
-    checks = normalize_checks(action['checks'])
-    return validate_checks(checks, context['spec'], require_coverage=False, language=context.get('language'))
+    raise MasaError(f"unknown project role {context['purpose']!r}")
 
 
 def _validate_code_proposal(context, action, key):

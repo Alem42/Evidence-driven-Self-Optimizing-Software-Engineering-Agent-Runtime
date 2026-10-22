@@ -9,7 +9,7 @@ import { byRouting, profileLabel, profileLevel, profileReady } from '../../entit
 import { stageLabels } from '../../entities/status';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 
-const FALLBACK_ROLES = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision'];
+const FALLBACK_ROLES = ['project_architect', 'project_developer', 'project_repair', 'project_test_revision'];
 const CHAIN_NAMES: Record<string, string> = { planning: '规划', generation: '生成', fix: '修复' };
 
 type Draft = { policy: RoutingPolicy; budget: RoutingBudget };
@@ -79,9 +79,9 @@ export function RoutingSection() {
         </ol>
       </Card>
 
-      <Card title="默认预算" subtitle="整个任务累计（修复、重规划都不重置）。运行时间不含等你确认的时间。">
+      <Card title="默认预算" subtitle="整个任务累计（修复、重规划都不重置）。只有云端调用和云端 token 受限额约束；本地模型免费，只受运行时间约束。运行时间不含等你确认的时间。">
         <div className="grid2">
-          {limit('max_model_calls', '模型调用次数', '次')}
+          {limit('max_model_calls', '云端调用次数（付费）', '次')}
           {limit('max_cloud_tokens', 'API token', 'token', 1000)}
           {limit('max_active_seconds', '运行时间', '分钟', 1, 60)}
           {limit('max_cost', '费用（需配置价格）', '按你填的价格币种', 0.1)}
@@ -104,11 +104,11 @@ export function RoutingSection() {
             <input type="number" min={1} max={4} value={draft.policy.planner_retries} onChange={(e) => setPolicy({ planner_retries: Number(e.target.value) })} />
           </Field>
         </div>
-        <h4>Tester 用例审计（实验，默认关闭）</h4>
+        <h4>用例审计（实验，默认关闭）</h4>
         <Notice tone="warn">真实配对评测（3 轮，17 个有效配对）：开启后 5 个更好、0 个更差、12 个持平；通过 16/21 对 11/20，平均费用 −36%。但样本仍小、噪声大，且发现一个共同的假通过（wc）。想试用时再开，细节见“实验结果”页。</Notice>
-        <p className="hint">规划阶段，便宜的云端模型（Flash）只看用例的输入、不看期望，独立推导 3 次，再与 Tester 写的期望比较；多数认为不一致的用例被丢弃（最少保留 3 个）。每个任务约多 6 次廉价调用（≈ ¥0.01）。只在天梯模式且有云端模型时生效。</p>
+        <p className="hint">规划阶段，便宜的云端模型（Flash）只看用例的输入、不看期望，独立推导 3 次，再与 Architect 写的期望比较；多数认为不一致的用例被丢弃（最少保留 3 个）。每个任务约多 6 次廉价调用（≈ ¥0.01）。只在天梯模式且有云端模型时生效。</p>
         <div className="grid2">
-          <Field label="启用 Tester 用例审计">
+          <Field label="启用用例审计">
             <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
           </Field>
         </div>
@@ -139,7 +139,7 @@ export function RoutingSection() {
           </Field>
         </div>
         <h4>按角色的起始等级</h4>
-        <p className="hint">留空 = 从最低等级起。例如让 Planner 从 L2 起：规划输出短、影响大，值得用更强的模型。</p>
+        <p className="hint">留空 = 从最低等级起。例如让 Architect 从 L2 起：规划输出短、影响大，值得用更强的模型。</p>
         <div className="grid2">
           {ROLES.map((role) => (
             <Field key={role} label={stageLabels[role] ?? role}>

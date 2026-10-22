@@ -29,7 +29,7 @@ class PlannerProvider:
 
     def respond(self, context):
         self.contexts.append(context)
-        return copy.deepcopy(SPEC if context['purpose']=='project_planner' else CHECKS)
+        return copy.deepcopy({'spec':SPEC,'checks':CHECKS})
 
 
 class ProjectPlanTests(unittest.TestCase):
@@ -61,8 +61,8 @@ class ProjectPlanTests(unittest.TestCase):
                 service=ProjectPlanning(store,executor)
                 rid=service.generate(provider,'Build a small CLI')
                 run=store.run(rid);plan=run['data']['project_plan']
-                self.assertEqual(provider.contexts[1]['spec'],SPEC)
-                self.assertEqual(run['model_calls'],2)
+                self.assertEqual(provider.contexts[0]['purpose'],'project_architect')
+                self.assertEqual(run['model_calls'],1)  # 规格与检查计划是同一次调用 / the spec and the check plan come from one call
                 self.assertEqual(run['tool_calls'],0)
                 self.assertEqual(run['status'],'paused')
                 body={'spec_ref':plan['spec_ref'],'checks_ref':plan['checks_ref'],'spec':copy.deepcopy(SPEC),'checks':CHECKS}
@@ -77,11 +77,11 @@ class ProjectPlanTests(unittest.TestCase):
                 self.assertFalse((Path(run['data']['workspace'])/'cmd/app/main.go').exists())
             finally: store.close()
 
-    def test_invalid_planner_never_reaches_tester(self):
+    def test_an_invalid_architect_answer_publishes_nothing(self):
         provider=PlannerProvider()
         def invalid(context):
             provider.contexts.append(context)
-            return {'summary':'not a spec'}
+            return {'spec':{'summary':'not a spec'},'checks':[]}
         provider.respond=invalid
         with tempfile.TemporaryDirectory() as temp:
             store=Store(Path(temp))
@@ -114,7 +114,7 @@ class ProjectPlanTests(unittest.TestCase):
         original=provider.respond
         def respond(context):
             result=original(context)
-            if context['purpose']=='project_tester':result[0]['acceptance_indices']=[]
+            if context['purpose']=='project_architect':result['checks'][0]['acceptance_indices']=[]
             return result
         provider.respond=respond
         with tempfile.TemporaryDirectory() as temp:

@@ -45,12 +45,13 @@ class ProjectPlanning:
                 status,reason,event='failed',plan['error'],'project_deadline_expired'
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
-    def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
+    def generate(self, provider, goal, on_created=None, resume_id=None, retry_of=None, retry_feedback=None,
                  triage=None, triage_provider=None, audit_provider=None, language=None):
-        """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
+        """Architect 一次调用给出规格 + 检查计划 + 假设（取代原来 Planner、Tester 两次交接）；有界调用，无工具执行。
+        One bounded Architect call yields the spec, the check plan and the assumptions (replacing the former Planner -> Tester handoff); no tool execution."""
         text(goal, 16000)
-        # 语言：显式给出的优先；续跑/重试/复用沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry/reuse follow the original run; else the default language.
-        origin = resume_id or retry_of or reuse
+        # 语言：显式给出的优先；续跑/重试沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry follow the original run; else the default language.
+        origin = resume_id or retry_of
         pack = registry.for_run({'language': language} if language else (self.store.run(origin)['data'] if origin else {}))
         if resume_id:
             run=self.store.run(resume_id)
@@ -70,12 +71,12 @@ class ProjectPlanning:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
                 for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0), deadline_seconds=86400),
-                                                           graph=harness_policy(pack.id), project_plan=plan, parent_run_id=reuse or retry_of, language=pack.id)
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=3+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0), deadline_seconds=86400),
+                                                           graph=harness_policy(pack.id), project_plan=plan, parent_run_id=retry_of, language=pack.id)
         if on_created:
             on_created(rid)
         # 本地模型复核可行性：只能升级为“有风险”，失败也不影响规划。Local review may only raise a warning; failures never block planning.
-        if triage_provider is not None and not resume_id and not reuse and not retry_of:
+        if triage_provider is not None and not resume_id and not retry_of:
             try:
                 # 复核用自己的冻结键：它常常是本地模型，而规划者可能随路由换成云端——共用 model_snapshot_ref 会把“换模型”误判成“有人改了配置”（真实任务因此失败过两次）。
                 # Triage freezes under its own key: it is usually the local model while the planner may be routed to the cloud - sharing model_snapshot_ref made that
@@ -87,12 +88,8 @@ class ProjectPlanning:
                 plan['triage']={**(plan.get('triage') or {'verdict':'ok','findings':[]}),'model':{'verdict':'skipped','reasons':[str(exc)[:200]],'suggestions':[]}}
             self.update(rid,plan,'created','triage_reviewed')
         try:
-            if resume_id and plan.get('spec_ref'):
-                spec=self.store.read(plan['spec_ref'])
-            elif reuse:
-                old=self.store.run(reuse)['data']['project_plan']
-                spec=self.store.read(old['spec_ref'])
-                self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
+            if resume_id and plan.get('spec_ref') and plan.get('checks_ref'):
+                spec, checks = self.store.read(plan['spec_ref']), self.store.read(plan['checks_ref'])
             else:
                 values={'goal':goal}
                 # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
@@ -106,27 +103,26 @@ class ProjectPlanning:
                     # 重规划是新 run：它的第一次调用必须是 initial（答案已在上下文里）；只有在原 run 内续跑才用澄清编号。
                     # A re-plan is a NEW run: its first call must be 'initial' (the answers are already in the context).
                     invocation='initial' if retry_of else plan['clarification_id']
-                spec = RoleRuntime(self.store).call(rid,provider,'project_planner',values,invocation_id=invocation)
-                if isinstance(spec,dict) and spec.get('kind')=='clarification_request':
+                answer = RoleRuntime(self.store).call(rid,provider,'project_architect',values,invocation_id=invocation)
+                if isinstance(answer,dict) and answer.get('kind')=='clarification_request':
                     if plan.get('clarification_answers'):
                         raise MasaError('clarification round limit reached; refine requirements in a new plan')
-                    validate_question(spec)
-                    plan.update(status='waiting_for_input',clarification=spec,
-                                clarification_id=self.store.put(spec))
+                    validate_question(answer)
+                    plan.update(status='waiting_for_input',clarification=answer,
+                                clarification_id=self.store.put(answer))
                     self.update(rid,plan,'paused','clarification_requested')
                     return rid
+                if not isinstance(answer, dict) or not isinstance(answer.get('spec'), dict) or 'checks' not in answer:
+                    raise MasaError('invalid Architect answer: expected {"spec":…,"checks":…,"assumptions":…}')
+                spec, checks = answer['spec'], answer['checks']
+                if answer.get('assumptions'):plan['assumptions']=answer['assumptions']
             validate_spec(spec, pack.id)
             plan['spec_ref'] = self.store.put(spec)
-            self.update(rid, plan, 'created', 'planner_proposed')
-            tester_values = {'goal':goal, 'spec':spec}
-            # 复用 Planner 结果重试 Tester 时，带上上次被拒绝的原因：否则上下文和第一次完全一样，同样的输出会连续被拒三次（评测里 hello 因此失败）。
-            # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
-            if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
-            checks = self.call(rid, provider, 'project_tester', tester_values)
+            self.update(rid, plan, 'created', 'architect_proposed')
             validate_checks(checks,spec,require_coverage=False,language=pack.id)
             if audit_provider is not None:
                 self._audit_cases(rid,audit_provider,goal,spec,checks,plan)
-            # 审查原始 Tester 计划，避免补覆盖后把遗漏隐藏掉。
+            # 审查 Architect 原始的检查计划，避免补覆盖后把遗漏隐藏掉。
             # Review the original plan before coverage supplementation hides omissions.
             plan['test_review']=review_test_plan(spec,checks,pack.id)
             covered={i for c in checks for i in c['acceptance_indices']}
@@ -137,7 +133,7 @@ class ProjectPlanning:
                 test=next(c for c in checks if c['operation']==pack.op_id('test'))
                 test['acceptance_indices']=sorted(set(test['acceptance_indices'])|set(missing))
                 test['purpose']+='\nRuntime review required: add verification for criteria '+', '.join(str(i+1) for i in missing)+'. Coverage is not proof; manually review non-testable constraints.'
-                plan['coverage_warning']='Tester 遗漏验收项 '+', '.join(str(i+1) for i in missing)+'；Runtime 已补入待审核验证计划，请确认策略是否足够。'
+                plan['coverage_warning']='检查计划遗漏验收项 '+', '.join(str(i+1) for i in missing)+'；Runtime 已补入待审核验证计划，请确认策略是否足够。'
                 self.store.event(rid,'check_plan_supplemented',{'missing_indices':missing,'policy':'human review required; not verification evidence'})
             Runtime.compile_project_checks(spec, checks, pack.id)
             plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
@@ -166,9 +162,9 @@ class ProjectPlanning:
         return rid
 
     def _audit_cases(self, rid, provider, goal, spec, checks, plan, samples=None):
-        """Tester 用例审计（策略 test_audit，默认关闭）：便宜的模型只看输入盲推导，再与 Tester 的期望比较，多数认为不一致的用例被丢弃。
+        """用例审计（策略 test_audit，默认关闭）：便宜的模型只看输入盲推导，再与 Architect 写的期望比较，多数认为不一致的用例被丢弃。
         每次调用都经过持久角色层（计入预算、可恢复），结果写进计划和账本事件。任何失败都保持原用例不变。
-        Tester case audit (policy test_audit, off by default): a cheap model derives blindly from the inputs, the result is compared with the Tester's expectation and cases a majority finds suspect are dropped.
+        Case audit (policy test_audit, off by default): a cheap model derives blindly from the inputs, the result is compared with the Architect's expectation and cases a majority finds suspect are dropped.
         Every call goes through the durable role layer (budgeted, recoverable); the outcome is stored in the plan and as a ledger event. Any failure leaves the cases untouched."""
         from masa.application.checks.case_audit import audit_cases, apply
         pack=self._pack_of(rid)

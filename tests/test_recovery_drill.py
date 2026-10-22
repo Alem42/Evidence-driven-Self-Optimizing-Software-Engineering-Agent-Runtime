@@ -69,7 +69,7 @@ class RecoveryDrillTests(unittest.TestCase):
         result = result_of(out, err)
         after = calls(self.state)
         # 每个模型调用恰好一次：本地规划/测试/生成/修复各 1，云修复 1。 Every model call happened exactly once overall.
-        for purpose in ('project_planner', 'project_tester', 'project_developer'):
+        for purpose in ('project_architect', 'project_developer'):
             self.assertEqual(after.count(f'local {purpose}'), 1, purpose)
         self.assertEqual(after.count('local project_repair'), 1)
         self.assertEqual(after.count('cloud project_repair'), 1)
@@ -98,8 +98,7 @@ class RecoveryDrillTests(unittest.TestCase):
         code, out, err = run_child(self.state, 'resume', 'none')
         result = result_of(out, err)
         after = calls(self.state)
-        self.assertEqual(after.count('local project_planner'), 1)
-        self.assertEqual(after.count('local project_tester'), 1)
+        self.assertEqual(after.count('local project_architect'), 1)
         self.assertEqual(after.count('local project_developer'), 2)  # 丢失的一次 + 重试 / the lost call plus its retry
         self.assertEqual(result['final_run_status'], 'succeeded', result)
         self.assertEqual(result['abandoned'], 1)

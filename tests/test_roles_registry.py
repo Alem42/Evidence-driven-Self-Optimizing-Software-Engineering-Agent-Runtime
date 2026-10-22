@@ -42,13 +42,13 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
 
     def test_the_sets_the_router_and_config_derive_equal_the_old_hard_coded_ones(self):
         """可路由的角色就是最初的 6 个（指挥者、测试怀疑者、代码审阅者三个可选角色已在 2026-10 删除）。
-        The routable roles are the original six (the three optional roles conductor, test skeptic and code reviewer were removed in 2026-10)."""
+        The routable roles: the Planner and the Tester became one Architect in 2026-10 (the conductor, test skeptic and code reviewer were removed earlier)."""
         current = registry.current()
-        legacy = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
+        legacy = ('project_architect', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
         self.assertEqual(current.routable_ids(), legacy)
         # 默认的“直接用最高等级”名单与 P1 之前逐项相同。 The default start-at-top list equals the pre-P1 one.
-        self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'])
-        self.assertEqual(current.config_roles(), {'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
+        self.assertEqual(list(current.top_ids()), ['project_architect', 'project_test_revision', 'project_diagnoser'])
+        self.assertEqual(current.config_roles(), {'project_architect', 'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
                                                   'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'expectation_deriver', 'expectation_auditor', 'case_deriver', 'case_judge', 'assertion_referee'})
         self.assertEqual(routing.DEFAULT_POLICY['prefer_highest_roles'], list(current.top_ids()))
 
@@ -61,7 +61,7 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
         by_id = {s.id: s for s in registry.current().all()}
         self.assertEqual(by_id['project_repair'].permissions['writes'], 'implementation')
         self.assertEqual(by_id['project_test_revision'].permissions['writes'], 'tests')
-        for read_only in ('project_planner', 'project_tester', 'project_diagnoser', 'project_triage'):
+        for read_only in ('project_architect', 'project_planner', 'project_tester', 'project_diagnoser', 'project_triage'):
             self.assertEqual(by_id[read_only].permissions['writes'], 'none')
         self.assertFalse(by_id['project_triage'].routable)  # 预检只用本地模型，不进路由器 / triage is local-only, never routed
 

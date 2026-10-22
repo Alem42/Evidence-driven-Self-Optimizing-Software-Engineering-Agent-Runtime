@@ -41,31 +41,32 @@ def response_schema(context):
         return {'type':'object','additionalProperties':False,'required':['files'],
                 'properties':{'files':{'type':'object','additionalProperties':False,'required':[path],
                                      'properties':{path:string}}}}
-    if purpose=='project_tester':
-        case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
-              'properties':{'name':{'type':'string','minLength':1},'input':string,
-                            'expected':{'type':'string','minLength':1},'level':{'enum':['unit','integration','cli']}}}
-        check={'type':'object','additionalProperties':False,'required':['purpose','acceptance_indices'],
-               'properties':{'purpose':string,
-                    'acceptance_indices':{'type':'array','items':{'type':'integer','minimum':0,'maximum':len(context['spec']['acceptance'])-1}},
-                    'cases':{'type':'array','minItems':1,'maxItems':16,'items':case}}}
-        # 名称作为键避免重复工具，绕过本地不完整的 tuple schema 支持。
-        # Named keys prevent duplicate operations without relying on unsupported tuple schemas.
-        test={**check,'required':check['required']+['cases']}
-        static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
-        return {'type':'object','additionalProperties':False,'required':['checks'],
-                'properties':{'checks':{'type':'object','additionalProperties':False,'required':[pack.op_id('test')],
-                    'properties':{pack.op_id(kind):(test if kind=='test' else static) for kind in ('test','static','format') if kind in pack.operations}}}}
-    if purpose!='project_planner':
+    if purpose!='project_architect':
         return 'json'
+    # Architect = 规格 + 检查计划 + 假设，一次回答 / one answer: spec + check plan + assumptions
+    case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
+          'properties':{'name':{'type':'string','minLength':1},'input':string,
+                        'expected':{'type':'string','minLength':1},'level':{'enum':['unit','integration','cli']}}}
+    check={'type':'object','additionalProperties':False,'required':['purpose','acceptance_indices'],
+           'properties':{'purpose':string,
+                'acceptance_indices':{'type':'array','items':{'type':'integer','minimum':0}},
+                'cases':{'type':'array','minItems':1,'maxItems':16,'items':case}}}
+    # 名称作为键避免重复工具，绕过本地不完整的 tuple schema 支持。
+    # Named keys prevent duplicate operations without relying on unsupported tuple schemas.
+    test={**check,'required':check['required']+['cases']}
+    static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
+    checks={'type':'object','additionalProperties':False,'required':[pack.op_id('test')],
+            'properties':{pack.op_id(kind):(test if kind=='test' else static) for kind in ('test','static','format') if kind in pack.operations}}
     spec={'type':'object','additionalProperties':False,
             'required':['summary','module','entrypoint','files','acceptance'],
             'properties':{'summary':string,'module':string,'entrypoint':pack.entrypoint_schema(),
                 'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}
+    answer={'type':'object','additionalProperties':False,'required':['spec','checks'],
+            'properties':{'spec':spec,'checks':checks,'assumptions':{'type':'array','maxItems':6,'items':string}}}
     if not context.get('clarification_allowed'):
-        return spec
+        return answer
     option={'type':'object','additionalProperties':False,'required':['id','label'],
             'properties':{'id':string,'label':string}}
     question={'type':'object','additionalProperties':False,'required':['key','title','options','allow_text'],
@@ -74,4 +75,4 @@ def response_schema(context):
     clarification={'type':'object','additionalProperties':False,'required':['kind','reason','questions'],
                    'properties':{'kind':{'const':'clarification_request'},'reason':string,
                        'questions':{'type':'array','minItems':1,'maxItems':3,'items':question}}}
-    return {'oneOf':[spec,clarification]}
+    return {'oneOf':[answer,clarification]}

@@ -1,11 +1,12 @@
 {
   "id": "project_planner",
-  "label": "Planner 规划",
-  "description": "把需求写成规格（文件结构 + 验收项），必要时提出澄清问题",
-  "order": 10,
-  "level": "top",
-  "routable": true,
+  "label": "Planner（历史）",
+  "description": "（历史）已并入 Architect；旧账本里的调用仍用这个名字显示",
+  "order": 101,
+  "level": null,
+  "routable": false,
   "config_allowed": true,
+  "legacy": true,
   "permissions": {
     "reads": [
       "goal"

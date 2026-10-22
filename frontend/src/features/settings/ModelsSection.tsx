@@ -15,7 +15,7 @@ const CLOUD: Form = {
 };
 
 const ROLE_NAMES: Record<string, string> = {
-  project_planner: 'Planner', project_tester: 'Tester', project_developer: 'Developer', project_repair: '实现修复',
+  project_architect: 'Architect', project_planner: 'Planner（历史）', project_tester: 'Tester（历史）', project_developer: 'Developer', project_repair: '实现修复',
   project_test_revision: '测试修订', project_test_reviewer: '语义评审', verifier: '工具验证', code_generation: '旧单文件生成',
 };
 

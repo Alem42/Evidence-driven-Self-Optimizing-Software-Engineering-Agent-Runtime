@@ -22,14 +22,14 @@ DEFAULT_POLICY = {
     'attempts_per_level': {'planning': 2, 'generation': 2, 'fix': 1},  # 初次 + 自修；fix 链的“初次”已是前面的生成 / initial + self-repair
     'max_escalations': 2,
     'planner_retries': 2,
-    'start_level_by_role': {},  # 例如 {'project_planner': 2}：Planner 从 L2 起步 / e.g. start the Planner at L2
+    'start_level_by_role': {},  # 例如 {'project_architect': 2}：Architect 从 L2 起步 / e.g. start the Architect at L2
     # 免费本地调用：崩溃遗留或没收到响应时，等服务恢复后作为新尝试重试；付费云调用永远不自动重放。
     # Free local calls: re-attempted after a crash or when no response arrived. Paid cloud calls are never replayed.
     'retry_unknown_local': True,
     # 付费调用结果未知（进程退出前请求可能已被远端受理）：pause = 暂停并进入“待处理”（默认）；retry = 明确允许发起新的一次付费尝试。 Uncertain paid calls: pause = wait in the pending queue (default); retry = explicitly allow a new paid attempt.
     'unknown_paid_calls': 'pause',
     'diagnose': True,  # 修复前允许 Diagnoser 诊断 / allow the Diagnoser before fixing
-    'diagnose_max': 2,  # 每个任务最多诊断几次 / diagnoses per task
+    'diagnose_max': 3,  # 每个任务最多裁决几次（首次断言失败一次、重复失败一次、修不动一次）/ adjudications per task (first assertion failure, repeated failure, stuck)
     # 规格与测试决定后面一切（测试写坏了，再多轮“修实现”也无效），且 token 很少：用最高等级；代码实现由低等级起步、逐级上推。
     # Spec and tests decide everything downstream (broken tests make any number of implementation repairs useless) and cost few tokens: use the top level; implementation starts low and escalates.
     'prefer_highest_roles': list(registry.current().top_ids()),
@@ -47,10 +47,12 @@ DEFAULT_POLICY = {
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
-FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 1,
+FIXED_POLICY = {'attempts_per_level': {'planning': 1, 'generation': 1, 'fix': 1}, 'max_escalations': 0, 'planner_retries': 2,
                 'retry_unknown_local': False, 'triage_model': False, 'stuck_after': 99, 'diagnose': False, 'diagnose_max': 0, 'prefer_highest_roles': [], 'transport_retries': 0, 'transport_wait_seconds': 0}
-DEFAULT_BUDGET = {'max_model_calls': 40, 'max_cloud_tokens': 200_000, 'max_active_seconds': 3600, 'max_cost': None}
-BUDGET_KEYS = ('max_model_calls', 'max_cloud_tokens', 'max_active_seconds', 'max_cost')
+# 云端的限额才是钱：max_model_calls 只数付费的云端调用，max_cloud_tokens 只数云端 token；本地调用免费，不占这两项，只受 max_active_seconds（时间）和可选的 max_local_calls 约束。
+# Only the cloud costs money: max_model_calls counts PAID cloud calls and max_cloud_tokens cloud tokens; local calls are free and use neither, bounded only by max_active_seconds and the optional max_local_calls.
+DEFAULT_BUDGET = {'max_model_calls': 40, 'max_cloud_tokens': 200_000, 'max_active_seconds': 3600, 'max_cost': None, 'max_local_calls': None}
+BUDGET_KEYS = ('max_model_calls', 'max_cloud_tokens', 'max_active_seconds', 'max_cost', 'max_local_calls')
 
 
 @dataclass(frozen=True)
@@ -110,9 +112,12 @@ def spend_from_report(report: dict, prices: dict | None = None) -> dict:
     cost = 0.0
     cost_known = True
     reserved_calls = 0
+    cloud_calls = local_calls = 0
     for call in report.get('calls', []):
         if call.get('kind') != 'cloud':
+            local_calls += 1
             continue
+        cloud_calls += 1
         p_in, p_out = prices.get(call.get('model'), (None, None))
         if call.get('total_tokens') is not None:
             cloud_tokens += call['total_tokens']
@@ -133,6 +138,8 @@ def spend_from_report(report: dict, prices: dict | None = None) -> dict:
     tool_ms = sum(t.get('duration_ms') or 0 for t in report.get('tools', []) if t.get('kind') == 'tool')
     return {
         'calls': totals.get('calls', 0),
+        'cloud_calls': cloud_calls,
+        'local_calls': local_calls,
         'cloud_tokens': cloud_tokens,
         'active_seconds': round((totals.get('model_ms', 0) + tool_ms) / 1000, 1),
         'cost': round(cost, 6),
@@ -145,9 +152,14 @@ def _blocked(c: Candidate, need_tokens: int, spend: dict, budget: dict) -> str |
     """候选被上下文或预算挡住的原因；None 表示可用。 Why a candidate cannot be used now (None = usable)."""
     if need_tokens + min(c.max_output, CONTEXT_OUTPUT_RESERVE) > c.context_limit:
         return 'context'
-    limit = budget.get('max_model_calls')
-    if limit is not None and spend.get('calls', 0) + 1 > limit:
-        return 'budget_calls'
+    if c.model_type == 'cloud':
+        limit = budget.get('max_model_calls')
+        if limit is not None and spend.get('cloud_calls', spend.get('calls', 0)) + 1 > limit:
+            return 'budget_calls'
+    else:
+        limit = budget.get('max_local_calls')
+        if limit is not None and spend.get('local_calls', 0) + 1 > limit:
+            return 'budget_local_calls'
     limit = budget.get('max_active_seconds')
     if limit is not None and spend.get('active_seconds', 0) >= limit:
         return 'budget_time'
@@ -244,7 +256,8 @@ STOP_TEXT = {
     'no_candidate': '没有可用的模型候选',
     'no_higher_level': '已用尽所有等级，没有更高等级的模型',
     'escalation_limit': '升级次数已达上限',
-    'budget_calls': '任务的模型调用次数预算已用完',
+    'budget_calls': '任务的云端调用次数预算已用完',
+    'budget_local_calls': '任务的本地调用次数预算已用完',
     'budget_time': '任务的运行时间预算已用完',
     'budget_cloud_tokens': 'API token 预算已用完（含对未知用量请求的预留）',
     'budget_cost': '费用预算已用完',
@@ -256,7 +269,8 @@ STOP_TEXT = {
 # Why ONE candidate was skipped (unlike STOP_TEXT, which explains why the whole task stops).
 SKIP_TEXT = {
     'context': '输入放不进它的上下文窗口',
-    'budget_calls': '调用次数预算用完',
+    'budget_calls': '云端调用次数预算用完',
+    'budget_local_calls': '本地调用次数预算用完',
     'budget_time': '运行时间预算用完',
     'budget_cloud_tokens': 'API token 预算不够',
     'budget_cost': '费用预算不够',

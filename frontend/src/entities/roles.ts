@@ -28,4 +28,4 @@ export function roleGroups(roles: RoleInfo[]): { core: RoleInfo[] } {
 export const levelText = (level: RoleInfo['level']): string => (level === 'top' ? '最高等级' : level === 'low' ? '低等级起步' : level === null ? '只用本地模型' : 'L' + level);
 export const writesText = (writes: RoleInfo['permissions']['writes']): string => ({ none: '只读', tests: '可改测试', implementation: '可改实现' })[writes];
 
-export const FALLBACK_ORDER = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];
+export const FALLBACK_ORDER = ['project_architect', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];

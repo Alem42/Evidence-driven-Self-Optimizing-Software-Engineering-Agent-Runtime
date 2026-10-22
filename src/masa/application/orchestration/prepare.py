@@ -34,7 +34,6 @@ class PrepareMixin:
             saved=store.run(checkpoint['run_id'])['data'].get('project_plan',{})
             if saved.get('status') in {'awaiting_review','approved'}:
                 plan=checkpoint['run_id'];checkpoint['plan_id']=plan
-        reuse=None
         planner_feedback=None
         retry_of=None
         planner_retries=int(self.router.policy.get('planner_retries',1))
@@ -48,9 +47,8 @@ class PrepareMixin:
                 if recover_id:
                     provider=self._provider_of(recover_id);decision=None
                 else:
-                    provider,decision=self._pick('project_tester' if reuse else 'project_planner','planning',
-                                                 need=goal,stage='planning')
-                plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),reuse,resume_id=recover_id,
+                    provider,decision=self._pick('project_architect','planning',need=goal,stage='planning')
+                plan=planning.generate(provider,goal,lambda rid:phase('planning',rid),resume_id=recover_id,
                                        retry_of=retry_of,retry_feedback=planner_feedback,
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
@@ -65,40 +63,25 @@ class PrepareMixin:
             except TransportFailure:
                 if provider is not None and self._wait_for_server(provider,transport_used):
                     transport_used+=1
-                    retry_of=self.job['run_id'] if not reuse else retry_of  # 新 run，沿用已回答的澄清 / new run keeping answered clarifications
+                    retry_of=self.job['run_id']  # 新 run，沿用已回答的澄清 / new run keeping answered clarifications
                     phase('planning_retry',self.job['run_id'])
                     continue
                 raise
             except MasaError:
                 failed_id=self.job['run_id']
                 run=store.run(failed_id)
-                # 取消和过期是工作流边界，不应伪装成 Tester 契约失败重建任务。
-                # Cancellation and expiry are workflow boundaries, never retryable Tester contracts.
+                # 取消和过期是工作流边界，不应伪装成契约失败重建任务。
+                # Cancellation and expiry are workflow boundaries, never retryable contract failures.
                 if run['cancel_requested'] or run['status']=='cancelled' or time.time()>=run['data']['deadline_at']:
                     raise
-                failed=run['data'].get('project_plan',{})
-                if recover_id and failed.get('spec_ref'):raise
-                if not failed.get('spec_ref'):
-                    # Planner 的响应被契约拒绝：带原因重规划（新版本，旧失败保留）；重复失败可升级。
-                    # A Planner response rejected by the contract gets a corrected re-plan (new version; the failure is kept).
-                    reason=self._retryable(failed_id) if retry<planner_retries else None
-                    if not reason:raise
-                    self._fail('planning',decision)
-                    planner_feedback=reason;retry_of=failed_id
-                    phase('planning_retry',failed_id)
-                    continue
-                if retry==2:
-                    raise
-                # 仅复用已校验 Planner 结果，Tester 最多额外调用两次；重试时把被拒绝的原因和契约要求告诉它。
-                # Reuse validated Planner output and retry Tester at most twice, telling it why the last answer was rejected and what the contract requires.
+                # Architect 的响应被契约拒绝（规格或检查计划）：带原因重来（新版本，旧失败保留）；重复失败可升级。
+                # An Architect response rejected by the contract (spec or check plan) is redone with the reason (new version; the failure is kept); repeated failures may escalate.
+                reason=self._retryable(failed_id) if retry<planner_retries else None
+                if not reason:raise
                 self._fail('planning',decision)
-                rejected=self._retryable(failed_id) or str(failed.get('error') or 'response rejected by validation')
-                planner_feedback=(rejected+'. Contract reminder: return {"checks":[...]} with 1 to 3 checks; each check has EXACTLY the fields operation, purpose, '
-                                  'acceptance_indices (a list of zero-based integers that are valid acceptance indices) and, only when concrete cases are given, cases; '
-                                  'operation is '+self.pack.op_id('test')+' (required), '+' or '.join(self.pack.operations[k].id for k in ('static','format') if k in self.pack.operations)+', each at most once; every case has exactly name, input, expected, level '
-                                  '(unit, integration or cli), where input is a string (may be empty) and name and expected are non-empty strings.')[:1000]
-                reuse=failed_id
+                planner_feedback=reason;retry_of=failed_id
                 phase('planning_retry',failed_id)
+                continue
         meta=store.run(plan)['data']['project_plan']
         if meta['status']!='approved':planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
                                'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),
@@ -123,11 +106,11 @@ class PrepareMixin:
                     resume=recover_id if (fb is None and first[0]) else None
                     first[0]=False
                     if resume:provider=self._provider_of(resume)
-                    # 测试由更强的模型先写（Tester 等级），实现由低等级模型对着冻结的测试写。固定模式与全本地时保持原行为。
-                    # A stronger model writes the tests first (Tester level); the weaker model implements against the frozen tests.
+                    # 测试由更强的模型先写（Architect 等级），实现由低等级模型对着冻结的测试写。固定模式与全本地时保持原行为。
+                    # A stronger model writes the tests first (Architect level); the weaker model implements against the frozen tests.
                     test_provider=None
                     if self._ladder and (getattr(provider,'config',None) or {}).get('model_type')=='local':
-                        candidate,_=self._pick('project_tester','gen_tests',need=[goal,approved],stage='generation',release=False)
+                        candidate,_=self._pick('project_architect','gen_tests',need=[goal,approved],stage='generation',release=False)
                         if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local':
                             test_provider=candidate
                     # 云端整包生成被截断后，本任务的生成改为逐文件（记在 job 里，之后的重试不再回到整包）。

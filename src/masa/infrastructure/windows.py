@@ -10,6 +10,11 @@ The effective context window of a model: the configured value, the model's decla
   declared    模型自己声明的最大上下文：Ollama `POST /api/show` 的 model_info["<架构>.context_length"]；云端用配置里的 context_window（若有）。 The model's own maximum: Ollama /api/show model_info, or the profile's context_window for a cloud model.
   runtime     Ollama `GET /api/ps` 对已加载模型报告的 context_length。 What /api/ps reports for the loaded model.
 任何网络错误都只是“这个来源未知”。 Any network error simply means "this source is unknown".
+
+effective 是**我们下一次请求**会得到的窗口：我们发请求时总是带上 num_ctx = configured，所以已加载实例的大小（runtime）只是“现在装的是什么”——
+别的客户端留下的小窗口实例会被我们的请求重新加载，不该把我们的预算压低。没有配置值（没有发 num_ctx）时，才退回 runtime，再退回 declared。
+`effective` is the window our NEXT request will get: we always send num_ctx = configured, so the loaded instance's size (runtime) only says what is loaded right now - a small instance left behind
+by another client is reloaded by our request and must not shrink our budget. Only without a configured value (no num_ctx sent) does it fall back to runtime, then declared.
 """
 import json
 import time
@@ -70,10 +75,12 @@ def resolve(config, *, fetch=_http, now=time.time):
             runtime = _runtime_from_ps(fetch(root + '/api/ps'), config.get('model'))
     elif isinstance(config.get('context_window'), int) and config['context_window'] > 0:
         declared = config['context_window']
-    known = {name: value for name, value in (('configured', configured), ('declared', declared), ('runtime', runtime)) if value}
-    if known:
-        source = min(known, key=lambda name: (known[name], ('configured', 'declared', 'runtime').index(name)))
-        effective = known[source]
+    if configured:  # 我们发 num_ctx = configured：得到的窗口是它，但不会超过模型自己的上限 / we send num_ctx = configured: that is what we get, capped by the model's own maximum
+        source, effective = ('declared', declared) if declared and declared < configured else ('configured', configured)
+    elif runtime:
+        source, effective = 'runtime', runtime
+    elif declared:
+        source, effective = 'declared', declared
     else:
         source, effective = 'unknown', None
     result = {'effective': effective, 'configured': configured, 'declared': declared, 'runtime': runtime, 'source': source}

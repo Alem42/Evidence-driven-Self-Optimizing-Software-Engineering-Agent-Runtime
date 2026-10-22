@@ -301,14 +301,14 @@ class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
             provider = self.settings.provider(body.get('api_profile_id'))
             store = Store(self.root)
             try:
-                reuse=body.get('retry_run_id')
+                retry=body.get('retry_run_id')
                 goal=body.get('goal')
-                if reuse:
-                    old=store.run(reuse)
-                    if old['status']!='failed' or not old['data'].get('project_plan',{}).get('spec_ref'):
-                        raise MasaError('only failed plans with saved Planner output can retry Tester')
+                if retry:
+                    old=store.run(retry)
+                    if old['status']!='failed' or not old['data'].get('project_plan'):
+                        raise MasaError('only a failed plan can be retried')
                     goal=old['data']['goal']
-                rid = ProjectPlanning(store, self._runner()).generate(provider, goal,on_created,reuse,language=None if reuse else self._language_of(body))
+                rid = ProjectPlanning(store, self._runner()).generate(provider, goal,on_created,retry_of=retry,language=None if retry else self._language_of(body))
                 return {'id':rid}
             finally:
                 store.close()

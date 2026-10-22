@@ -24,7 +24,7 @@ export function BudgetChips({ routing }: { routing: NonNullable<TaskReport['rout
   const b = routing.budget;
   const items: [string, number, number | null, (n: number) => string][] = [
     ['API', routing.spend.cloud_tokens, b.max_cloud_tokens, fmtTokens],
-    ['调用', routing.spend.calls, b.max_model_calls, String],
+    ['云端调用', routing.spend.cloud_calls ?? routing.spend.calls, b.max_model_calls, String],
   ];
   return (
     <span className="budget-chips" title="任务级预算（含对未知用量请求的预留）；详情见任务报告">

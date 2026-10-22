@@ -1,0 +1,17 @@
+{
+  "id": "project_architect",
+  "label": "Architect 规划与验收设计",
+  "description": "一次调用同时写出规格（文件结构 + 验收项）和对应的验收用例，并记录假设；取代 Planner + Tester",
+  "order": 10,
+  "level": "top",
+  "routable": true,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal"
+    ],
+    "writes": "none"
+  },
+  "validator": "project_roles",
+  "prompt_builder": "project_roles"
+}

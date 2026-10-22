@@ -34,7 +34,7 @@ const MAP: Record<string, Mapper> = {
     return { text: `${role(e)} · 响应完成${rate != null ? ' · ' + rate + ' tok/s' : ''}`, tone: 'ok' };
   },
   model_failed: (e) => ({ text: `${role(e)} · 模型调用失败`, tone: 'bad' }),
-  planner_reused: () => ({ text: 'Planner 方案复用（未重新调用）', tone: 'ok' }),
+  planner_reused: () => ({ text: 'Planner 方案复用（未重新调用）', tone: 'ok' }), // 历史事件 / legacy event
   test_format_applied: () => ({ text: '测试文件已格式化（无模型调用）', tone: 'ok' }),
   check_plan_supplemented: () => ({ text: '验证方案已补充必需检查' }),
   repair_context_selected: () => ({ text: '已选取修复上下文' }),

@@ -42,7 +42,7 @@ def judge(pack, interpreter, files, task):
             return {'passed': False, 'built': False, 'cases': [], 'error': (built.stdout + built.stderr).decode('utf-8', 'replace')[:300]}
         results = []
         for index, (args, stdin) in enumerate(task.cases):
-            want_out, want_code = task.ref(args, stdin)
+            want_out, want_code = task.ref(args, stdin)  # 有 verify 时只是参考输出，不逐字节比对 / with verify this is only a reference output
             try:
                 done = subprocess.run([str(interpreter), *flags, str(here / 'launcher.py'), *args], cwd=work, input=stdin.encode('utf-8'),
                                       capture_output=True, timeout=RUN_SECONDS, env=env, **_NO_WINDOW)
@@ -50,6 +50,10 @@ def judge(pack, interpreter, files, task):
                 results.append({'index': index, 'ok': False, 'reason': 'timeout'})
                 continue
             got_out = done.stdout[:OUTPUT_LIMIT].decode('utf-8', 'replace')
+            if getattr(task, 'verify', None) is not None:  # 模糊任务：宽容判官只检查无歧义的核心行为 / vague task: the tolerant judge checks only the unambiguous core
+                ok, reason = task.verify(args, stdin, got_out, done.stderr[:OUTPUT_LIMIT].decode('utf-8', 'replace'), done.returncode)
+                results.append({'index': index, 'ok': bool(ok), 'reason': '' if ok else reason})
+                continue
             if done.returncode != want_code:
                 results.append({'index': index, 'ok': False, 'reason': f'exit code {done.returncode}, want {want_code}'})
             elif normalize(got_out) != normalize(want_out):

@@ -113,7 +113,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 # 工人角色每步只执行一个动作：模型按它自己的“原生工具调用”习惯，常在第一个 JSON 之后再追加第二个动作或一段标记（真实运行里 Flash 就是这样）。只对这些角色接受“第一个完整 JSON 对象 + 其后的杂质”，其余角色仍然严格。
 # A worker role executes ONE action per step: following its native tool-calling habit the model often appends a second action or some markup after the first JSON (that is what Flash did in real runs). Only these roles accept
 # "the first complete JSON object followed by trailing junk"; every other role stays strict.
-LENIENT_TRAILING = frozenset({'package_worker', 'project_repair', 'project_test_revision', 'project_developer', 'project_tester', 'project_planner', 'project_diagnoser'})
+LENIENT_TRAILING = frozenset({'package_worker', 'project_repair', 'project_test_revision', 'project_developer', 'project_architect', 'project_diagnoser'})
 
 
 def decode_action(content, purpose=None):
@@ -396,7 +396,7 @@ class ChatProvider:
                 'top_keys':[str(k).replace(self.key,'[REDACTED]')[:80] if self.key else str(k)[:80] for k in list(action)[:8]] if isinstance(action,dict) else []}
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
-        if self.config['protocol']=='ollama' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):
+        if self.config['protocol']=='ollama' and purpose=='project_architect' and isinstance(action,dict) and isinstance(action.get('checks'),dict):
             # 仅归一化本地传输形状；原业务校验仍拒绝非法工具和内容。
             # Normalize transport shape only; business validation still rejects invalid tools/content.
             checks=[]
@@ -409,7 +409,7 @@ class ChatProvider:
         except MasaError:
             # 被校验拒绝的计划类回答（规格、检查计划、诊断）留一小段原文在本地账本里：以前只留“被拒绝”三个字，没法知道模型到底写了什么（只有本地账本，密钥已替换；代码类角色不存）。
             # Keep a short excerpt of a rejected planning-type answer (spec, check plan, diagnosis) in the local ledger: before, only "rejected" survived and nobody could see what the model wrote (local ledger only, key redacted; code roles are not stored).
-            if purpose in ('project_planner', 'project_tester', 'project_diagnoser', 'project_triage') and isinstance(self.contract_diagnostic, dict):
+            if purpose in ('project_architect', 'project_diagnoser', 'project_triage') and isinstance(self.contract_diagnostic, dict):
                 raw = json.dumps(action, ensure_ascii=False)[:1500]
                 self.contract_diagnostic['rejected'] = raw.replace(self.key, '[REDACTED]') if self.key else raw
             raise

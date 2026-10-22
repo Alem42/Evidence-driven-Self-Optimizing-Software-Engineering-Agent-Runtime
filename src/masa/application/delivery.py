@@ -79,7 +79,8 @@ def build(store, rid, runner=None, run_smoke=False):
     plan = store.run(report['project_id'])['data'].get('project_plan') or {}
     revisions = next((s['calls'] for s in report['by_step'] if s['step_id'] == 'project_test_revision'), 0)
     notes = user_input.notes_for(store, final['id'])
-    assumptions = [{'source': 'planner', 'text': f'Acceptance criteria were written by the Planner model and approved automatically ({len(spec.get("acceptance") or [])} items); they are the only definition of "done" used here.'}]
+    assumptions = [{'source': 'architect', 'text': f'Acceptance criteria were written by the Architect model and approved automatically ({len(spec.get("acceptance") or [])} items); they are the only definition of "done" used here.'}]
+    assumptions += [{'source': 'architect', 'text': str(item)[:300]} for item in (plan.get('assumptions') or [])]  # 目标没说、Architect 选了约定的地方 / what the goal left open and the convention the Architect chose
     questions = (plan.get('clarification') or {}).get('questions') or []
     for question in questions:
         assumptions.append({'source': 'clarification', 'text': f'Asked: {question.get("text") or question.get("question") or question}'})

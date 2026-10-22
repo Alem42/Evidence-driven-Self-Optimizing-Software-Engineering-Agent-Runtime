@@ -60,8 +60,8 @@ class RoleRecoveryTests(unittest.TestCase):
             self.assertEqual(Jobs(root)['saved-job']['status'],'completed')
             console.close()
 
-    def test_saved_planner_response_survives_reopen_before_publication(self):
-        """响应落盘后发布前崩溃，只补 Tester 调用。 Reopening after response commit does not charge Planner twice."""
+    def test_saved_architect_response_survives_reopen_before_publication(self):
+        """响应落盘后发布前崩溃，重开后复用已保存的响应，不再付费。 Reopening after the response commit does not charge the Architect twice."""
         with tempfile.TemporaryDirectory() as temp:
             store=Store(Path(temp));service=ProjectPlanning(store,FakeExecutor());ids=[]
             with patch.object(service,'update',side_effect=Crash):
@@ -71,10 +71,9 @@ class RoleRecoveryTests(unittest.TestCase):
             provider=CompositeProvider()
             with patch.object(provider,'respond',wraps=provider.respond) as respond:
                 ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',resume_id=rid)
-                self.assertEqual(respond.call_count,1)
-                self.assertEqual(respond.call_args.args[0]['purpose'],'project_tester')
+                respond.assert_not_called()  # 已落盘的响应被复用 / the saved response is reused
             self.assertEqual(store.run(rid)['data']['project_plan']['status'],'awaiting_review')
-            self.assertEqual(store.run(rid)['model_calls'],2)
+            self.assertEqual(store.run(rid)['model_calls'],1)
             store.close()
 
     def test_unknown_call_is_not_replayed(self):
@@ -161,15 +160,15 @@ class RoleRecoveryTests(unittest.TestCase):
                 with self.assertRaises(Crash):ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',ids.append)
             rid=ids[0];roles=RoleRuntime(store)
             with patch.object(provider,'respond',return_value={'answer':'accepted'}) as call:
-                result=roles.call(rid,provider,'project_planner',{'answer':'range 0 to 99'},invocation_id='answer-1')
+                result=roles.call(rid,provider,'project_architect',{'answer':'range 0 to 99'},invocation_id='answer-1')
                 self.assertEqual(result,{'answer':'accepted'})
                 self.assertEqual(call.call_count,1)
             store.close();store=Store(root);roles=RoleRuntime(store)
             with patch.object(provider,'respond') as call:
-                self.assertEqual(roles.call(rid,provider,'project_planner',{'answer':'range 0 to 99'},invocation_id='answer-1'),result)
+                self.assertEqual(roles.call(rid,provider,'project_architect',{'answer':'range 0 to 99'},invocation_id='answer-1'),result)
                 call.assert_not_called()
                 with self.assertRaisesRegex(MasaError,'input or provider changed'):
-                    roles.call(rid,provider,'project_planner',{'answer':'different'},invocation_id='answer-1')
+                    roles.call(rid,provider,'project_architect',{'answer':'different'},invocation_id='answer-1')
             self.assertEqual([r['attempt_no'] for r in roles.states(rid)],[1,2])
             self.assertEqual(store.run(rid)['model_calls'],2)
             store.close()
@@ -182,7 +181,7 @@ class RoleRecoveryTests(unittest.TestCase):
                 with self.assertRaises(Crash):ProjectPlanning(store,FakeExecutor()).generate(provider,'Build CLI',ids.append)
             with patch.object(provider,'respond') as call:
                 with self.assertRaisesRegex(MasaError,'cannot bypass'):
-                    RoleRuntime(store).call(ids[0],provider,'project_planner',{},invocation_id='answer-1')
+                    RoleRuntime(store).call(ids[0],provider,'project_architect',{},invocation_id='answer-1')
                 call.assert_not_called()
             self.assertEqual(store.run(ids[0])['model_calls'],1)
             store.close()

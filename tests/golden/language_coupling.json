@@ -28,7 +28,7 @@
   "go_template": 1
  },
  "application/orchestration/workflows.py": {
-  "gofmt": 2
+  "gofmt": 1
  },
  "application/reports.py": {
   "go_word": 3
@@ -74,9 +74,6 @@
  "roles/specs/code_generation.prompt.md": {
   "go_word": 1,
   "gofmt": 1
- },
- "roles/specs/project_diagnoser.prompt.md": {
-  "go_word": 1
  },
  "roles/specs/project_triage.json": {
   "go_word": 1

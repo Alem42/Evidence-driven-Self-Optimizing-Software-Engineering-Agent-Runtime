@@ -26,6 +26,7 @@ class Task:
     cases: tuple  # ((args, stdin), ...)
     ref: object  # callable(args, stdin) -> (stdout, exit_code)
     probes: tuple = ()  # 这个任务特别容易触发哪些 runtime 机制 / runtime mechanisms this task tends to exercise
+    verify: object = None  # 可选的宽容判官 callable(args, stdin, stdout, stderr, exit_code) -> (ok, reason)：模糊任务不能逐字节比对，见 tasks_vague.py / optional tolerant judge for vague tasks that cannot be compared byte for byte, see tasks_vague.py
 
     @property
     def max_seconds(self):

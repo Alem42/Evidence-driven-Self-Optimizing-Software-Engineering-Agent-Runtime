@@ -276,7 +276,7 @@ class SeveralPackagesTests(unittest.TestCase):
         class Planner(FakeModel):
             def respond(self, context):
                 self.contexts.append(copy.deepcopy(context))
-                return copy.deepcopy(SPEC2 if context['purpose'] == 'project_planner' else CHECKS)
+                return copy.deepcopy({'spec': SPEC2, 'checks': CHECKS})
         self.parent = planning.generate(Planner(), 'sum integers', language='python')
         meta = self.store.run(self.parent)['data']['project_plan']
         planning.approve(self.parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': SPEC2, 'checks': CHECKS})
@@ -645,7 +645,7 @@ class GoWorkerTests(unittest.TestCase):
 
                 class GoWorker(ScriptedWorker):
                     def respond(self, context):
-                        if context['purpose'] in ('project_planner', 'project_tester'):
+                        if context['purpose'] == 'project_architect':
                             return PlannerProvider.respond(self, context)
                         return super().respond(context)
                 service = V2Generation(store, runner)

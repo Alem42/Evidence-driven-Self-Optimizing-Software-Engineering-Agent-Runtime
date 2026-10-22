@@ -114,19 +114,21 @@ class ChatTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
 
-    def test_planner_and_tester_use_distinct_prompts_and_validated_contracts(self):
+    def test_the_architect_answers_spec_checks_and_assumptions_in_one_validated_contract(self):
         from test_project_plan import SPEC, CHECKS
-        self.action = SPEC
-        spec = self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
-        self.assertEqual(spec, SPEC)
-        self.assertIn('You are Planner', self.requests[-1]['messages'][0]['content'])
-        self.action = {'checks':CHECKS}
-        checks = self.provider.respond({'purpose':'project_tester','spec':spec,'goal':'CSV CLI'})
-        self.assertEqual(checks,CHECKS)
-        self.assertIn('You are Tester', self.requests[-1]['messages'][0]['content'])
+        self.action = {'spec':SPEC,'checks':CHECKS,'assumptions':['  the first row is a header  ',7]}
+        answer = self.provider.respond({'purpose':'project_architect','goal':'CSV CLI'})
+        self.assertEqual((answer['spec'], answer['checks']), (SPEC, CHECKS))
+        self.assertEqual(answer['assumptions'], ['the first row is a header'])  # 写坏的条目丢掉，不拒绝整个回答 / malformed entries are dropped, the answer is not rejected
+        self.assertIn('You are Architect', self.requests[-1]['messages'][0]['content'])
+        self.action = {**SPEC, 'checks':CHECKS}  # 规格字段平铺在顶层也接受 / a flattened spec is accepted too
+        self.assertEqual(self.provider.respond({'purpose':'project_architect','goal':'CSV CLI'})['spec'], SPEC)
+        self.action = {'spec':SPEC,'checks':[{'operation':'shell','purpose':'p','acceptance_indices':[0]}]}
+        with self.assertRaisesRegex(MasaError, 'checks:'):  # 错误说明是哪一部分 / the error names the part
+            self.provider.respond({'purpose':'project_architect','goal':'CSV CLI'})
         self.action = {'type':'tool_call','operation':'go_test','arguments':{}}
         with self.assertRaises(MasaError):
-            self.provider.respond({'purpose':'project_planner','goal':'CSV CLI'})
+            self.provider.respond({'purpose':'project_architect','goal':'CSV CLI'})
 
     def test_repair_schema_rejects_test_rewrites(self):
         from test_project_generation import FILES
@@ -224,20 +226,21 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(len(self.requests),1)
         self.assertEqual(self.provider.usage['total_tokens'],7)
 
-    def test_native_tester_mapping_normalizes_then_keeps_business_validation(self):
+    def test_native_architect_mapping_normalizes_then_keeps_business_validation(self):
         """本地键映射不绕过工具白名单或验收引用。 Native keyed checks preserve allowlists and acceptance validation."""
+        from test_project_plan import SPEC
         provider=ChatProvider({**self.config,'model_type':'local','protocol':'ollama'})
         check={'purpose':'Check behavior','acceptance_indices':[0],'cases':[{'name':'empty','input':'','expected':'exit 0','level':'cli'}]}
         def response(checks):
-            return {'done':True,'done_reason':'stop','message':{'content':json.dumps({'checks':checks})},'eval_count':8,'eval_duration':0}
+            return {'done':True,'done_reason':'stop','message':{'content':json.dumps({'spec':SPEC,'checks':checks})},'eval_count':8,'eval_duration':0}
         self.envelope=response({'go_test':check})
-        context={'purpose':'project_tester','spec':{'acceptance':['criterion']}}
+        context={'purpose':'project_architect','goal':'g'}
         result=provider.respond(context)
-        self.assertEqual(result[0]['operation'],'go_test')
+        self.assertEqual(result['checks'][0]['operation'],'go_test')
         self.assertIsNone(provider.metrics['generation_tokens_per_second'])
         self.envelope=response({'shell':check})
         with self.assertRaisesRegex(MasaError,'unauthorized'):provider.respond(context)
-        self.envelope=response({'go_test':{**check,'acceptance_indices':[1]}})
+        self.envelope=response({'go_test':{**check,'acceptance_indices':[5]}})
         with self.assertRaisesRegex(MasaError,'acceptance reference'):provider.respond(context)
 
     def test_native_developer_uses_json_but_keeps_strict_module_validation(self):

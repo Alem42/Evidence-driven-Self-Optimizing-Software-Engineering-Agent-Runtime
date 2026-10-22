@@ -75,7 +75,7 @@ class Model:
             elif kill == 'model' and phase == 'start':
                 block('local repair in flight')
             return {'internal/app/app.go': f'package app\n\nfunc Value() int {{ return 42 }} // {self.name}\n'}
-        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_architect': {'spec': SPEC, 'checks': CHECKS}, 'project_developer': FILES}[purpose]
 
 
 MODELS = {'local': Model('local'), 'cloud': Model('cloud')}

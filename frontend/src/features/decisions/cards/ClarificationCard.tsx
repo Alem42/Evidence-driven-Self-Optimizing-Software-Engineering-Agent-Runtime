@@ -8,8 +8,8 @@ import { useAction } from '../useAction';
 
 type Answer = { option_id?: string; text?: string };
 
-// Planner 的澄清问题：选项以卡片呈现，也可自由填写；回答不等于批准方案，也不预选。
-// Planner's clarification: option cards or free text; answering never approves and nothing is preselected.
+// Architect 的澄清问题：选项以卡片呈现，也可自由填写；回答不等于批准方案，也不预选。
+// Architect's clarification: option cards or free text; answering never approves and nothing is preselected.
 export function ClarificationCard({ detail }: { detail: Detail }) {
   const plan = detail.run.data.project_plan!;
   const clarification = plan.clarification!;
@@ -22,7 +22,7 @@ export function ClarificationCard({ detail }: { detail: Detail }) {
   const complete = clarification.questions.every((q) => answers[q.key]?.option_id || answers[q.key]?.text?.trim());
 
   return (
-    <Card title="Planner 需要你补充需求" tone="wait" subtitle={clarification.reason}>
+    <Card title="Architect 需要你补充需求" tone="wait" subtitle={clarification.reason}>
       {clarification.questions.map((q) => (
         <fieldset key={q.key} className="question" disabled={submit.busy}>
           <legend>{q.title}</legend>

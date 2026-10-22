@@ -160,39 +160,86 @@ def _check_text(record):
     return text if record.get('tool') in ('run_check', 'finish') else None
 
 
-def _last_check(records):
+_KIND = re.compile(r'(?<![A-Za-z])(test|static) check(?![A-Za-z])')
+PASSED = ('test check passed', 'static check passed', 'package sealed')
+STALE_AFTER_EDITS = 2  # 之后代码又改了这么多次，裁判结论就可能过时 / after this many edits since, a referee verdict may be outdated
+
+
+def _check_kind(record):
+    """这条检查结果属于哪一种检查（test / static）；认不出时当作 test（修复模式里改文件后自动接的就是 test）。 Which kind of check a result belongs to; test when it cannot be told."""
+    found = _KIND.search(_check_text(record) or '')
+    return found.group(1) if found else 'test'
+
+
+def _check_failed(record):
+    text = _check_text(record) or ''
+    if record.get('tool') in ('run_check', 'finish'):
+        return not record.get('ok')
+    return not text.lstrip().startswith(PASSED)  # 修复模式里改文件后自动接上的检查 / the check appended after an edit in repair mode
+
+
+def failing_checks(records):
+    """每一种检查（test / static）各取最近一次结果，只留下失败的。以前只看“最近一次检查”：一次后到的静态检查通过，会把更早的测试失败从钉住项里挤掉。
+    The latest result of EACH kind of check (test / static), keeping only the failing ones. Before, only the very latest check counted: a later passing static check pushed an earlier failing test out of the pins."""
+    latest = {}
     for record in reversed(records):
-        if _check_text(record) is not None:
-            return record
-    return None
+        if _check_text(record) is None:
+            continue
+        latest.setdefault(_check_kind(record), record)
+    return {kind: record for kind, record in latest.items() if _check_failed(record)}
+
+
+def _edits_after(records, step):
+    """这一步之后成功写入了几次文件（检查结果对应的代码已经变了几次）。 How many successful writes happened after this step (how often the code behind a check result changed since)."""
+    return sum(1 for r in records if (r.get('step') or 0) > (step or 0) and r.get('tool') in ('write_file', 'edit_file') and r.get('ok'))
 
 
 def pins_of(workspace, records, strategy):
-    """此刻仍然有效、不该随时间淡出的事实：最近一次失败检查的问题清单、裁判结论、相同失败的重复次数、修复里最好状态的问题数。
-    What is still true now and must not fade with time: the problems of the latest failing check, referee verdicts, how often the same failure repeated, the best state's problem count in a repair."""
+    """此刻仍然有效、不该随时间淡出的事实：每一种检查最近一次失败的问题清单（带“其后代码又改了几次”）、裁判结论（带年龄）、相同失败的重复次数、修复里最好状态的问题数。
+    What is still true now and must not fade with time: the problems of the latest failing result of each kind of check (with how often the code changed since), referee verdicts (with their age), how often the same failure repeated, the best state's problem count in a repair."""
     pins = {}
-    check = _last_check(records)
-    if check is not None:
+    failing = failing_checks(records)
+    ordered = sorted(failing.items(), key=lambda item: item[1].get('step') or 0, reverse=True)  # 最近的在前 / the most recent first
+
+    def entry(kind, check):
         text = _check_text(check)
-        if check.get('tool') in ('run_check', 'finish'):
-            failed = not check.get('ok')
-        else:  # 修复模式里改文件后自动接上的检查 / the check appended after an edit in repair mode
-            failed = not text.lstrip().startswith(('test check passed', 'static check passed', 'package sealed'))
-        if failed:
-            lines = [line.strip()[:strategy.line_chars * 2] for line in text.split(chr(10)) if line.strip()]
-            pins['failing_check'] = {'step': check.get('step'), 'problems': lines[1:1 + strategy.pin_lines] if _PROBLEMS.search(lines[0] if lines else '') else lines[:strategy.pin_lines]}
-    verdicts = [v for v in getattr(workspace, 'verdicts', [])[-2:] if v]
-    if verdicts:
-        pins['referee_verdicts'] = [str(v)[:400] for v in verdicts]
+        lines = [line.strip()[:strategy.line_chars * 2] for line in text.split(chr(10)) if line.strip()]
+        problems = lines[1:1 + strategy.pin_lines] if _PROBLEMS.search(lines[0] if lines else '') else lines[:strategy.pin_lines]
+        out = {'step': check.get('step'), 'problems': problems}
+        since = _edits_after(records, check.get('step'))
+        if since:
+            out['code_changed_since'] = since  # 这份清单是改动之前的 / the list predates these edits
+        if len(failing) > 1:
+            out['check'] = kind
+        return out
+
+    if ordered:
+        pins['failing_check'] = entry(*ordered[0])
+        if len(ordered) > 1:
+            pins['also_failing'] = [entry(kind, check) for kind, check in ordered[1:]]
+    verdicts = list(getattr(workspace, 'verdicts', []))[-2:]
+    ages = list(getattr(workspace, 'verdict_edits', []))[-2:]
+    edits_now = getattr(workspace, 'edits', 0)
+    shown = []
+    for index, verdict in enumerate(verdicts):
+        if not verdict:
+            continue
+        passed_since = edits_now - ages[index] if index < len(ages) else 0
+        prefix = f'[given {passed_since} edit(s) ago - may be outdated] ' if passed_since >= STALE_AFTER_EDITS else ''
+        shown.append(prefix + str(verdict)[:400])
+    if shown:
+        pins['referee_verdicts'] = shown
     signatures = list(getattr(workspace, 'signatures', []))
     repeats = 0
-    while repeats < len(signatures) and signatures[-1 - repeats] == signatures[-1]:
+    while signatures and signatures[-1] and repeats < len(signatures) and signatures[-1 - repeats] == signatures[-1]:
         repeats += 1
     if repeats >= 2:
         pins['same_failure_repeats'] = repeats
     best = getattr(workspace, 'best', None)
     if best is not None:
         pins['best_problems_so_far'] = best[0]
+        if (getattr(workspace, 'best_rank', None) or (False,))[0]:
+            pins['best_state_has_blocking_errors'] = True  # 最好的状态也起不来（导入/编译错误）/ even the best state cannot start (import / compile errors)
     return pins
 
 

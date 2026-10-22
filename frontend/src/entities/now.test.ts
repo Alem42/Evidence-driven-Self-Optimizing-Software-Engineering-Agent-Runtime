@@ -20,8 +20,8 @@ describe('describeNow', () => {
   it('says editing for an edit fragment and thinking when nothing is visible yet', () => {
     const status = deriveStatus(detail(), job());
     expect(describeNow({ status, live: live([{ path: 'a.go', content: 'x', complete: false, kind: 'edit' }]) }).text).toBe('正在修改 a.go');
-    expect(describeNow({ status, live: live([], { chars: 0, step: 'project_planner' }) }).text).toBe('Planner 规划 正在思考…');
-    expect(describeNow({ status, live: live([], { step: 'project_planner' }) }).text).toBe('Planner 规划 正在回答…');
+    expect(describeNow({ status, live: live([], { chars: 0, step: 'project_architect' }) }).text).toBe('Architect 规划与验收设计 正在思考…');
+    expect(describeNow({ status, live: live([], { step: 'project_architect' }) }).text).toBe('Architect 规划与验收设计 正在回答…');
   });
 
   it('falls back to the job stage and file progress between model calls', () => {

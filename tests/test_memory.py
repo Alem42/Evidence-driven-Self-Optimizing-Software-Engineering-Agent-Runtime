@@ -67,6 +67,71 @@ class ViewTests(unittest.TestCase):
         self.assertEqual((pins['referee_verdicts'], pins['same_failure_repeats']), (['referee: the implementation is wrong'], 3))
 
 
+class PinValidityTests(unittest.TestCase):
+    """P0 复盘 §4.3：钉住项要按检查种类和代码版本保持有效，而不是“最近一次检查”。 P0 review 4.3: pins stay valid per kind of check and per code version, not "the latest check"."""
+    STATIC_FAILING = 'static check found 1 problem(s) in your files:' + chr(10) + 'calc/app.py:1: unused import os'
+    STATIC_OK = 'static check passed'
+
+    def view(self, records, stub=None):
+        padded = records + [record(i) for i in range(100, 108)]  # 把前面的记录挤出原文窗口，钉住项才会出现 / push the records out of the verbatim window so the pins appear
+        return memory.view(memory.STRATEGIES['digest'], padded, stub or Stub()).get('progress_pins', {})
+
+    def test_a_later_passing_static_check_does_not_hide_an_earlier_failing_test(self):
+        pins = self.view([record(1, 'run_check', ok=False, result=FAILING), record(2, 'run_check', ok=True, result=self.STATIC_OK)])
+        self.assertIn('got 2, want 1', ' '.join(pins['failing_check']['problems']))
+
+    def test_two_kinds_failing_are_both_pinned_the_most_recent_first(self):
+        pins = self.view([record(1, 'run_check', ok=False, result=FAILING), record(2, 'run_check', ok=False, result=self.STATIC_FAILING)])
+        self.assertEqual(pins['failing_check']['check'], 'static')
+        self.assertEqual([p['check'] for p in pins['also_failing']], ['test'])
+
+    def test_a_failing_list_says_how_often_the_code_changed_since(self):
+        pins = self.view([record(1, 'run_check', ok=False, result=FAILING), record(2, 'edit_file', path='calc/app.py'), record(3, 'write_file', path='calc/app.py')])
+        self.assertEqual(pins['failing_check']['code_changed_since'], 2)
+
+    def test_a_referee_verdict_is_marked_outdated_after_further_edits(self):
+        stub = Stub()
+        stub.verdicts, stub.verdict_edits, stub.edits = ['referee: test wrong'], [1], 4
+        self.assertTrue(self.view([record(1, 'run_check', ok=False, result=FAILING)], stub)['referee_verdicts'][0].startswith('[given 3 edit(s) ago'))
+        stub.edits = 2
+        self.assertEqual(self.view([record(1, 'run_check', ok=False, result=FAILING)], stub)['referee_verdicts'], ['referee: test wrong'])
+
+    def test_a_best_state_that_cannot_start_is_flagged(self):
+        stub = Stub()
+        stub.best, stub.best_rank = (1, {}), (True, 1)
+        self.assertTrue(self.view([record(1, 'run_check', ok=False, result=FAILING)], stub)['best_state_has_blocking_errors'])
+
+
+class WorkspaceStateTests(unittest.TestCase):
+    def workspace(self):
+        space = WorkerWorkspace.__new__(WorkerWorkspace)
+        space.repair, space.best, space.best_rank, space.files, space.own_paths = True, None, None, {'calc/app.py': 'x'}, {'calc/app.py'}
+        space.signatures, space.exact, space.edit_marks, space.edits, space.failed_kind = [('a',)], [('v',)], [0], 0, 'test'
+        return space
+
+    def test_an_import_failure_is_not_a_better_state_than_a_few_failed_assertions(self):
+        space = self.workspace()
+        space._record(3, 0)           # 3 条断言失败 / three failed assertions
+        space._record(1, 1)           # 1 个导入错误：问题更少，但整个测试都起不来 / one import error: fewer problems, but nothing can run
+        self.assertEqual(space.best[0], 3)
+        space._record(2, 0)           # 2 条断言失败：更好 / two failed assertions: better
+        self.assertEqual((space.best[0], space.best_rank), (2, (False, 2)))
+
+    def test_a_passing_check_ends_the_failure_streak_of_its_own_kind_only(self):
+        space = self.workspace()
+        space._streak_ends('static')  # 另一种检查通过：不打断测试失败的连续 / another kind passed: the test streak goes on
+        self.assertEqual(space.signatures, [('a',)])
+        space._streak_ends('test')
+        self.assertEqual((space.signatures, space.exact, space.failed_kind), ([('a',), None], [('v',), None], None))
+
+    def test_recall_returns_the_full_output_not_the_truncated_copy(self):
+        space = WorkerWorkspace.__new__(WorkerWorkspace)
+        space.history = [record(i, result='short') for i in range(1, 8)]
+        space.memory, space.last_tool = memory.STRATEGIES['digest'], None
+        space.full_text = {2: 'F' * 5000}
+        self.assertEqual(len(space.recall_step(2)['text'].split(chr(10), 1)[1]), 5000)
+
+
 class WindowTests(unittest.TestCase):
     def setUp(self):
         windows.forget()
@@ -82,8 +147,13 @@ class WindowTests(unittest.TestCase):
         show = {'model_info': {'llama.context_length': 8192}}
         self.assertEqual(windows.resolve(self.CONFIG, fetch=self.fetch(show, {'models': []}))['effective'], 8192)
         windows.forget()
+        # 已加载实例的窗口只说明“现在装的是什么”：我们的请求带 num_ctx = 配置值，会把它重新加载，所以不压低有效窗口。 The loaded instance only says what is loaded now: our request carries num_ctx = configured and reloads it, so it does not lower the effective window.
         got = windows.resolve(self.CONFIG, fetch=self.fetch({'model_info': {'x.context_length': 131072}}, {'models': [{'name': 'm:latest', 'context_length': 4096}]}))
-        self.assertEqual((got['effective'], got['source'], got['declared'], got['runtime']), (4096, 'runtime', 131072, 4096))
+        self.assertEqual((got['effective'], got['source'], got['declared'], got['runtime']), (16384, 'configured', 131072, 4096))
+        windows.forget()
+        unconfigured = {k: v for k, v in self.CONFIG.items() if k != 'context_limit'}  # 没配置值就没发 num_ctx：此时已加载实例的大小才是我们会得到的 / without a configured value no num_ctx is sent: the loaded instance's size is what we get
+        got = windows.resolve(unconfigured, fetch=self.fetch({'model_info': {'x.context_length': 131072}}, {'models': [{'name': 'm:latest', 'context_length': 4096}]}))
+        self.assertEqual((got['effective'], got['source']), (4096, 'runtime'))
         windows.forget()
         offline = windows.resolve(self.CONFIG, fetch=lambda *a, **k: None)  # 服务不可达：只剩配置值，不是 0 也不是无穷 / unreachable: only the configured value remains, neither 0 nor infinite
         self.assertEqual((offline['effective'], offline['source']), (16384, 'configured'))

@@ -278,6 +278,8 @@ class V2Generation(ProjectGeneration):
                     defer(wait.needs)
                 return 'deferred', results
             results.append({'step': step, 'tool': action.get('tool'), 'path': action.get('path'), 'ok': outcome['ok'], 'result': outcome['text'][:MAX_RESULT_CHARS]})
+            if outcome.get('full'):
+                workspace.full_text[step] = outcome['full']  # 回给模型的结果被截断到 2800 字符；完整的另存，recall_step 取这份 / the model saw 2800 characters; the full text is kept aside for recall_step
             self.store.event(rid, 'worker_step', {'package': directory, 'step': step, 'tool': action.get('tool'), 'path': action.get('path'), 'ok': outcome['ok'],
                                                   'keys': sorted(action), 'summary': outcome['text'][:300]})
             if outcome.get('sealed'):
@@ -410,7 +412,7 @@ class V2Generation(ProjectGeneration):
         workspace.repair = True
         workspace.goal, workspace.arbiter = data['goal'], self._arbitrate  # 修复也用断言裁判（信号 S1 触发）/ repairs use the assertion referee too (triggered by signal S1)
         self._initial = True
-        outcome, results, baseline = 'open', [], None
+        outcome, results, baseline, baseline_rank = 'open', [], None, None
         try:
             # 起点：先在草稿上真实跑一遍检查——给工人一份新鲜的、按“你的文件”整理过的失败清单，也给“有没有变好”一个基准。
             # Starting point: run the checks on the draft first - the worker gets a fresh failure list in terms of its files, and "did it get better" gets a baseline.
@@ -418,7 +420,9 @@ class V2Generation(ProjectGeneration):
             if first.get('passed'):
                 first = workspace.run_check('static')
             baseline = first.get('problems')
+            baseline_rank = (bool(first.get('blocking')), baseline) if baseline is not None else None
             workspace.best = (baseline, {p: files[p] for p in own}) if baseline is not None else None
+            workspace.best_rank = baseline_rank
             seed = [{'step': 0, 'tool': 'run_check', 'ok': first['ok'], 'path': None, 'result': first['text'][:MAX_RESULT_CHARS]}] if not first['ok'] else []
             try:
                 outcome, results = self._worker_steps(rid, provider, RoleRuntime(self.store), workspace, data['goal'], spec, approved, '(repair)', purposes,
@@ -430,7 +434,9 @@ class V2Generation(ProjectGeneration):
             workspace.close()
             shutil.rmtree(Path(self.store.root) / 'v2-scratch', ignore_errors=True)
         best = workspace.best
-        improved = bool(best) and (baseline is None or best[0] < baseline)
+        # “变好”按同一个排序键比：没有阻塞性错误优先，再比问题数。只比数量会把“导入失败（1 个问题）”当成比“3 条断言失败”更好。
+        # "Better" uses the same rank: no blocking errors first, then the problem count; counts alone would rate "an import failure (1 problem)" better than "3 failed assertions".
+        improved = bool(best) and (baseline_rank is None or (workspace.best_rank or (True, best[0])) < baseline_rank)
         changes = {p: t for p, t in (best[1] if improved else {}).items() if t != base['files'].get(p)}
         self.store.event(rid, 'repair_worker_done', {'outcome': outcome, 'steps': len(results), 'baseline_problems': baseline, 'best_problems': best[0] if best else None,
                                                      'improved': improved, 'changed': sorted(changes)})

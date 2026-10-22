@@ -1,11 +1,12 @@
 {
   "id": "project_tester",
-  "label": "Tester 测试方案",
-  "description": "根据规格设计检查方案和具体测试用例",
-  "order": 20,
-  "level": "top",
-  "routable": true,
+  "label": "Tester（历史）",
+  "description": "（历史）已并入 Architect；旧账本里的调用仍用这个名字显示",
+  "order": 102,
+  "level": null,
+  "routable": false,
   "config_allowed": true,
+  "legacy": true,
   "permissions": {
     "reads": [
       "goal",

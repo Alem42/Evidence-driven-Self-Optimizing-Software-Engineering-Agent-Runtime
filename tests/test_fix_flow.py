@@ -54,11 +54,11 @@ class WorldExecutor(FakeExecutor):
 class Model:
     """脚本化的假模型：能记录调用、模拟显存驻留，并按设定决定修复是否真的有效。"""
 
-    def __init__(self, name, kind, world, *, fixes_impl=True, fixes_test=True, noop_tests=0, diagnosis=None):
+    def __init__(self, name, kind, world, *, fixes_impl=True, fixes_test=True, noop_tests=0, noop_impl=0, diagnosis=None):
         self.profile = {'provider': 'test', 'model': name}
         self.config = {'model_type': kind}
         self.name, self.world = name, world
-        self.fixes_impl, self.fixes_test, self.noop_tests = fixes_impl, fixes_test, noop_tests
+        self.fixes_impl, self.fixes_test, self.noop_tests, self.noop_impl = fixes_impl, fixes_test, noop_tests, noop_impl
         self.diagnosis = diagnosis
         self.usage = {'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15}
         self.loaded = False
@@ -78,6 +78,9 @@ class Model:
             self.loaded = True
         self.calls += 1
         if purpose == 'project_repair':
+            if self.noop_impl > 0:
+                self.noop_impl -= 1
+                return {IMPL: context['original_files'][IMPL]}  # 原样返回：修不动 / unchanged: cannot fix it
             if self.fixes_impl:
                 self.world.impl_ok = True
             return {IMPL: f'package app\n\nfunc Value() int {{ return 42 }} // by {self.name} #{self.calls}\n'}
@@ -90,7 +93,7 @@ class Model:
             return {TEST: context['original_files'][TEST] + f'\n// revised by {self.name} #{self.calls}\n'}
         if purpose == 'project_diagnoser':
             return self.diagnosis or {'owner': 'implementation', 'rationale': 'r', 'implementation_instructions': 'fix it', 'test_instructions': ''}
-        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_planner': SPEC, 'project_tester': CHECKS,
+        return {'project_triage': {'verdict': 'ok', 'reasons': [], 'suggestions': []}, 'project_architect': {'spec': SPEC, 'checks': CHECKS},
                 'project_developer': FILES}[purpose]
 
 
@@ -262,8 +265,33 @@ class ContinueTests(FixFlowCase):
         self.assertGreaterEqual(cloud.calls, 1)
         self.assertEqual(local_only.calls, before)
         self.assertTrue(self.events(store, 'history_seeded'))
-        planning_calls = [p for p in world.log if p in ('project_planner small', 'project_developer small')]
+        planning_calls = [p for p in world.log if p in ('project_architect small', 'project_developer small')]
         self.assertEqual(len(planning_calls), 2)  # 只有第一次运行做过规划/生成 / planning and generation happened once only
+
+
+class EvidenceGateTests(FixFlowCase):
+    """P0 复盘 §5.3：“修不动实现”不能证明“测试错”。有裁决者时，修不动只能得到裁决或停下；改测试需要证据。
+    P0 review 5.3: "the implementation cannot be fixed" does not prove "the test is wrong". With an adjudicator a stall yields a ruling or a stop; revising the tests needs evidence."""
+
+    def test_a_stalled_implementation_goes_to_the_diagnoser_and_never_to_a_test_revision_on_its_own(self):
+        world = World(impl_ok=False, test_ok=True)  # 只有实现有缺陷，测试是对的 / only the implementation is defective, the test is right
+        local, cloud = Model('small', 'local', world, noop_impl=99), Model('big', 'cloud', world, noop_impl=99)
+        store, job = self.run_task(local, cloud, world)
+        self.assertNotIn('project_test_revision small', world.log)
+        self.assertNotIn('project_test_revision big', world.log)  # 从不因为“修不动”去弱化一个正确的测试 / a correct test is never weakened because the implementation could not be fixed
+        self.assertIn('project_diagnoser big', world.log)           # 先请裁决者看 / the adjudicator looked
+        self.assertTrue(job['note'].startswith('halted'), job.get('note'))  # 然后交给人 / then a human
+        path = [(s['node'], s['to']) for s in self.trace(store)]
+        self.assertIn(('repair', 'diagnose'), path)
+        self.assertNotIn(('repair', 'revise'), path)
+
+    def test_without_an_adjudicator_the_old_shortcut_still_applies(self):
+        """固定单模型 / 诊断被关：没有任何裁决者，保留旧的“修不动 ⇒ 疑似测试错，改一次测试”。 No adjudicator at all: the old one-time shortcut is kept."""
+        world = World(impl_ok=False, test_ok=False)
+        local, cloud = Model('small', 'local', world, noop_impl=99), Model('big', 'cloud', world, noop_impl=99)
+        store, job = self.run_task(local, cloud, world, policy={'diagnose': False})
+        path = [(s['node'], s['to']) for s in self.trace(store)]
+        self.assertIn(('repair', 'revise'), path)
 
 
 class ResidencyTests(FixFlowCase):

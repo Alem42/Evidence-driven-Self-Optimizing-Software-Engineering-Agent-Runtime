@@ -45,7 +45,8 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
       {r.mode === 'ladder' && (
         <div className="budget">
           <BudgetBar label="API token" used={r.spend.cloud_tokens} limit={b.max_cloud_tokens} fmt={fmtTokens} />
-          <BudgetBar label="模型调用" used={r.spend.calls} limit={b.max_model_calls} fmt={String} />
+          <BudgetBar label="云端调用" used={r.spend.cloud_calls ?? r.spend.calls} limit={b.max_model_calls} fmt={String} />
+          {b.max_local_calls != null && <BudgetBar label="本地调用" used={r.spend.local_calls ?? 0} limit={b.max_local_calls} fmt={String} />}
           <BudgetBar label="运行时间" used={r.spend.active_seconds} limit={b.max_active_seconds} fmt={(n) => fmtDuration(n * 1000)} />
           {b.max_cost != null && <BudgetBar label="费用" used={r.spend.cost} limit={b.max_cost} fmt={(n) => n.toFixed(4)} />}
           {r.spend.reserved_calls > 0 && <p className="hint">有 {r.spend.reserved_calls} 次云调用没有返回用量，已按其上下文上限预留。</p>}
@@ -73,7 +74,7 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
 
 const NODE_TEXT: Record<string, string> = {
   classify: '失败分类（归属：实现/测试）', diagnose: 'Diagnoser 诊断', format: '格式化（无模型）',
-  repair: '修复实现', revise: '修订测试', arbitrate: '测试↔规格仲裁', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
+  repair: '修复实现', revise: '修订测试', rewrite: '整体重写实现', drafted: '得到新草稿，去验证', halt: '停止并交给人',
 };
 const OWNER_TEXT: Record<string, string> = { implementation: '实现有问题', test: '测试有问题', both: '两侧都有问题', spec: '规格有问题', unclear: '不明确' };
 

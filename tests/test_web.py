@@ -41,7 +41,7 @@ class WebTests(unittest.TestCase):
                     finally:release.set();self.console.job_thread.join(10)
                 self.assertEqual(self.request('/api/jobs/'+started['job_id'])[1]['status'],'cancelled')
                 self.assertEqual(self.request('/api/runs/'+rid)[1]['run']['status'],'cancelled')
-                self.assertEqual(purposes,['project_planner'])
+                self.assertEqual(purposes,['project_architect'])
 
     def test_unexpected_fault_returns_traceable_safe_diagnostic(self):
         """程序错误返回可追踪 JSON，而不是断开连接或泄露异常原文。 Faults return traceable JSON without disconnecting or exposing raw messages."""
@@ -241,7 +241,7 @@ class WebTests(unittest.TestCase):
             status,_=self.request(path,body)
             self.assertEqual(status,200)
             _,detail=self.request('/api/runs/'+rid)
-            self.assertEqual(detail['run']['model_calls'],3)
+            self.assertEqual(detail['run']['model_calls'],2)
 
     def test_http_source_review_preserves_draft_and_enforces_budget(self):
         """HTTP 源码解析保持草稿状态，超预算拒绝。 HTTP parsing preserves drafts and enforces tool limits."""
@@ -372,9 +372,9 @@ class WebTests(unittest.TestCase):
             self.console.job_thread.join(10)
             status,progress=self.request('/api/jobs/'+job['job_id'])
             self.assertEqual(progress['status'],'completed',progress)
-            self.assertEqual(progress['stage'],'project_tester')
+            self.assertEqual(progress['stage'],'project_architect')
             rid=progress['result']['id']
-            self.assertIn('project_planner',self.request('/api/runs/'+rid+'/logs')[1]['text'])
+            self.assertIn('project_architect',self.request('/api/runs/'+rid+'/logs')[1]['text'])
             self.assertEqual(self.request('/api/runs/'+rid+'/open-workspace',{})[0],400)
 
     def test_local_session_and_static_access(self):

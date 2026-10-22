@@ -103,7 +103,7 @@ class Provider:
             if self.triage_error:
                 raise self.triage_error
             return self.triage or {'verdict': 'ok', 'reasons': [], 'suggestions': []}
-        return {'project_planner': SPEC, 'project_tester': CHECKS, 'project_developer': FILES}[purpose]
+        return {'project_architect': {'spec': SPEC, 'checks': CHECKS}, 'project_developer': FILES}[purpose]
 
 
 class FrozenProvider(Provider):
@@ -171,7 +171,7 @@ class IntegrationTests(unittest.TestCase):
     def test_force_lets_the_user_proceed_anyway(self):
         local = Provider('small', 'local')
         store, job, _ = self.run_task('实现 Go 函数 Clamp。保留 package solution。', local, force=True)
-        self.assertIn('project_planner', local.purposes)
+        self.assertIn('project_architect', local.purposes)
         self.assertEqual(store.run(job['result']['id'])['status'], 'succeeded')  # 照常规划、生成、验证 / planned, generated and verified as usual
         self.assertFalse(any(e['type'] == 'triage_blocked' for r in store.all_runs() for e in store.events(r['id'])))
 

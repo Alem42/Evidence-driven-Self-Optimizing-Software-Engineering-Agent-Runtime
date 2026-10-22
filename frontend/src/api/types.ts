@@ -369,7 +369,9 @@ export interface ProcessEvent {
 
 // ───────── 路由与预算 Routing & budget ─────────
 export interface RoutingBudget {
+  /** 只数付费的云端调用；本地调用免费，由 max_local_calls（可选）和时间约束。 Counts PAID cloud calls only. */
   max_model_calls: number | null;
+  max_local_calls?: number | null;
   max_cloud_tokens: number | null;
   max_active_seconds: number | null;
   max_cost: number | null;
@@ -400,7 +402,7 @@ export interface RouteDecision {
   level: number | null;
   model: string | null;
   model_type: 'local' | 'cloud' | null;
-  spend: { calls: number; cloud_tokens: number; active_seconds: number; cost: number };
+  spend: { calls: number; cloud_calls?: number; local_calls?: number; cloud_tokens: number; active_seconds: number; cost: number };
 }
 
 export interface RoutingReport {
@@ -408,7 +410,7 @@ export interface RoutingReport {
   budget: RoutingBudget;
   policy: RoutingPolicy;
   candidates: { id: string; level: number; model: string; model_type: string; digest: string | null; context_limit: number }[];
-  spend: { calls: number; cloud_tokens: number; active_seconds: number; cost: number; cost_known: boolean; reserved_calls: number };
+  spend: { calls: number; cloud_calls?: number; local_calls?: number; cloud_tokens: number; active_seconds: number; cost: number; cost_known: boolean; reserved_calls: number };
   decisions: RouteDecision[];
   escalations: number;
   stopped: { reason: string; detail?: string } | null;

@@ -9,6 +9,7 @@ from masa.domain.models import ExpectationSuspected, MasaError
 
 MAX_FILE_BYTES = 60000
 MAX_RESULT_CHARS = 2800  # 回给模型的单次工具结果上限 / cap on one tool result shown to the model
+RECALL_CHARS = 8000  # recall_step 取回的上限（检查的完整输出另存）/ cap of what recall_step returns (a check's full output is kept aside)
 FULL_INTERFACE_CHARS = 14000  # 直接依赖的包以全文（而不是只有签名）给工人，合计不超过这么多字符 / the packages a worker directly depends on are shown in full (not just signatures), within this many characters in total
 MAX_ARBITRATIONS = 2  # 每个包最多请几次断言裁判（每次约 3 个很小的调用）/ assertion referee rounds per package (about 3 tiny calls each)
 
@@ -80,6 +81,10 @@ class WorkerWorkspace:
         self.test_writes = 0  # 修复模式里被拒绝的写测试尝试 / refused attempts to write a test in repair mode
         self.history = []  # 这个循环里每一步的结果（由生成循环设置；摘要行与 recall_step 的来源）/ the result of every step of this loop (set by the generation loop; the source of the digest lines and recall_step)
         self.verdicts = []  # 断言裁判的结论（钉住项用）/ the referee's verdicts (pinned)
+        self.verdict_edits = []  # 每条裁判结论给出时的写入次数（与 verdicts 平行）：之后代码又改了几次，决定它还算不算“现在的事实” / the write count when each verdict was given (parallel to verdicts): how often the code changed since decides whether it is still "true now"
+        self.full_text = {}  # 步号 → 该步检查结果的完整文本（回给模型的那份被截断到 2800 字符；recall_step 取回这份）/ step -> the full text of that step's check (the copy shown to the model is cut to 2800 characters; recall_step returns this one)
+        self.failed_kind = None  # 当前失败连续属于哪种检查 / which kind of check the current failure streak belongs to
+        self.best_rank = None  # 最好状态的排序键 (有无阻塞错误, 问题数) / the ranking key of the best state: (has blocking errors, problems)
         self.memory = None  # 当前的记忆策略（由生成循环设置；None = window）/ the current memory strategy (set by the generation loop; None = window)
         self.shown = set()  # 工人读过的别的包的文件（之后以全文留在 interfaces 里）/ other packages' files the worker has read (kept in full in interfaces from then on)
         self.scratch = Path(tempfile.mkdtemp(prefix='v2-', dir=self._scratch_root()))
@@ -145,7 +150,9 @@ class WorkerWorkspace:
         record = next((r for r in self.history if r.get('step') == step), None)
         if record is None or isinstance(step, bool):
             return {'ok': False, 'text': f'there is no step {step!r} in this loop: use a step number from progress_digest.'}
-        return {'ok': True, 'text': f"step {record['step']} ({record.get('tool') or 'reply'}{' ' + str(record['path']) if record.get('path') else ''}, {'ok' if record.get('ok') else 'failed'}):" + chr(10) + str(record.get('result', ''))[:MAX_RESULT_CHARS]}
+        # 账本无损、窗口有损：检查的完整输出另存一份，回查时给这一份（回给模型的结果被截断到 2800 字符）。 The ledger is lossless, the window is lossy: a check's full output is kept aside and recalled from there (the copy shown to the model is cut to 2800 characters).
+        body = str(getattr(self, 'full_text', {}).get(step) or record.get('result', ''))[:RECALL_CHARS]
+        return {'ok': True, 'text': f"step {record['step']} ({record.get('tool') or 'reply'}{' ' + str(record['path']) if record.get('path') else ''}, {'ok' if record.get('ok') else 'failed'}):" + chr(10) + body}
 
     def read_file(self, path):
         # 读文件不改变任何东西：没有新信息的读取（自己的文件已经在上下文里、同一个别的包的文件又读一遍）算“无意义的动作”（ok=False），连续出现会触发卡住检测；并且告诉模型下一步该做什么。
@@ -239,6 +246,7 @@ class WorkerWorkspace:
         if result.get('status') != 'completed':
             return {'ok': False, 'problems': None, 'text': f"the check did not complete: {result.get('status')} {str(result.get('error') or '')[:200]}"}
         if result.get('exit_code') == 0:
+            self._streak_ends(kind)
             return {'ok': True, 'text': f'{kind} check passed', 'passed': kind, 'problems': 0}
         # 临时目录的绝对路径换成 “.”：诊断里的路径才能还原成项目内的相对路径（否则 calc/app/app.py 会被当成“别的包的文件”）。
         # Replace the scratch directory's absolute path by ".": only then can diagnostic paths become project-relative (otherwise calc/app/app.py looks like another package's file).
@@ -251,11 +259,13 @@ class WorkerWorkspace:
             tail = (str(clean.get('stderr', '')) + chr(10) + str(clean.get('stdout', ''))).strip()[-MAX_RESULT_CHARS:]
             return {'ok': False, 'problems': 1, 'text': 'the check failed (output could not be parsed):' + chr(10) + tail}
         if not own:
+            self._streak_ends(kind)
             return {'ok': True, 'text': f'{kind} check: no problem in your files ({len(foreign)} problem(s) belong to other packages, not yours)', 'foreign': len(foreign), 'passed': kind, 'problems': 0}
         # 失败签名与卡住提示：同一个失败连续出现，说明上一次改动没有用 / failure signature and stuck hint: the same failure again means the last change did not help
         sig = signature(own)
         repeated = bool(self.signatures) and self.signatures[-1] == sig
         self.signatures.append(sig)
+        self.failed_kind = kind
         verbatim = tuple(sorted(f"{i['path']}|{i['message']}" for i in own))
         unchanged = bool(self.exact) and self.exact[-1] == verbatim
         self.exact.append(verbatim)
@@ -288,6 +298,7 @@ class WorkerWorkspace:
             verdict = self.arbiter(self, [(operation, clean)])
             if verdict:
                 self.verdicts.append(verdict)
+                self.verdict_edits.append(self.edits)
                 text = verdict + chr(10) + text
                 votes = [v['verdict'] for v in (self.last_referee or {}).values()]
                 if self.repair and 'test_wrong' in votes and 'implementation_wrong' not in votes:
@@ -296,14 +307,30 @@ class WorkerWorkspace:
                     raise ExpectationSuspected('repair cannot change tests: the independent referee judged the test expectation wrong while the actual value stayed the same', verdict)
         if repeated:
             text += chr(10) + 'WARNING: this is the same problem as the previous check, so your last change did not fix it. Do something different: re-read the failing assertion against the acceptance criteria and the examples.'
-        return {'ok': False, 'text': text[:MAX_RESULT_CHARS], 'signature': sig, 'repeated': repeated, 'problems': len(own)}
+        # 阻塞性错误（导入/编译/测试准备）会让整个测试运行起不来：问题数看起来很少，其实比几条断言失败糟得多。 Blocking errors (import / compile / test setup) keep the whole test run from starting: few problems on paper, much worse than a few failed assertions.
+        blocking = sum(1 for i in own if i['kind'] in ('compile', 'setup'))
+        return {'ok': False, 'text': text[:MAX_RESULT_CHARS], 'full': text[:12000], 'signature': sig, 'repeated': repeated, 'problems': len(own), 'blocking': blocking}
 
-    def _record(self, problems):
-        """修复模式：记住检查结果最好的状态（问题数最少；同样多取先到的）。工人可能越改越糟，最后交出去的必须是最好的那个状态而不是最后的状态。
-        Repair mode: remember the best state seen (fewest problems, the earlier one on a tie). A worker can make things worse by editing on; what is handed over must be the best state, not the last one."""
+    def _streak_ends(self, kind):
+        """一次检查通过：连续失败到此为止。签名与逐字消息的历史里放一个 None，“同一个失败连续 N 次”“实际值稳定”都不能跨过一次通过去数。
+        A check passed: the failure streak ends. A None goes into the signature and verbatim histories so neither "the same failure N times in a row" nor "the actual value is stable" counts across a pass."""
+        if kind != self.failed_kind:  # 通过的是另一种检查（静态通过不能打断测试失败的连续）/ another kind passed (a static pass must not break a streak of test failures)
+            return
+        self.signatures.append(None)
+        self.exact.append(None)
+        self.edit_marks.append(self.edits)
+        self.failed_kind = None
+
+    def _record(self, problems, blocking=0):
+        """修复模式：记住检查结果最好的状态：没有阻塞性错误的优先，再比问题数（同样好取先到的）。工人可能越改越糟，最后交出去的必须是最好的那个状态而不是最后的状态；
+        只比问题数会把“导入失败（1 个问题）”误当成比“3 条断言失败”更好。
+        Repair mode: remember the best state seen: no blocking errors first, then fewest problems (the earlier one on a tie). A worker can make things worse by editing on; what is handed over must be the best state, not the last one;
+        comparing counts alone would rate "an import failure (1 problem)" better than "3 failed assertions"."""
         if not self.repair or problems is None:
             return
-        if self.best is None or problems < self.best[0]:
+        rank = (bool(blocking), problems)
+        if self.best is None or self.best_rank is None or rank < self.best_rank:
+            self.best_rank = rank
             self.best = (problems, {p: self.files[p] for p in self.own_paths if p in self.files})
 
     def finish(self):
@@ -338,10 +365,10 @@ class WorkerWorkspace:
                     # 修复模式每次改完文件，工具自己立刻跑检查并把结果接在后面：真实探针里 Flash 连改了 12 次文件一次也没去跑检查，没有反馈就是盲改，也记不下“最好的状态”。
                     # In repair mode the tool runs the check itself right after every change and appends the result: in a real probe Flash changed files 12 times without ever running a check - blind edits, and no best state to remember.
                     check = self._apply({'tool': 'run_check', 'kind': 'test'})
-                    self._record(check.get('problems') if not check.get('passed') else None)
+                    self._record(check.get('problems') if not check.get('passed') else None, check.get('blocking', 0))
                     if check.get('sealed'):
                         self._record(0)
-                    outcome = {**outcome, 'text': (outcome['text'] + chr(10) + 'automatic check after your change: ' + check['text'])[:MAX_RESULT_CHARS + 400], 'sealed': check.get('sealed'), 'signature': check.get('signature')}
+                    outcome = {**outcome, 'text': (outcome['text'] + chr(10) + 'automatic check after your change: ' + check['text'])[:MAX_RESULT_CHARS + 400], 'full': check.get('full'), 'sealed': check.get('sealed'), 'signature': check.get('signature')}
                     self.failed_check = 'test' if (not check.get('ok') and check.get('signature')) else None
             elif tool in ('run_check', 'finish') and not outcome.get('ok') and outcome.get('signature'):
                 self.failed_check = 'test' if tool == 'finish' else (action.get('kind') or 'test')
@@ -361,7 +388,7 @@ class WorkerWorkspace:
             return self.edit_file(str(action.get('path', '')), action.get('old'), action.get('new'))
         if tool == 'run_check':
             outcome = self.run_check(action.get('kind') or 'test')
-            self._record(outcome.get('problems') if not outcome.get('passed') else None)
+            self._record(outcome.get('problems') if not outcome.get('passed') else None, outcome.get('blocking', 0))
             if outcome.get('passed'):
                 self.passed.add(outcome['passed'])
                 required = [k for k in ('test', 'static') if self.pack.op_id(k) is not None]
@@ -373,7 +400,7 @@ class WorkerWorkspace:
                         continue
                     extra = self.run_check(kind)
                     if not extra.get('passed'):
-                        self._record(extra.get('problems'))
+                        self._record(extra.get('problems'), extra.get('blocking', 0))
                         return {**extra, 'text': outcome['text'] + chr(10) + extra['text'], 'ok': False}
                     self.passed.add(kind)
                 if complete and set(required) <= self.passed:

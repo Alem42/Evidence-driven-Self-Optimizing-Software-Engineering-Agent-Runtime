@@ -15,7 +15,7 @@ ANSWER={'range':{'option_id':'small'}}
 
 class AskingProvider(CompositeProvider):
     def respond(self,context):
-        if context['purpose']=='project_planner' and not context.get('answers'):return QUESTION
+        if context['purpose']=='project_architect' and not context.get('answers'):return QUESTION
         return super().respond(context)
 
 class ClarificationTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class ClarificationTests(unittest.TestCase):
             with self.assertRaises(MasaError):p.answer(rid,plan['clarification_id'],{'range':{'text':'different'}})
             with self.assertRaises(MasaError):p.answer(rid,'stale',ANSWER)
             p.generate(provider,'Build CLI',resume_id=rid)
-            self.assertEqual(s.run(rid)['model_calls'],3)
+            self.assertEqual(s.run(rid)['model_calls'],2)  # 问题一次、回答之后的规划一次 / the question, then the plan after the answer
             self.assertEqual(s.run(rid)['data']['project_plan']['status'],'awaiting_review')
             s.close()
 
@@ -40,8 +40,8 @@ class ClarificationTests(unittest.TestCase):
         class RejectedOnce(AskingProvider):
             def __init__(self):self.rejected=False
             def respond(self,context):
-                if context['purpose']=='project_planner' and context.get('answers') and not self.rejected:
-                    self.rejected=True;return {'summary':'incomplete'}  # 缺字段，契约拒绝 / missing fields
+                if context['purpose']=='project_architect' and context.get('answers') and not self.rejected:
+                    self.rejected=True;return {'spec':{'summary':'incomplete'},'checks':[]}  # 缺字段，契约拒绝 / missing fields
                 return super().respond(context)
         with tempfile.TemporaryDirectory() as temp:
             s=Store(Path(temp));provider=RejectedOnce();p=ProjectPlanning(s,FakeExecutor())
@@ -86,7 +86,7 @@ class ClarificationTests(unittest.TestCase):
                 self.assertEqual(result['job_id'],ident)
                 c.job_thread.join(10)
                 self.assertEqual(c.project_job(ident)['status'],'completed')
-                self.assertEqual(c.detail(rid)['run']['model_calls'],3)
+                self.assertEqual(c.detail(rid)['run']['model_calls'],2)
                 c.close()
 
     def test_invalid_answers_leave_question_pending(self):

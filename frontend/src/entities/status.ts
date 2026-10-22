@@ -15,9 +15,10 @@ export interface DerivedStatus {
 }
 
 export const stageLabels: Record<string, string> = {
-  planning: 'Planner 规划',
-  project_planner: 'Planner 规划',
-  project_tester: 'Tester 测试方案',
+  planning: 'Architect 规划与验收设计',
+  project_architect: 'Architect 规划与验收设计',
+  project_planner: 'Planner 规划（历史）',
+  project_tester: 'Tester 测试方案（历史）',
   generation: '生成代码',
   project_developer: 'Developer 生成',
   verification: '验证',
@@ -73,7 +74,7 @@ export function deriveStatus(detail: Detail | undefined, job?: Job | null): Deri
   const live = Boolean(detail.active || detail.role_active || jobRunning);
 
   if (plan?.status === 'waiting_for_input')
-    return make('clarify', '等待回答', 'wait', 'Planner 需要你补充需求', '回答问题后继续原任务；等待期间不会调用模型。', false, true);
+    return make('clarify', '等待回答', 'wait', 'Architect 需要你补充需求', '回答问题后继续原任务；等待期间不会调用模型。', false, true);
   if (live) {
     if (run.cancel_requested || run.status === 'cancelled')
       return make('cancelling', '取消中', 'warn', '取消已记录 · 等待当前请求结束', '模型请求无法被强行中断，结果返回后不会被应用。', true);

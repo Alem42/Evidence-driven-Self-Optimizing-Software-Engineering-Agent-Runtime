@@ -17,9 +17,8 @@ FILES = {'go.mod': 'module example.com/task\n\ngo 1.27.0\n', 'cmd/app/main.go': 
 
 # 名字 → 上下文。覆盖每个角色的每一种提示词分支。 name -> context, covering every prompt branch of every role.
 CONTEXTS = {
-    'planner': {'purpose': 'project_planner', 'goal': 'g'},
-    'planner_clarification': {'purpose': 'project_planner', 'goal': 'g', 'clarification_allowed': True},
-    'tester': {'purpose': 'project_tester', 'goal': 'g', 'spec': SPEC},
+    'architect': {'purpose': 'project_architect', 'goal': 'g'},
+    'architect_clarification': {'purpose': 'project_architect', 'goal': 'g', 'clarification_allowed': True},
     'developer_bundle': {'purpose': 'project_developer', 'goal': 'g', 'spec': SPEC},
     'developer_files': {'purpose': 'project_developer', 'goal': 'g', 'spec': SPEC, 'generation_mode': 'files-v1',
                         'target_path': 'internal/app/app.go', 'previous_files': {}},

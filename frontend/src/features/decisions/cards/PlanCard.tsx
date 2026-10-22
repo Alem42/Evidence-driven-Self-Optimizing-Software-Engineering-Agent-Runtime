@@ -64,9 +64,9 @@ export function PlanCard({ detail }: { detail: Detail }) {
 
   return (
     <Card
-      title="Planner / Tester · 项目方案"
+      title="Architect · 项目方案与验收设计"
       tone={editable ? 'wait' : undefined}
-      subtitle={spec ? `${spec.files.length} 个计划文件 · ${spec.acceptance.length} 条验收标准 · ${checks.length} 项拟执行检查。Tester 此时只设计测试，尚未运行 Go。` : '正在读取方案…'}
+      subtitle={spec ? `${spec.files.length} 个计划文件 · ${spec.acceptance.length} 条验收标准 · ${checks.length} 项拟执行检查。Architect 此时只设计方案与验收用例，尚未运行任何检查。` : '正在读取方案…'}
       actions={
         <>
           <ModelSelect choice={choice} disabled={busy} />
@@ -136,7 +136,7 @@ export function PlanCard({ detail }: { detail: Detail }) {
           ))}
           {editable && <Button size="sm" variant="ghost" onClick={() => update({ acceptance: [...spec.acceptance, ''] })}>＋ 添加验收标准</Button>}
 
-          <h4>Tester · 验证方案</h4>
+          <h4>Architect · 验证方案</h4>
           {checks.map((c, i) => (
             <div className="check-plan" key={c.operation}>
               <div className="field-label">{c.operation} · 覆盖验收项 {c.acceptance_indices.map((n) => n + 1).join('、') || '通用检查'}</div>

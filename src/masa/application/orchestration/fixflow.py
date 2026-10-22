@@ -4,7 +4,7 @@ from masa.application.orchestration.router import RoutingStop
 from masa.application.orchestration import attempts
 from masa.application.checks import ownership
 from masa.application.orchestration.flow import FlowEngine
-from masa.application.orchestration.workflows import FIX_V1
+from masa.application.orchestration.workflows import FIX_V2
 from masa.runtime.roles import RoleRuntime
 from masa.domain.models import CallCancelled, ExpectationSuspected, MasaError, TransportFailure
 from masa.application.orchestration.limits import NoChange, NoProgress, REWRITE_AFTER_STALLS, MAX_REWRITES
@@ -16,11 +16,11 @@ class FixFlowMixin:
     # ───────────── 修复子图（声明式工作流）/ the repair subgraph (declarative workflow) ─────────────
     def _trace_step(self, step, verified):
         """把工作流走过的每一步写进事件，报告里可见。 Persist every workflow step as an event for the report."""
-        self.store.event(verified,'workflow_node',{'workflow':f"{FIX_V1['id']}-v{FIX_V1['version']}",'node':step.node,'action':step.action,'to':step.to,'why':step.why})
+        self.store.event(verified,'workflow_node',{'workflow':f"{FIX_V2['id']}-v{FIX_V2['version']}",'node':step.node,'action':step.action,'to':step.to,'why':step.why})
 
     def _run_fix_flow(self, verified, checks, attempt, generation, assertion, repeats, analysis):
-        """用 fix-v1 决定并执行“验证失败之后做什么”。返回 {end, outcome, facts, trace}。
-        Decide and run what happens after a failed verification, using the fix-v1 workflow."""
+        """用 fix-v2 决定并执行“验证失败之后做什么”。返回 {end, outcome, facts, trace}。
+        Decide and run what happens after a failed verification, using the fix-v2 workflow."""
         store=self.store
         phase=self._phase
         outputs=[result for _,result in checks]
@@ -33,7 +33,10 @@ class FixFlowMixin:
         facts={'verified':verified,'draft':None,'halted':False,'noop':False,'noop_count':0,'diagnosed':False,'diagnosis':None,'analysis':analysis,
                # 工人修复（v2repair）连续“卡住且没有改善”两次，就是同样的信息再来一遍：第三次不会有新东西，转去修订测试（真实 LCS 复跑：3 次卡住 ×3 步后才转，又多花约 1/5 的 token）。V1 默认流程仍是 3 次。
                # A worker repair (v2repair) that got stuck without improvement twice is the same information again: a third try brings nothing new, revise the tests (a real LCS rerun spent three stuck attempts of three steps before flipping, about a fifth of its tokens). The V1 default flow keeps 3.
-               'noop_limit':2 if self.job['request'].get('runtime')=='v2repair' else 3}
+               'noop_limit':2 if self.job['request'].get('runtime')=='v2repair' else 3,
+               # 有没有裁决者（Diagnoser）：有，则“修不动”只能得到裁决或停下；没有（固定单模型、诊断被关）才保留旧的“疑似测试错”捷径。
+               # Is there an adjudicator (the Diagnoser)? If so, "cannot fix it" yields a ruling or a stop; only without one does the old "suspect the test" shortcut survive.
+               'adjudicator':bool(self._ladder and self.router.policy.get('diagnose'))}
 
         def classify(ctx):
             primary=analysis['primary']
@@ -48,7 +51,6 @@ class FixFlowMixin:
             wants=(repeats>=2 or (primary=='ambiguous' and history>=2) or (only_assertions and not self.job.get('diagnoses')))
             can=bool(self._ladder and self.router.policy.get('diagnose') and diagnoses<int(self.router.policy.get('diagnose_max',0)))
             result={'primary':primary,'format_only':format_only(checks,self.pack),'can_diagnose':can,
-                    'arbitrate_due':bool(assertion) and self.job.get('repeated_assertions',0)==2 and not self.job.get('arbitrated'),
                     'needs_diagnosis':bool(can and wants),
                     'rewrite_due':bool(self._ladder and primary in ('implementation','ambiguous') and int(self.job.get('stall',0))>=REWRITE_AFTER_STALLS
                                        and int(self.job.get('rewrites',0))<MAX_REWRITES and self._strongest_tried())}
@@ -96,7 +98,7 @@ class FixFlowMixin:
                 if chain=='fix:implementation' and not facts.get('flipped'):
                     self.job['referee_text']=exc.referee_text
                     self._emit('repair_wants_tests',{'reason':str(exc)[:200],'signal':'stable_actual_value'},verified,always=True)
-                    return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+                    return {'halted':True,'halt_kind':'expectation_suspected','halt_reason':str(exc)}
                 raise
             except MasaError as exc:
                 # 修复实现的模型一再想改冻结的测试/go.mod/文件结构（被校验拒绝）：说明它认为问题在测试里。别让整个任务失败，
@@ -105,7 +107,7 @@ class FixFlowMixin:
                 # Do not fail the whole task; treat it like "the strongest model will not change the implementation" and revise the tests once (a real benchmark run failed this way).
                 if chain=='fix:implementation' and 'repair cannot change tests' in str(exc) and not facts.get('flipped'):
                     self._emit('repair_wants_tests',{'reason':str(exc)[:200]},verified,always=True)
-                    return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+                    return {'halted':True,'halt_kind':'wants_tests','halt_reason':str(exc)}
                 raise
             if used:self.job['pending_fix']={**used,'chain':chain}
             self._log_fix(stage,draft,used)
@@ -124,7 +126,7 @@ class FixFlowMixin:
         def revise_tests(ctx):
             phase('test_revision',verified,attempt+1)
             base='Fix the recorded test-file errors, including any '+self.pack.ui().get('format_name','format')+' failure. Preserve behavioral assertions and requirements.'
-            flipped=not facts.get('flipped') and (facts.get('halt_kind')=='noop' or int(facts.get('noop_count',0))>=int(facts.get('noop_limit',3)))
+            flipped=not facts.get('flipped') and (facts.get('halt_kind') in ('expectation_suspected','noop','wants_tests') or int(facts.get('noop_count',0))>=int(facts.get('noop_limit',3)))
             if flipped:
                 # 最强模型多次审视后认为实现无需改动：逐条重新手算期望值（字节数要把换行和多字节字符算进去），只改算错的期望。
                 # The strongest model reviewed the implementation repeatedly and changed nothing: recompute EVERY expected value by hand and change only the wrong ones.
@@ -154,22 +156,9 @@ class FixFlowMixin:
                 lambda rid:phase('repair',rid,attempt+1),use_intelligence=False))
             return {**out,'rewritten':True}
 
-        def arbitrate_tests(ctx):
-            # 实现修复后同一断言仍失败：测试期望可能与已批准规格矛盾。让 Tester 以规格为准仲裁一次，
-            # 此后仍相同则由三次规则停止并交给人。 Same assertion survives an implementation repair: let the Tester
-            # arbitrate once against the approved spec; if it still repeats, the three-strike rule hands over to a human.
-            self.job.update(arbitrated=True)
-            phase('test_revision',verified,attempt+1)
-            base=('The same assertions kept failing after an implementation repair. Compare EACH failing assertion with the approved '
-                  'spec.acceptance and the goal text. If an expected value contradicts them, correct that expectation to follow the '
-                  'requirement; do not delete cases or weaken checks. If the test already follows the requirement, change nothing '
-                  'about that assertion.')
-            return run_fix('fix:ambiguous','project_test_revision','arbitration',lambda provider,fb:generation.revise_tests(
-                verified,provider,'\n'.join(x for x in (base,fb) if x),lambda rid:phase('test_revision',rid,attempt+1)))
-
         actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
-                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation}
-        engine=FlowEngine(self.job['request'].get('workflow') or FIX_V1,actions,max_steps=12,on_step=lambda step:self._trace_step(step,verified))
+                 'revise_tests':revise_tests,'rewrite_implementation':rewrite_implementation}
+        engine=FlowEngine(self.job['request'].get('workflow') or FIX_V2,actions,max_steps=12,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
 
     def _log_fix(self, stage, draft, used):
@@ -197,8 +186,8 @@ class FixFlowMixin:
             self.store.save_metadata(run_id,'deadline_at',time.time()+3600,'deadline_extended',payload={'reason':'continued by the user'})
 
     def _failure_context(self, verified, analysis, checks, bundle):
-        """Diagnoser、测试怀疑者、指挥者共用的输入片段：任务目标、已批准的规格、失败涉及的文件、失败证据。
-        Shared input of the Diagnoser, the Test Skeptic and the Conductor: goal, approved spec, the files the failures point at, failure evidence."""
+        """Diagnoser 的输入片段：任务目标、已批准的规格、失败涉及的文件（失败的测试 + 它调用的实现）、失败证据。
+        The Diagnoser's input pieces: goal, approved spec, the files the failures point at (the failing tests AND the implementation they call), failure evidence."""
         store=self.store
         run=store.run(verified)
         approved=store.read(store.read(run['data']['project_bundle']['approval_ref'])['spec_approval_ref'])
@@ -212,7 +201,18 @@ class FixFlowMixin:
             full=keys[0] if len(keys)==1 else None
             if full and full not in files and budget>0:
                 files[full]=bundle[full][:6000];budget-=len(files[full])
-        evidence=[{'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3]
+        # 只给了失败的测试：要写出“改哪个文件的哪一行”的指导，得看到被测的实现。按导入关系（点号模块名）和同目录找到它调用的实现源码。
+        # Only the failing tests were given: guidance such as "change this line of that file" needs the implementation under test. Find it by import (dotted module name) and by directory.
+        seeds=self.pack.seed_files(approved['spec'])
+        for test_path in [p for p in files if self.pack.is_test(p)]:
+            folder=test_path.rsplit('/',1)[0] if '/' in test_path else ''
+            for path in bundle:
+                if path in files or budget<=0 or not self.pack.is_source(path) or path in seeds:
+                    continue
+                dotted=path.rsplit('.',1)[0].replace('/','.')
+                if (bool(folder) and path.rsplit('/',1)[0]==folder) or dotted in files[test_path]:
+                    files[path]=bundle[path][:6000];budget-=len(files[path])
+        evidence=[{'operation':op,'output':(str(r.get('stdout',''))+chr(10)+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3]
         return run,approved,files,evidence
 
     def _referee(self, verified, analysis, bundle, samples=3):
@@ -256,6 +256,12 @@ class FixFlowMixin:
         context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'all_files':sorted(bundle),'files':files,
                  'ownership':ownership.describe(analysis),'failure_evidence':evidence,
                  'history':list(self.job.get('fix_log',[])),'noop_streak':int(self.job.get('noop_streak',0))}
+        # Architect 当初写下的用例（输入 → 期望）与假设：失败的断言多半对应其中一条，它们是同一个角色对“需求是什么”的第二次表述。
+        # The cases (input -> expectation) and assumptions the Architect wrote: a failing assertion usually corresponds to one of them, a second statement of "what the requirement is" by the same role.
+        cases=[{k:str(c[k])[:300] for k in ('name','input','expected')} for check in approved.get('checks',[]) for c in (check.get('cases') or [])][:16]
+        if cases:context['architect_cases']=cases
+        plan=self.store.run(self.job.get('plan_id') or verified)['data'].get('project_plan') or {}
+        if plan.get('assumptions'):context['assumptions']=plan['assumptions']
         evidence_text=self._referee(verified,analysis,bundle)
         if evidence_text:
             context['independent_evidence']=evidence_text

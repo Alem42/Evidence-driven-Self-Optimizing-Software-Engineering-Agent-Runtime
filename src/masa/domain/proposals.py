@@ -266,6 +266,44 @@ def acceptance_problem(items):
     return None
 
 
+SPEC_KEYS = ('summary', 'module', 'entrypoint', 'files', 'acceptance')
+MAX_ASSUMPTIONS = 6
+
+
+def _assumptions(value):
+    """Architect 记录的假设（目标没说、它选了约定的地方）：可选元数据，写坏了就丢掉，不为它拒绝整个规格。
+    The Architect's recorded assumptions (what the goal left open and the convention it chose): optional metadata, dropped when malformed rather than rejecting the whole plan."""
+    if not isinstance(value, list):
+        return []
+    return [item.strip()[:300] for item in value if isinstance(item, str) and item.strip() and '\x00' not in item][:MAX_ASSUMPTIONS]
+
+
+def validate_architect(action, language=None):
+    """Architect 的一次回答 = 规格 + 检查计划 + 假设，分别按原来 Planner 与 Tester 的契约校验；错误信息标明是哪一部分，重试时模型才知道改哪里。
+    One Architect answer = spec + check plan + assumptions, each validated under the contract the Planner and the Tester used to have; the error names the part so the retry knows what to fix."""
+    if not isinstance(action, dict):
+        raise MasaError('invalid Architect answer: expected {"spec":…,"checks":…,"assumptions":…}')
+    # 多出来的顶层字段从不被使用：丢掉，不为它拒绝；缺字段是实质错误。模型有时把规格的字段平铺在顶层，也接受。
+    # Extra top-level fields are never used and are dropped; a missing field is substantive. A model sometimes flattens the spec fields to the top level; that is accepted too.
+    raw = action['spec'] if isinstance(action.get('spec'), dict) else {k: action[k] for k in SPEC_KEYS if k in action}
+    spec = {k: v for k, v in raw.items() if k in SPEC_KEYS}
+    try:
+        validate_spec(spec, language)
+        problem = acceptance_problem(spec['acceptance'])
+        if problem:
+            raise MasaError(problem)
+    except MasaError as exc:
+        raise MasaError('spec: ' + str(exc)) from None
+    checks = action.get('checks')
+    if isinstance(checks, dict):  # 以操作名为键的写法（本地传输的约定）/ keyed by operation (the local transport's convention)
+        checks = [{'operation': name, **body} for name, body in checks.items() if isinstance(body, dict) and 'operation' not in body]
+    try:
+        checks = validate_checks(normalize_checks(checks), spec, require_coverage=False, language=language)
+    except MasaError as exc:
+        raise MasaError('checks: ' + str(exc) + '. Contract reminder: "checks" is a list of 1 to 3 objects, each with EXACTLY operation, purpose, acceptance_indices (zero-based integers valid for spec.acceptance) and, only when concrete cases are given, cases (each exactly name, input, expected, level).') from None
+    return {'spec': spec, 'checks': checks, 'assumptions': _assumptions(action.get('assumptions'))}
+
+
 def validate_diagnosis(action):
     """Diagnoser 的结论：谁的问题 + 依据 + 给修复者的指导。它不能改文件，也不能放宽冻结边界；
     spec/unclear 表示需要人（需求矛盾或证据不足），由工作流确定性地停下。
