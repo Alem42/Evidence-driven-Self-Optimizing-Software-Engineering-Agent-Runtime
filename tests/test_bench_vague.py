@@ -47,6 +47,8 @@ class ToleranceTests(unittest.TestCase):
         self.assertTrue(verdict('v_calc', v.CALC_CASES[0][0], '6\n121\n'))
         self.assertTrue(verdict('v_calc', v.CALC_CASES[0][0], '6.0\n121.0\n'))
         self.assertTrue(verdict('v_calc', v.CALC_CASES[0][0], '= 6\n= 121.000000\n'))
+        self.assertTrue(verdict('v_calc', v.CALC_CASES[1][0], '5/2\n5\n'))          # 精确除法打印成分数也是合理的写法 / printing exact division as a fraction is a reasonable reading
+        self.assertFalse(verdict('v_calc', v.CALC_CASES[1][0], '3/2\n5\n'))         # 但分数的值得对 / but the fraction's value must be right
         self.assertTrue(verdict('v_calc', v.CALC_ERRORS[0], '', err='error: division by zero', code=1))
         self.assertTrue(verdict('v_calc', v.CALC_ERRORS[0], '错误：除零\n5\n', code=0))
         self.assertTrue(verdict('v_calc', v.CALC_ERRORS[1], 'error: y is not defined\n', code=0))
@@ -104,6 +106,12 @@ class RejectionTests(unittest.TestCase):
         self.assertFalse(verdict('v_shop', v.SHOP_CASES[0][0], 'ok\nok\nok\nrejected\napple: 7\npear: -1\n'))  # 被拒绝的订单也扣了库存 / the rejected order still reduced stock
         self.assertFalse(verdict('v_shop', v.SHOP_CASES[1][0], 'ok\nok\napple: 3\nok\napple: 3\n'))           # 取消没有退回库存 / cancel did not return stock
         self.assertFalse(verdict('v_shop', v.SHOP_CASES[2][0], 'ok\nok\nok\nok\nok\napple: -1\npear: 4\n'))  # 负数进货被接受 / a negative stock was accepted
+
+    def test_shop_accepts_aborting_on_an_invalid_command_but_not_a_negative_stock(self):
+        script = v.SHOP_CASES[2][0]
+        self.assertTrue(task('v_shop').verify([], script, '', "error: quantity must be positive: '-5'", 1)[0])     # 遇到非法指令就中止是合理的写法 / aborting on an invalid command is a reasonable reading
+        self.assertFalse(task('v_shop').verify([], script, 'apple -1\npear 7\n', 'error', 1)[0])                    # 但不能把负数当成库存 / but a negative number must not become stock
+        self.assertFalse(task('v_shop').verify([], script, '', '', 0)[0])                                            # 静默什么都不做也不行 / silently doing nothing is not acceptable either
 
     def test_semver(self):
         self.assertTrue(verdict('v_semver', v.SEMVER_A, '0.9.9\n1.2.0\n1.2.9\n1.2.10\n1.10.0\n'))

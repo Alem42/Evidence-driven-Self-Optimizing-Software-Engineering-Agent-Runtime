@@ -153,12 +153,23 @@ def ref_calc(args, stdin):
     return ''.join(out), 0
 
 
+_VALUE = re.compile(r'(-?\d+)\s*/\s*(\d+)|(-?\d+(?:\.\d+)?)')
+
+
+def values_of(text):
+    """输出里的数值，按出现顺序：小数、整数，以及分数 `5/2`（精确除法的合理写法，值就是 2.5）。 The numeric values in order: decimals, integers and fractions such as `5/2` (a reasonable way to print exact division; its value is 2.5)."""
+    out = []
+    for match in _VALUE.finditer(text):
+        out.append(float(match.group(1)) / float(match.group(2)) if match.group(1) is not None and int(match.group(2)) else float(match.group(3) or match.group(1)))
+    return out
+
+
 def verify_calc(args, stdin, out, err, code):
     if _crashed(err):
         return False, 'traceback'
     expected = next((values for text, values in CALC_CASES if text == stdin), None)
     if expected is not None:
-        got = numbers(out)
+        got = values_of(out)
         if len(got) != len(expected) or not all(_close(a, b, 1e-6) for a, b in zip(got, expected)):
             return False, f'values {got}, want {expected}'
         return _ok()
@@ -327,6 +338,10 @@ def verify_shop(args, stdin, out, err, code):
     if _crashed(err):
         return False, 'traceback'
     expected = next(values for text, values in SHOP_CASES if text == stdin)
+    if stdin == SHOP_CASES[2][0] and code != 0 and (err or out).strip():
+        # 脚本里有一条非法指令（负数进货）：遇到错误就整体中止并报错，也是合理的写法（题面没说“继续”还是“中止”）；只要没有把负数当成库存。
+        # A script with an invalid command (a negative stock): aborting with an error is a reasonable reading too (the statement does not say continue or abort); it only must not accept the negative number as stock.
+        return (False, 'a negative quantity became stock') if re.search(r'apple\D*-\d', out, re.I) else _ok()
     for product, count in expected.items():
         if not last_value(out, product, count):
             return False, f'the last line about {product!r} does not show {count}'
