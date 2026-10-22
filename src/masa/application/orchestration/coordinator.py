@@ -247,6 +247,7 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         else:
             generation=ProjectGeneration(store,runner)
         generation.context_budget=bool(self._ladder and self.router.policy.get('context_budget'))
+        generation.memory_strategy=(self.router.policy.get('memory_strategy') or 'window') if self._ladder else 'window'  # 包工人的记忆策略 / the package worker's memory strategy
         generation.pause_gate=self._pause_gate  # V2 工人的每一步之前也检查暂停 / V2 workers check for a pause before every step
         if getattr(generation,'workers',False) and self._ladder and self.router.policy.get('assertion_referee'):
             generation.referee_provider=self.router.cheapest('assertion_referee')  # V2 的工人在同一个断言一再失败时请裁判 / V2 workers ask the referee when the same assertion keeps failing

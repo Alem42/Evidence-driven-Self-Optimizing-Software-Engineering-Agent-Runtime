@@ -130,6 +130,12 @@ function Composition({ d }: { d: CallDetail }) {
   );
 }
 
+const STRATEGY_TEXT: Record<string, string> = {
+  window: 'window · 最近 3 步原文（原有行为）', digest_wide: 'digest_wide · 大窗口，原文 5 步 + 摘要行 + 钉住项', digest: 'digest · 原文 3 步 + 摘要行 + 钉住项',
+  digest_tight: 'digest_tight · 小窗口，原文 1 步 + 更短的摘要行',
+};
+const PIN_TEXT: Record<string, string> = { failing_check: '当前失败的检查', referee_verdicts: '裁判结论', same_failure_repeats: '同一失败重复次数', best_problems_so_far: '最好状态的问题数' };
+
 /** 工作记忆：最近结果窗口保留几条、更早的几条已经离开窗口、有没有笔记/摘要。离开窗口的结果不会自动并入笔记——没有笔记时标红。 Working memory: what the recent-results window keeps and what left it; results that leave are not folded into notes automatically, so no notes is flagged. */
 function WorkingMemory({ d }: { d: CallDetail }) {
   const m = d.working_memory;
@@ -141,9 +147,13 @@ function WorkingMemory({ d }: { d: CallDetail }) {
         <span>最近结果窗口</span><b>保留 {m.kept} 条</b>
         <span>已离开窗口</span><b className={m.at_risk ? 'bad-text' : ''}>{m.dropped == null ? '—' : m.dropped + ' 条'}</b>
         <span>笔记</span><b>{m.notes_chars ? m.notes_chars.toLocaleString() + ' 字符' : '无'}</b>
-        <span>自动摘要</span><b>{m.summary_chars ? m.summary_chars.toLocaleString() + ' 字符' : '没有（尚未实现自动压缩）'}</b>
+        <span>记忆策略</span><b>{STRATEGY_TEXT[m.strategy] ?? m.strategy}</b>
+        <span>摘要行</span><b>{m.digest_lines ? m.digest_lines + ' 行（每个离开窗口的结果一行）' : m.strategy === 'window' ? '没有（window 策略）' : '无（还没有结果离开窗口）'}</b>
+        <span>钉住项</span><b>{m.pins.length ? m.pins.map((p) => PIN_TEXT[p] ?? p).join('、') : '无'}</b>
+        <span>回查旧结果</span><b>{m.recall ? '可用（recall_step）' : '不可用'}</b>
+        <span>LLM 滚动摘要</span><b>{m.summary_chars ? m.summary_chars.toLocaleString() + ' 字符' : '没有'}</b>
       </div>
-      {m.at_risk && <p className="ctx-warn">更早的 {m.dropped} 条结果已经离开窗口，而且没有笔记或摘要：其中的信息现在只存在于文件内容里，模型可能已经忘了。</p>}
+      {m.at_risk && <p className="ctx-warn">更早的 {m.dropped} 条结果已经离开窗口，而且没有笔记、摘要行或钉住项：其中的信息现在只存在于文件内容里，模型可能已经忘了。</p>}
       {m.kept_items.length > 0 && (
         <ul className="entries">
           {m.kept_items.map((r, i) => <li key={i}><code>{r.tool ?? '（被拒绝的回答）'}{r.path ? ' ' + r.path : ''}</code><span>{r.ok === false ? '失败 · ' : ''}{r.chars.toLocaleString()} 字符</span></li>)}

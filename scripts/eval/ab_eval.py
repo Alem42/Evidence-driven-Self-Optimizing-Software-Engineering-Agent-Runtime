@@ -1,7 +1,7 @@
 """V1 与 V2（以及 Planner 示例开/关）的同预算配对对照：同一批任务、同一组模型、同样的单次费用上限，独立判官判定。
 Same-budget paired comparison of V1 vs V2 (and Planner examples on/off): the same tasks, the same models, the same per-run cost cap, judged by the independent oracle.
 
-臂 / arms:  v1 = 默认流程；v2 = 包工人循环；v2r = V1 生成 + 工人修复；v2s = v2 + 旧的字母序提示排布。
+臂 / arms:  v1 = 默认流程；v2 = 包工人循环；v2r = V1 生成 + 工人修复；v2rm = v2r + 按窗口自动选择的记忆策略；v2s = v2 + 旧的字母序提示排布。
 模型 / models: `--models flash` 只用云端 Flash；`--models flash+glm` 本地 glm-4.7-flash 起步、Flash 兜底并担任 Planner/Tester/Diagnoser（Pro 一律不用）。
 
 用法 / usage:  python scripts/eval/ab_eval.py --name ab1 --language python --only upper,fizz,sum --arms v1,v2,v1x,v2x --models flash+glm --yuan 2.0 --per-run 0.3 --round 1
@@ -22,6 +22,7 @@ from masa.infrastructure.store import Store  # noqa: E402
 
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
 ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}}, 'v2r': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}}},  # 修复的工人直接用 Flash（本地 glm 当不了工人）/ the repair workers start at Flash (the local glm cannot be a worker)
+        'v2rm': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}, 'memory_strategy': 'auto'}},  # 同 v2r，但包工人用按窗口自动选择的记忆策略 / like v2r, but the workers use the window-adaptive memory strategy
         'v2s': {'runtime': 'v2', 'policy': {}, 'layout': 'sorted'},  # 与 v2 相同，只是提示用旧的字母序排布（缓存命中率对照）/ same as v2 but with the old alphabetical prompt layout (cache hit-rate comparison)
 }
 
@@ -124,7 +125,7 @@ def main():
                    'level': record['level'], 'status': record['status'], 'cost': record.get('cost') or 0, 'cloud_tokens': record['cloud_tokens'], 'local_tokens': record.get('local_tokens', 0),
                    'seconds': record['seconds'], 'rounds': record['rounds'], 'verifications': verifications, 'calls': record['calls'], 'failed_calls': record.get('failed_calls', 0),
                    'escalations': record['escalations'], 'cache_hit_tokens': record.get('cache_hit_tokens'), 'cache_miss_tokens': record.get('cache_miss_tokens'), 'stuck': len(events.get('worker_stuck', [])), 'deferred': len(events.get('package_deferred', [])),
-                   'worker_steps': len(events.get('worker_step', [])), 'examples_total': checked.get('total'), 'examples_passed': checked.get('passed'),
+                   'worker_steps': len(events.get('worker_step', [])), 'recalls': sum(1 for e in events.get('worker_step', []) if e.get('tool') == 'recall_step'), 'memory_strategy': sorted({e.get('strategy') for e in events.get('memory_strategy', [])}), 'examples_total': checked.get('total'), 'examples_passed': checked.get('passed'),
                    'mechanisms': record['mechanisms'], 'oracle_reason': record.get('oracle_reason'), 'note': record.get('note'), 'stop_reason': record.get('stop_reason'),
                    'run_id': record.get('run_id'), 'bench_id': runner.id}
             summary['runs'].append(row)

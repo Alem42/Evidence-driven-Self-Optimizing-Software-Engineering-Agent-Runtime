@@ -118,6 +118,19 @@ export function RoutingSection() {
             <input type="checkbox" checked={!!draft.policy.assertion_referee} onChange={(e) => setPolicy({ assertion_referee: e.target.checked })} />
           </Field>
         </div>
+        <h4>包工人的记忆策略</h4>
+        <p className="hint">离开“最近几步”窗口的工具结果怎么办。<b>window</b> = 只留最近 3 步原文（原有行为，默认）；<b>digest*</b> = 每个离开窗口的结果留一行摘要，当前失败的检查和裁判结论钉住，并可按步号回查原文；<b>auto</b> = 先取得当前模型的有效上下文窗口，再按预算选一档（窗口小就选更紧的，仍放不下会明确换模型/拆任务，而不是被静默截断）。设计与验收见 docs/design/AUTO_COMPACTION.md。</p>
+        <div className="grid2">
+          <Field label="记忆策略">
+            <select value={draft.policy.memory_strategy ?? 'window'} onChange={(e) => setPolicy({ memory_strategy: e.target.value as RoutingPolicy['memory_strategy'] })}>
+              <option value="window">window · 最近 3 步原文（默认）</option>
+              <option value="auto">auto · 按模型窗口自动选择</option>
+              <option value="digest_wide">digest_wide · 大窗口</option>
+              <option value="digest">digest · 普通窗口</option>
+              <option value="digest_tight">digest_tight · 小窗口</option>
+            </select>
+          </Field>
+        </div>
         <h4>规模自适应的分层上下文（实验，默认关闭）</h4>
         <p className="hint">任务小（全部内容放得进窗口的 35%）时原样全给，什么都不改；只有放不下窗口的大项目，才把与当前文件无关的已生成文件降级为“只有声明的轮廓”，同目录文件、测试和清单文件永远完整，并把决定写进账本。云端大窗口模型几乎不会触发；对 16k 窗口的本地模型更有意义。</p>
         <div className="grid2">

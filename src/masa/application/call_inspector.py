@@ -40,12 +40,12 @@ FIELD_CATEGORY = {
     'goal': 'task', 'summary': 'task', 'acceptance': 'task', 'spec': 'task', 'contract': 'task', 'module': 'task', 'package': 'task', 'own_files': 'task',
     'examples': 'tests', 'spec_examples': 'tests', 'checks': 'tests', 'cases': 'tests', 'pairs': 'tests',
     'files': 'code', 'interfaces': 'code', 'original_files': 'code', 'all_files': 'code', 'previous_files': 'code', 'other_files_outline_readonly': 'code', 'context_selection': 'code',
-    'last_results': 'memory', 'notes': 'memory', 'history': 'memory', 'progress_summary': 'memory', 'fix_log': 'memory', 'noop_streak': 'memory',
+    'last_results': 'memory', 'notes': 'memory', 'history': 'memory', 'progress_summary': 'memory', 'progress_digest': 'memory', 'progress_pins': 'memory', 'memory_notes': 'memory', 'fix_log': 'memory', 'noop_streak': 'memory',
     'repair': 'evidence', 'failure_evidence': 'evidence', 'feedback': 'evidence', 'ownership': 'evidence', 'independent_evidence': 'evidence', 'previous_attempt_error': 'evidence',
     'language_notes': 'conventions', 'language': 'conventions', 'reason_language': 'conventions',
     'user_notes': 'human',
     'purpose': 'control', 'step': 'control', 'max_steps': 'control', 'allowed_tools': 'control', 'generation_mode': 'control', 'target_path': 'control', 'clarification_allowed': 'control',
-    'examples_required': 'control', 'omitted': 'control',
+    'examples_required': 'control', 'omitted': 'control', 'memory': 'control',
 }
 
 
@@ -104,8 +104,13 @@ def working_memory_of(context):
     dropped = max(0, step - 1 - kept) if step is not None else None
     notes = context.get('notes') if isinstance(context.get('notes'), str) else ''
     summary = context.get('progress_summary') if isinstance(context.get('progress_summary'), str) else ''
+    digest = context.get('progress_digest') if isinstance(context.get('progress_digest'), list) else []
+    pins = context.get('progress_pins') if isinstance(context.get('progress_pins'), dict) else {}
+    memory = context.get('memory') if isinstance(context.get('memory'), dict) else {}
+    covered = bool(notes or summary or digest or pins)  # 离开窗口的结果有没有留下任何痕迹 / do results that left the window leave any trace
     return {'step': step, 'max_steps': context.get('max_steps') if isinstance(context.get('max_steps'), int) else None, 'kept': kept, 'dropped': dropped,
-            'notes_chars': len(notes), 'summary_chars': len(summary), 'at_risk': bool(dropped) and not notes and not summary,
+            'notes_chars': len(notes), 'summary_chars': len(summary), 'digest_lines': len(digest), 'pins': sorted(pins), 'strategy': memory.get('strategy') or 'window',
+            'recall': bool(memory.get('recall')), 'at_risk': bool(dropped) and not covered,
             'kept_items': [{'tool': r.get('tool'), 'ok': r.get('ok'), 'path': r.get('path'), 'chars': len(str(r.get('result', '')))} for r in results[-8:] if isinstance(r, dict)]}
 
 

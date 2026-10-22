@@ -383,6 +383,7 @@ export interface RoutingPolicy {
   test_audit?: boolean;
   context_budget?: boolean;
   assertion_referee?: boolean;
+  memory_strategy?: 'auto' | 'window' | 'digest_wide' | 'digest' | 'digest_tight';
 }
 
 export interface RouteDecision {
@@ -575,6 +576,10 @@ export interface WorkingMemory {
   dropped: number | null;
   notes_chars: number;
   summary_chars: number;
+  digest_lines: number;
+  pins: string[];
+  strategy: string;
+  recall: boolean;
   at_risk: boolean;
   kept_items: { tool: string | null; ok: boolean | null; path: string | null; chars: number }[];
 }

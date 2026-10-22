@@ -37,7 +37,7 @@ STRATEGIES = {
 }
 LOOSE_TO_TIGHT = ('digest_wide', 'digest', 'digest_tight')
 CHOICES = ('auto', *STRATEGIES)
-WIDE_BUDGET, NORMAL_BUDGET = 90_000, 26_000  # 单步输入预算（token）的分档 / input-budget tiers in tokens
+WIDE_BUDGET, NORMAL_BUDGET = 60_000, 14_000  # 单步输入预算（token）的分档：一个包工人的典型单步上下文约 5–10k，大项目可到 15k+ / input-budget tiers in tokens: a worker step is typically 5-10k, 15k+ on a big project
 
 
 def input_budget(window, output_reserve, instruction_tokens, margin=0.1):
@@ -148,9 +148,21 @@ def _fold_line(folded):
 
 
 # ───────────── 钉住项 / pinned items ─────────────
+AUTO_CHECK = 'automatic check after your change:'
+
+
+def _check_text(record):
+    """这条结果里检查的那一部分（run_check / finish 的结果，或修复模式里改文件后自动接上的检查）；不是检查返回 None。
+    The check part of a result (run_check / finish, or the check automatically appended after an edit in repair mode); None when it is not a check."""
+    text = str(record.get('result', ''))
+    if AUTO_CHECK in text:
+        return text.split(AUTO_CHECK, 1)[1].strip()
+    return text if record.get('tool') in ('run_check', 'finish') else None
+
+
 def _last_check(records):
     for record in reversed(records):
-        if _PROBLEMS.search(str(record.get('result', ''))[:200]) or ' check passed' in str(record.get('result', ''))[:80] or record.get('result') == 'package sealed':
+        if _check_text(record) is not None:
             return record
     return None
 
@@ -160,9 +172,15 @@ def pins_of(workspace, records, strategy):
     What is still true now and must not fade with time: the problems of the latest failing check, referee verdicts, how often the same failure repeated, the best state's problem count in a repair."""
     pins = {}
     check = _last_check(records)
-    if check and not check.get('ok') and _PROBLEMS.search(str(check['result'])[:200]):
-        lines = [line.strip()[:strategy.line_chars * 2] for line in str(check['result']).split('\n') if line.strip()]
-        pins['failing_check'] = {'step': check.get('step'), 'problems': lines[1:1 + strategy.pin_lines]}
+    if check is not None:
+        text = _check_text(check)
+        if check.get('tool') in ('run_check', 'finish'):
+            failed = not check.get('ok')
+        else:  # 修复模式里改文件后自动接上的检查 / the check appended after an edit in repair mode
+            failed = not text.lstrip().startswith(('test check passed', 'static check passed', 'package sealed'))
+        if failed:
+            lines = [line.strip()[:strategy.line_chars * 2] for line in text.split(chr(10)) if line.strip()]
+            pins['failing_check'] = {'step': check.get('step'), 'problems': lines[1:1 + strategy.pin_lines] if _PROBLEMS.search(lines[0] if lines else '') else lines[:strategy.pin_lines]}
     verdicts = [v for v in getattr(workspace, 'verdicts', [])[-2:] if v]
     if verdicts:
         pins['referee_verdicts'] = [str(v)[:400] for v in verdicts]

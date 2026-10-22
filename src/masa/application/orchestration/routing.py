@@ -39,6 +39,9 @@ DEFAULT_POLICY = {
     'context_budget': False,
     # 断言裁判（默认关闭）：失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为独立证据交给 Diagnoser；并在“测试修订没改动失败断言”时给出明确提示。 Assertion referee (off by default).
     'assertion_referee': False,
+    # 包工人的记忆策略（见 docs/design/AUTO_COMPACTION.md）：window = 最近 3 步原文（原有行为）；digest_wide / digest / digest_tight = 摘要行 + 钉住项 + 回查；auto = 按当前模型的有效窗口选一档。
+    # Memory strategy of the package worker: window = the last 3 steps verbatim (legacy); digest_wide / digest / digest_tight = digest lines + pins + recall; auto = a tier chosen from the current model's effective window.
+    'memory_strategy': 'window',
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
@@ -298,6 +301,11 @@ def validate_policy(policy) -> dict:
             low, high = POLICY_BOUNDS[key]
             if type(value) is not int or not low <= value <= high:
                 raise MasaError(f'{key} must be an integer in {low}..{high}')
+            out[key] = value
+        elif key == 'memory_strategy':
+            from masa.application.v2.memory import CHOICES
+            if value not in CHOICES:
+                raise MasaError('memory_strategy must be one of ' + ', '.join(CHOICES))
             out[key] = value
         elif key in RETIRED_POLICY_KEYS:
             continue  # 已删除的实验开关：旧的保存设置里可能还有，接受并丢弃，不让整个设置加载失败 / a removed experimental switch that old saved settings may still carry: accepted and dropped so the settings still load

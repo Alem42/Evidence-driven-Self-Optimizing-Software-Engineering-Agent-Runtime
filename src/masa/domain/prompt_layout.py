@@ -30,10 +30,10 @@ ORDER = (
     'graph', 'goal', 'spec', 'acceptance', 'checks', 'contract', 'cases', 'examples', 'spec_examples', 'sources',
     '*',
     # 换包/写文件/换版本时才变 / changes when a package is switched, a file is written or a version is made
-    'package', 'interfaces', 'own_files', 'notes', 'repair', 'original_files', 'files', 'all_files', 'ownership', 'previous_files', 'target_path',
+    'package', 'interfaces', 'own_files', 'notes', 'memory', 'memory_notes', 'repair', 'original_files', 'files', 'all_files', 'ownership', 'previous_files', 'target_path',
     # 每次调用都可能变 / may change on every call
     'allowed_tools', 'context_selection', 'history', 'noop_streak', 'clarification', 'answers', 'user_notes', 'previous_attempt_error',
-    'feedback', 'failure_evidence', 'briefing', 'pairs', 'step', 'last_results',
+    'feedback', 'failure_evidence', 'briefing', 'pairs', 'progress_pins', 'progress_digest', 'step', 'last_results',
 )
 _RANK = {name: index for index, name in enumerate(ORDER)}
 _UNKNOWN = _RANK['*']

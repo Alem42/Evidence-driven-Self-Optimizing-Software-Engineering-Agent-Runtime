@@ -22,6 +22,9 @@ def response_schema(context):
             kept = [o for o in schema['oneOf'] if (o.get('properties', {}).get('tool') or {}).get('const') in allowed]
             if kept:
                 schema['oneOf'] = kept
+        if purpose == 'package_worker' and isinstance(schema.get('oneOf'), list) and not (context.get('memory') or {}).get('recall'):
+            # recall_step 只在记忆策略提供它时才出现（window 策略的约束解码与原来逐字节相同）/ recall_step is part of the schema only when the memory strategy offers it (the window strategy keeps the old constrained-decoding schema)
+            schema['oneOf'] = [o for o in schema['oneOf'] if (o.get('properties', {}).get('tool') or {}).get('const') != 'recall_step']
         return schema
     if purpose in {'project_repair','project_test_revision'}:
         # 在传输层就限制修复文件类别，Domain 再独立核对冻结边界。

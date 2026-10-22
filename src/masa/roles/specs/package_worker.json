@@ -36,7 +36,11 @@
     "language_notes",
     "spec_examples",
     "repair",
-    "allowed_tools"
+    "allowed_tools",
+    "progress_digest",
+    "progress_pins",
+    "memory_notes",
+    "memory"
   ],
   "output_schema": {
     "oneOf": [
@@ -151,6 +155,24 @@
         "properties": {
           "tool": {
             "const": "finish"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tool",
+          "step"
+        ],
+        "properties": {
+          "tool": {
+            "const": "recall_step"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400
           }
         }
       }
