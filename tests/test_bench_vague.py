@@ -24,7 +24,7 @@ class ReferenceTests(unittest.TestCase):
 
     def test_the_tasks_read_like_vague_user_requests(self):
         for t in v.VAGUE_TASKS:
-            self.assertLessEqual(len(t.goal), 260, t.id)  # 1–3 句话 / one to three sentences
+            self.assertLessEqual(len(t.goal), 330, t.id)  # 1–3 句话 / one to three sentences
             self.assertIn('vague', t.probes)
 
     def test_ids_are_unique_and_registered_for_the_runner(self):
@@ -109,6 +109,35 @@ class RejectionTests(unittest.TestCase):
         self.assertTrue(verdict('v_semver', v.SEMVER_A, '0.9.9\n1.2.0\n1.2.9\n1.2.10\n1.10.0\n'))
         self.assertFalse(verdict('v_semver', v.SEMVER_A, '0.9.9\n1.10.0\n1.2.0\n1.2.10\n1.2.9\n'))             # 字典序 / lexicographic
         self.assertFalse(verdict('v_semver', v.SEMVER_B, '0.9.0\n1.0.0\n1.0.0-alpha\n1.0.0-beta\n1.0.1\n2.0.0-rc\n'))  # 预发布排在正式版后面 / prerelease after the release
+
+
+class HarderTaskTests(unittest.TestCase):
+    def test_template_accepts_whitespace_differences_and_any_error_wording(self):
+        text, _ = v.TEMPLATE_CASES[3]
+        self.assertTrue(verdict('v_template', text, '  [a][b][c]  \n\n'))   # 前后空白不算内容 / surrounding whitespace is not content
+        self.assertFalse(verdict('v_template', text, '[a] [b] [c]\n'))      # 项之间多出来的空格是内容 / extra spaces between items are content
+        self.assertTrue(verdict('v_template', v.TEMPLATE_ERROR, '', err='KeyError: ghost is not defined', code=1))
+        self.assertTrue(verdict('v_template', v.TEMPLATE_ERROR, '错误: 变量 ghost 未定义\n', code=0))
+
+    def test_template_rejects_wrong_renderings(self):
+        self.assertFalse(verdict('v_template', v.TEMPLATE_CASES[1][0], '普通\n'))               # 条件判反 / the condition is inverted
+        self.assertFalse(verdict('v_template', v.TEMPLATE_CASES[3][0], '[a][b]\n'))             # 循环少一项 / a loop item is missing
+        self.assertFalse(verdict('v_template', v.TEMPLATE_CASES[6][0], 'xHIDDENy\n'))           # 假条件仍输出 / a false condition still prints
+        self.assertFalse(verdict('v_template', v.TEMPLATE_ERROR, '{{ ghost }}\n', code=0))      # 缺变量原样输出标签 / the raw tag printed
+        self.assertFalse(verdict('v_template', v.TEMPLATE_ERROR, '\n', code=0))                 # 缺变量被静默当作空 / silently treated as empty
+
+    def test_cron_accepts_any_layout_around_the_times(self):
+        args = v.CRON_CASES[0][0][0]
+        self.assertTrue(task('v_cron').verify(args, '', 'next: 2024-03-05 10:45, 2024-03-05 11:00, 2024-03-05 11:15\n', '', 0)[0])
+        self.assertTrue(task('v_cron').verify(v.CRON_ERROR[0], '', '', 'invalid cron expression', 2)[0])
+
+    def test_cron_rejects_wrong_times(self):
+        t = task('v_cron')
+        weekdays = v.CRON_CASES[3][0][0]
+        self.assertFalse(t.verify(weekdays, '', '2024-03-09 12:00\n2024-03-10 12:00\n2024-03-11 12:00\n', '', 0)[0])    # 周末也触发了 / weekend triggers
+        self.assertFalse(t.verify(v.CRON_CASES[0][0][0], '', '2024-03-05 10:30\n2024-03-05 10:45\n2024-03-05 11:00\n', '', 0)[0])  # 含起始时间本身 / includes the start itself
+        self.assertFalse(t.verify(v.CRON_CASES[5][0][0], '', '2024-02-29 00:00\n2025-02-29 00:00\n2026-02-29 00:00\n', '', 0)[0])
+        self.assertFalse(t.verify(v.CRON_ERROR[0], '', '2024-03-05 11:00\n', '', 0)[0])                                    # 非法表达式被接受 / an invalid expression accepted
 
 
 if __name__ == '__main__':

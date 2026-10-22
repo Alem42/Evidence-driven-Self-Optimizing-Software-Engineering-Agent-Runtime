@@ -356,6 +356,137 @@ def verify_semver(args, stdin, out, err, code):
     return (True, '') if got == want else (False, f'order {got}, want {want}')
 
 
+# ───────────────────────── template ─────────────────────────
+TEMPLATE_CASES = (
+    ('{"name":"世界"}\n你好，{{ name }}！\n', '你好，世界！'),
+    ('{"vip":true}\n{% if vip %}VIP{% else %}普通{% endif %}\n', 'VIP'),
+    ('{"vip":false}\n{% if vip %}VIP{% else %}普通{% endif %}\n', '普通'),
+    ('{"items":["a","b","c"]}\n{% for x in items %}[{{ x }}]{% endfor %}\n', '[a][b][c]'),
+    ('{"show":true,"xs":[1,2]}\n{% if show %}{% for x in xs %}{{ x }},{% endfor %}{% endif %}\n', '1,2,'),
+    ('{"n":3,"pi":3.5,"empty":[]}\n{{ n }} {{ pi }}{% for x in empty %}X{% endfor %}\n', '3 3.5'),
+    ('{"a":false}\nx{% if a %}HIDDEN{% endif %}y\n', 'xy'),
+)
+TEMPLATE_ERROR = '{}\n{{ ghost }}\n'
+_TOKEN = re.compile(r'(\{\{.*?\}\}|\{%.*?%\})', re.S)
+
+
+def _render(tokens, env, i=0, stop=()):
+    out = []
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith('{{'):
+            name = token[2:-2].strip()
+            if name not in env:
+                raise KeyError(name)
+            out.append(str(env[name]))
+            i += 1
+        elif token.startswith('{%'):
+            words = token[2:-2].split()
+            if words[0] in stop:
+                return ''.join(out), i
+            if words[0] == 'if':
+                then, i = _render(tokens, env, i + 1, ('else', 'endif'))
+                other = ''
+                if tokens[i][2:-2].split()[0] == 'else':
+                    other, i = _render(tokens, env, i + 1, ('endif',))
+                out.append(then if env[words[1]] else other)
+                i += 1
+            elif words[0] == 'for':
+                start = i + 1
+                _, end = _render(tokens, {**env, words[1]: ''}, start, ('endfor',))
+                for item in env[words[3]]:
+                    body, _ = _render(tokens, {**env, words[1]: item}, start, ('endfor',))
+                    out.append(body)
+                i = end + 1
+            else:
+                raise ValueError(token)
+        else:
+            out.append(token)
+            i += 1
+    return ''.join(out), i
+
+
+def ref_template(args, stdin):
+    import json
+    head, _, body = stdin.partition('\n')
+    try:
+        return _render(_TOKEN.split(body), json.loads(head))[0], 0
+    except (KeyError, ValueError):
+        return '错误\n', 1
+
+
+def verify_template(args, stdin, out, err, code):
+    if _crashed(err):
+        return False, 'traceback'
+    want = next((value for text, value in TEMPLATE_CASES if text == stdin), None)
+    if want is None:
+        if code == 0 and not re.search('error|错误|未定义|不存在|undefined|missing|not defined|找不到', out + (err or ''), re.I):
+            return False, 'a missing variable was not reported'
+        return (False, 'the raw template tag was printed') if '{{' in out else _ok()
+    got = ' '.join(out.split())
+    return (True, '') if got == ' '.join(want.split()) else (False, f'rendered {got!r}, want {want!r}')
+
+
+# ───────────────────────── cron ─────────────────────────
+CRON_CASES = (
+    ((['*/15 * * * *', '2024-03-05 10:30'], ''), ['2024-03-05 10:45', '2024-03-05 11:00', '2024-03-05 11:15']),
+    ((['0 9 * * *', '2024-03-05 10:30'], ''), ['2024-03-06 09:00', '2024-03-07 09:00', '2024-03-08 09:00']),
+    ((['30 8 1 * *', '2024-03-05 10:30'], ''), ['2024-04-01 08:30', '2024-05-01 08:30', '2024-06-01 08:30']),
+    ((['0 12 * * 1-5', '2024-03-08 13:00'], ''), ['2024-03-11 12:00', '2024-03-12 12:00', '2024-03-13 12:00']),
+    ((['0,30 23 * * *', '2024-03-05 23:30'], ''), ['2024-03-06 23:00', '2024-03-06 23:30', '2024-03-07 23:00']),
+    ((['0 0 29 2 *', '2023-06-01 00:00'], ''), ['2024-02-29 00:00', '2028-02-29 00:00', '2032-02-29 00:00']),
+)
+CRON_ERROR = (['61 * * * *', '2024-03-05 10:30'], '')
+
+
+def _field(text, low, high):
+    values = set()
+    for part in text.split(','):
+        step = 1
+        if '/' in part:
+            part, step_text = part.split('/')
+            step = int(step_text)
+        if part == '*':
+            a, b = low, high
+        elif '-' in part:
+            a, b = (int(x) for x in part.split('-'))
+        else:
+            a = b = int(part)
+        if a < low or b > high or a > b or step < 1:
+            raise ValueError(text)
+        values |= set(range(a, b + 1, step))
+    return values
+
+
+def ref_cron(args, stdin):
+    import datetime
+    try:
+        minute, hour, dom, month, dow = args[0].split()
+        sets = (_field(minute, 0, 59), _field(hour, 0, 23), _field(dom, 1, 31), _field(month, 1, 12), _field(dow, 0, 6))
+        current = datetime.datetime.strptime(args[1], '%Y-%m-%d %H:%M')
+    except (ValueError, IndexError):
+        return '错误\n', 1
+    found = []
+    while len(found) < 3 and current.year < 2100:
+        current += datetime.timedelta(minutes=1)
+        weekday = (current.weekday() + 1) % 7  # 0 = 周日 / 0 = Sunday
+        if current.minute in sets[0] and current.hour in sets[1] and current.month in sets[3] and current.day in sets[2] and weekday in sets[4]:
+            found.append(current.strftime('%Y-%m-%d %H:%M'))
+    return ''.join(f + '\n' for f in found), 0
+
+
+def verify_cron(args, stdin, out, err, code):
+    if _crashed(err):
+        return False, 'traceback'
+    if args == CRON_ERROR[0]:
+        if code == 0 and not re.search('error|错误|无效|非法|invalid', out + (err or ''), re.I):
+            return False, 'an invalid expression was accepted silently'
+        return _ok()
+    want = next(value for (case_args, _), value in CRON_CASES if case_args == args)
+    got = re.findall(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}', out)
+    return (True, '') if got == want else (False, f'times {got}, want {want}')
+
+
 def _cases(*stdins):
     return tuple(([], text) for text in stdins)
 
@@ -373,6 +504,10 @@ VAGUE_TASKS = (
          _cases(MD_A, MD_B), ref_markdown, ('vague', 'parser'), verify_markdown),
     Task('v_shop', 6, '库存与订单', '写一个命令行小库存系统：从标准输入读取指令脚本，每行一条。能进货（`stock 商品 数量`）、下单（`order 订单号 商品 数量`，库存不够就拒绝）、取消订单（`cancel 订单号`，库存退回）、查看库存（`report`）。',
          _cases(*[text for text, _ in SHOP_CASES]), ref_shop, ('vague', 'state', 'errors'), verify_shop),
+    Task('v_template', 6, '模板渲染', '写一个命令行模板渲染小工具：标准输入的第一行是一个 JSON 对象（变量），其余部分是模板。模板里 `{{ name }}` 换成变量的值，`{% if flag %}…{% else %}…{% endif %}` 做条件，`{% for x in list %}…{% endfor %}` 对列表循环（循环里 `{{ x }}` 是当前项）。用到不存在的变量要报错。',
+         _cases(*[text for text, _ in TEMPLATE_CASES], TEMPLATE_ERROR), ref_template, ('vague', 'parser', 'errors'), verify_template),
+    Task('v_cron', 6, 'cron 触发时间', '写一个命令行小工具：第一个参数是 5 段的 cron 表达式（分 时 日 月 周，带引号作为一个整体），第二个参数是起始时间 `2024-03-05 10:30`（也是一个整体）。输出这个表达式在起始时间之后（不含起始时间本身）的下 3 次触发时间，每行一个，格式同起始时间。要支持 `*`、数字、`*/n`、`a-b` 和逗号列表。表达式不合法要报错。',
+         (*[case for case, _ in CRON_CASES], CRON_ERROR), ref_cron, ('vague', 'time', 'errors'), verify_cron),
     Task('v_semver', 4, '版本排序', '写一个命令行小工具：标准输入每行一个版本号（如 `1.2.3`，也可能带预发布标记，如 `1.0.0-beta`），按版本从低到高排序后每行输出一个。',
          _cases(SEMVER_A, SEMVER_B), ref_semver, ('vague', 'sorting'), verify_semver),
 )

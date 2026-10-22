@@ -262,6 +262,9 @@ class FixFlowMixin:
         if cases:context['architect_cases']=cases
         plan=self.store.run(self.job.get('plan_id') or verified)['data'].get('project_plan') or {}
         if plan.get('assumptions'):context['assumptions']=plan['assumptions']
+        # 同一角色上一次是怎么裁决的：第二次裁决不必重新推一遍，也能看到“上次判了实现错、修了之后还是同样的断言失败”。
+        # What the same role ruled before: the next ruling need not redo the reasoning, and sees "last time the implementation was blamed and the same assertion still fails".
+        if self.job.get('rulings'):context['previous_rulings']=list(self.job['rulings'])[-3:]
         evidence_text=self._referee(verified,analysis,bundle)
         if evidence_text:
             context['independent_evidence']=evidence_text
@@ -280,6 +283,7 @@ class FixFlowMixin:
         # The verdict must obey the Diagnoser's own per-case checks (it has been anchored by the test before: see reconcile_diagnosis).
         verdict=diagnosis['owner']
         diagnosis,changed=reconcile_diagnosis(diagnosis)
+        self.job['rulings']=[*list(self.job.get('rulings',[]))[-4:],{'owner':diagnosis['owner'],'rationale':diagnosis['rationale'][:240],'wrong_expectations':[c['case'] for c in diagnosis['expectation_checks'] if not c['matches']][:4]}]
         self._emit('diagnosis',{'owner':diagnosis['owner'],'rationale':diagnosis['rationale'][:400],'by':(provider.profile or {}).get('model'),
                                 'reconciled_from':verdict if changed else None,
                                 'mismatches':[c['case'] for c in diagnosis['expectation_checks'] if not c['matches']][:6]},verified,always=True)

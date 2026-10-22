@@ -72,8 +72,13 @@ def build(store, rid, runner=None, run_smoke=False):
             status = 'verified'
         else:
             status = 'failed'
+        black_box = sum(1 for c in (spec.get('cases') or []) if index in (c.get('accepts') or []))  # 程序生成并执行的黑盒用例数 / black-box cases generated and executed by the harness
+        strength = None
+        if status == 'verified':
+            strength = (f'{black_box} black-box acceptance case(s) executed by the harness; their expectations are model-written' if black_box
+                        else 'covered by model-written checks; not independently verified')
         acceptance.append({'index': index, 'text': text, 'status': status, 'evidence': evidence, 'cases': sum(len(c.get('cases') or []) for c in covering),
-                           'strength': 'covered by model-written checks; not independently verified' if status == 'verified' else None})
+                           'black_box_cases': black_box, 'strength': strength})
 
     # 假设：用户没说、但代码里做了的事，以及这次运行里不是用户写的东西 / assumptions: what the user did not say but the code does, and what was not written by the user
     plan = store.run(report['project_id'])['data'].get('project_plan') or {}
