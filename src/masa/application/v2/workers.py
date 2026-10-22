@@ -172,6 +172,7 @@ class V2Generation(ProjectGeneration):
                 except MasaError:
                     drawn.append(None)
             result = referee.tally(cases, drawn)
+            workspace.last_referee = result  # 逐条结论：修复时据此决定是否转去修订测试 / the per-case verdicts: a repair uses them to decide whether to revise the tests instead
             self.store.event(workspace.rid, 'assertion_referee', {'cases': len(cases), 'verdicts': {str(i): r['verdict'] for i, r in result.items()}, 'samples': sum(1 for d in drawn if d is not None), 'package': workspace.directory})
             text = referee.evidence_text(cases, result)
             if text:
@@ -395,8 +396,19 @@ class V2Generation(ProjectGeneration):
         text = SCRATCH_PATH.sub('', text)[:2500]  # 验证目录的绝对路径是噪声 / the absolute verification directory is noise
         snippets = '\n'.join(f"{s['path']}:{s['line']}\n{s['source']}" for e in evidence for s in (e.get('snippets') or [])[:3])[:2000]
         extra = {'repair': {'failure': text + ('\n' + snippets if snippets else ''), 'feedback': str(feedback)[:2500], 'scope': targets}}
+        # 失败测试函数的源码直接放进上下文：真实运行里 4 次修复有 3 次先花一步（约 3.6k token）去读测试文件。 The source of the failing test functions goes straight into the context: in real runs 3 of 4 repairs spent a first step (about 3.6k tokens) reading the test file.
+        failing_tests = {}
+        for e in evidence:
+            for s in (e.get('snippets') or []):
+                if len(failing_tests) < 3 and s.get('path') and self.pack.is_test(s['path']) and f"{s['path']}:{s['line']}" not in failing_tests:
+                    source = self.pack.test_function_source(files, s['path'], s['line'])
+                    if source:
+                        failing_tests[f"{s['path']}:{s['line']}"] = source
+        if failing_tests:
+            extra['repair']['failing_tests'] = failing_tests
         workspace = WorkerWorkspace(self, rid, spec, approved, files, own, '')
         workspace.repair = True
+        workspace.goal, workspace.arbiter = data['goal'], self._arbitrate  # 修复也用断言裁判（信号 S1 触发）/ repairs use the assertion referee too (triggered by signal S1)
         self._initial = True
         outcome, results, baseline = 'open', [], None
         try:

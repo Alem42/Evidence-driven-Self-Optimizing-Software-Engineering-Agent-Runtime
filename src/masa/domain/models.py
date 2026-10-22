@@ -24,6 +24,15 @@ class CallCancelled(MasaError):
     """模型调用在流式传输过程中被用户取消：连接已关闭，服务端会停止生成。 The call was cancelled mid-stream; the connection is closed so the server stops generating."""
 
 
+class ExpectationSuspected(MasaError):
+    """修复工人反复调整实现、失败断言的实际值却一点没变，独立裁判也认为是测试期望错了：别再修实现，改去修订测试。referee_text 是裁判的证据，会进入修订测试的指令。
+    The repair worker kept changing the implementation while the actual value of the failing assertion did not move, and the independent referee judged the test expectation wrong: stop repairing the implementation and revise the tests. referee_text is the referee's evidence for the revision instructions."""
+
+    def __init__(self, message, referee_text=''):
+        super().__init__(message)
+        self.referee_text = referee_text
+
+
 class TransportFailure(MasaError):
     """没有收到任何响应（连接被拒绝、被重置、服务被杀）。对免费的本地模型，这种失败可以在服务恢复后安全重试；
     对付费云调用，结果仍视为未知。 No response was received (refused, reset, server killed). Safe to retry for FREE local models

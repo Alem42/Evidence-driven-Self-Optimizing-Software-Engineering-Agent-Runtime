@@ -37,6 +37,14 @@ def parser():
                     help="serve the built frontend from this directory on the same origin (env MASA_STATIC_DIR)")
     ui.add_argument("--demo", action="store_true", default=os.environ.get("MASA_DEMO", "").lower() in ("1", "true", "yes"),
                     help="read-only demo: refuse everything that starts, changes or deletes work (env MASA_DEMO=1)")
+    watch = sub.add_parser("watch", help="run `serve` under a watchdog: restart after a crash, write crash/restart events to the ops feed (see docs/ROADMAP P0-4)")
+    watch.add_argument("--port", type=int, default=8765)
+    watch.add_argument("--auto-resume", action="store_true", help="after a restart resume interrupted jobs that have no uncertain paid call (default: wait for a human)")
+    watch.add_argument("--max-restarts", type=int, default=10, help="give up after this many restarts within one hour")
+    ops = sub.add_parser("ops", help="talk to a running service through the ops API: status, pending, events, stop-all")
+    ops.add_argument("ops_command", choices=["status", "pending", "events", "stop-all"])
+    ops.add_argument("--port", type=int, default=8765)
+    ops.add_argument("--since", type=int, default=0, help="events after this id")
     lang = sub.add_parser("lang", help="language packs: list, info, check")
     lang_sub = lang.add_subparsers(dest="lang_command", required=True)
     lang_sub.add_parser("list")
@@ -60,6 +68,9 @@ def parser():
     inspect.add_argument("--query", default="")
     inspect.add_argument("--role", choices=['planner','developer','tester','reviewer','verifier'], default='developer')
     inspect.add_argument("--budget-bytes", type=int, default=32000)
+    deliver = sub.add_parser("delivery", help="print the delivery report (DELIVERY.md) of a task, generated from the ledger")
+    deliver.add_argument("run_id")
+    deliver.add_argument("--smoke", action="store_true", help="also run the start-up check with the real entry point")
     for name in ("resume", "status", "events", "cancel", "report"):
         cmd = sub.add_parser(name)
         cmd.add_argument("run_id")
@@ -93,6 +104,28 @@ def _lang_command(args) -> int:
     return 0 if all(ok for _, ok, _ in results) else 1
 
 
+def _executor(args):
+    """受控运行器；语言的工具链缺失只影响那种语言。 The controlled runner; a missing language toolchain only affects that language."""
+    return Runner(args.runner, args.go if args.go.is_file() else None)
+
+
+def _ops_command(args) -> int:
+    """masa ops status | pending | events | stop-all：用固定的运维令牌（状态目录里的 ops.json）调用本机服务的 /api/ops。 Calls the local service's /api/ops with the stable ops token from ops.json."""
+    import urllib.request
+    from masa.application.ops import EventSink
+    token = EventSink(args.state_dir.resolve()).config()["token"]
+    path = {"status": "/api/ops/status", "pending": "/api/ops/pending", "events": f"/api/ops/events?since={args.since}", "stop-all": "/api/ops/stop-all"}[args.ops_command]
+    body = json.dumps({}).encode() if args.ops_command == "stop-all" else None
+    request = urllib.request.Request(f"http://127.0.0.1:{args.port}{path}", data=body, headers={"X-MASA-Ops-Token": token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            print(json.dumps(json.loads(response.read()), ensure_ascii=False, indent=2))
+    except OSError as exc:
+        print(f"cannot reach the service on port {args.port}: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     """装配应用并输出可诊断结果。 Compose the application and return diagnostic results."""
     args = parser().parse_args(argv)
@@ -105,6 +138,11 @@ def main(argv=None) -> int:
             serve(args.state_dir, args.runner, args.go, PROJECT, args.port, origins,
                   bind=args.bind, hosts=tuple(args.host or env_list("MASA_ALLOWED_HOSTS")), static_dir=args.static_dir, demo=args.demo)
             return 0
+        if args.command == "ops":
+            return _ops_command(args)
+        if args.command == "watch":
+            from masa.interfaces import watchdog
+            return watchdog.run(args.state_dir.resolve(), ["--port", str(args.port)], auto_resume=args.auto_resume, max_restarts=args.max_restarts)
         if args.command == "lang":
             return _lang_command(args)
         store = Store(args.state_dir)
@@ -122,7 +160,7 @@ def main(argv=None) -> int:
         if args.command in {"run", "resume"}:
             if args.pause_after < 0:
                 raise MasaError("pause-after must not be negative")
-            runtime = Runtime(store, Runner(args.runner, args.go if args.go.is_file() else None))  # 语言的工具链缺失只影响那种语言 / a missing language toolchain only affects that language
+            runtime = Runtime(store, _executor(args))  # 语言的工具链缺失只影响那种语言 / a missing language toolchain only affects that language
             if args.command == "run":
                 language = args.language or registry.default_id()
                 if args.operation and args.operation not in registry.get(language).operation_ids():
@@ -150,6 +188,14 @@ def main(argv=None) -> int:
             print("Cancellation requested; active runtime will stop the tool, or resume will observe it.")
         elif args.command == "report":
             print(render(store, args.run_id), end="")
+        elif args.command == "delivery":
+            from masa.application import delivery
+            data = delivery.build(store, args.run_id, _executor(args) if args.smoke else None, run_smoke=args.smoke)
+            print(delivery.render(data), end="")
+            problems = delivery.check_consistency(store, data)
+            if problems:
+                print(chr(10) + "REPORT/LEDGER MISMATCH: " + "; ".join(problems), file=sys.stderr)
+                return 1
         elif args.command == "events":
             store.run(args.run_id)
             print(json.dumps(store.events(args.run_id), ensure_ascii=False, indent=2))

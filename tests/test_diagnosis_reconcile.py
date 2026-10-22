@@ -29,8 +29,9 @@ class ValidateTests(unittest.TestCase):
         for bad in ([{'case': 'a'}], [check('a', 'yes')], [check('a', True)] * 9, 'x'):
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(MasaError):
                 validate_diagnosis(verdict('implementation', bad))
-        with self.assertRaises(MasaError):
-            validate_diagnosis(verdict('implementation', [check('a', True, says='x' * 301)]))
+        # H4：超长文本只截断，不再整条拒绝（真实运行里 Pro 的诊断因 requirement_says 超过 300 字符被丢弃，白花一次调用）。 H4: overlong text is truncated, no longer rejected whole.
+        kept = validate_diagnosis(verdict('implementation', [check('a', True, says='x' * 301)]))
+        self.assertEqual(len(kept['expectation_checks'][0]['requirement_says']), 300)
 
     def test_the_schema_makes_the_model_state_the_requirement_before_the_verdict(self):
         schema = response_schema({'purpose': 'project_diagnoser'})

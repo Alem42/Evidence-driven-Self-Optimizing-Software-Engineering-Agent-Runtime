@@ -5,7 +5,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from masa.application.checks.snippets import source_snippets
-from masa.domain.models import MasaError
+from masa.domain.models import ExpectationSuspected, MasaError
 
 MAX_FILE_BYTES = 60000
 MAX_RESULT_CHARS = 2800  # 回给模型的单次工具结果上限 / cap on one tool result shown to the model
@@ -61,6 +61,9 @@ class WorkerWorkspace:
         self.passed = set()  # 自上次修改以来通过的检查种类 / check kinds that passed since the last change
         self.failed_check = None  # 上一次失败检查的种类；自那以后没改过文件才有值 / the kind of the last failing check, kept only while nothing was changed since
         self.last_tool = None  # 上一个动作的工具名 / the tool of the previous action
+        self.edits = 0  # 已成功写入的次数 / how many writes succeeded
+        self.edit_marks = []  # 每次失败检查当时的写入次数（与 exact 平行）：判断“实际值没变”之间到底改过几次 / the write count at every failing check (parallel to exact): how often the code changed between two observations
+        self.last_referee = None  # 最近一次断言裁判的逐条结论 / the referee's latest per-case verdicts
         self.exact = []  # 每次失败检查的逐字消息（不抹掉数字）：判断“实际值一点没变” / the verbatim messages of every failing check (digits kept): to tell that the actual value did not change at all
         self.signatures = []  # 每次失败检查的签名 / the signature of every failing check
         self.refused = 0  # 连续被拒绝/无意义的动作数 / refused or pointless actions in a row
@@ -126,6 +129,10 @@ class WorkerWorkspace:
             return [t for t in everything if t != 'finish']
         return everything
 
+    def actual_stable(self):
+        """信号 S1：同一批失败断言的实际值连续 3 次观察完全相同，其间代码至少改过 2 次。 Signal S1: identical actual values in 3 observations in a row with at least 2 code changes in between."""
+        return len(self.exact) >= 3 and self.exact[-1] == self.exact[-2] == self.exact[-3] and self.edit_marks[-1] - self.edit_marks[-3] >= 2
+
     def can_recall(self):
         return bool(self.memory is not None and self.memory.recall and len(self.history) > self.memory.keep)
 
@@ -181,6 +188,7 @@ class WorkerWorkspace:
             return {'ok': False, 'text': f'{path} already has exactly this content: change something, run_check, or finish'}
         self.files[path] = candidate[path]
         self.changed = True
+        self.edits += 1
         self.passed.clear()
         problems = self.generation._syntax_errors(self.files, [path], self.spec)
         text = f'wrote {path} ({len(self.files[path])} characters)'
@@ -251,6 +259,7 @@ class WorkerWorkspace:
         verbatim = tuple(sorted(f"{i['path']}|{i['message']}" for i in own))
         unchanged = bool(self.exact) and self.exact[-1] == verbatim
         self.exact.append(verbatim)
+        self.edit_marks.append(self.edits)
         needs = unmet_dependencies(self.pack, self.spec, self.files, own) - {self.directory}
         if needs and not (needs & self.sealed_dirs) and self.can_defer(needs):
             raise Defer(needs)
@@ -270,7 +279,9 @@ class WorkerWorkspace:
             # 真实运行（grades）：测试里的期望值算错了（89*7+92 写成 91.125），工人五次尝试都只改实现，实际值一点没变。
             # Real run (grades): the test's expected value was computed wrongly (89*7+92 written as 91.125) and the worker changed only the implementation in five attempts while the actual value never moved.
             text += chr(10) + 'The ACTUAL value is exactly the same as in the previous check although you changed code, so your code changes have no effect on this assertion. Recompute the EXPECTED value by hand from the inputs of that test and the acceptance criteria (write the arithmetic in a note). If the expectation is wrong, fix the TEST (it is your file).'
-        if (unchanged or repeated) and self.arbiter and not self.repair and self.arbitrations < MAX_ARBITRATIONS and any(i['kind'] == 'assertion' for i in own):
+        # 触发：生成时沿用“同一断言重复失败”；修复时用信号 S1“实际值稳定”——同一批断言的实际值连续 3 次观察完全相同，其间代码改过至少 2 次（改了代码，输出却一点没变）。
+        # Trigger: when generating, "the same assertion failed again"; when repairing, signal S1 "the actual value is stable" - the actual values of the same assertions were identical in 3 observations in a row although the code changed at least twice in between.
+        if (self.actual_stable() if self.repair else (unchanged or repeated)) and self.arbiter and self.arbitrations < MAX_ARBITRATIONS and any(i['kind'] == 'assertion' for i in own):
             # 同一个断言一再失败：工人自己判断不了是测试错还是实现错（真实运行里 5 次尝试都在改对的那一边）。让独立的裁判在打乱成 A/B 的两个值里选，结论放在结果最前面。
             # The same assertion keeps failing and the worker cannot tell which side is wrong (in a real run five attempts kept changing the correct side): an independent referee chooses between the two values shuffled into A/B, the verdict goes first in the result.
             self.arbitrations += 1
@@ -278,6 +289,11 @@ class WorkerWorkspace:
             if verdict:
                 self.verdicts.append(verdict)
                 text = verdict + chr(10) + text
+                votes = [v['verdict'] for v in (self.last_referee or {}).values()]
+                if self.repair and 'test_wrong' in votes and 'implementation_wrong' not in votes:
+                    # 裁判认为测试期望错了：继续改实现只会把实现带歪（真实运行里工人为迎合错测试加了 TrimRight）。冻结的测试由工作流转去修订。
+                    # The referee judges the expectation wrong: more implementation edits only bend the code to a wrong test (in a real run the worker added TrimRight to please it). The workflow revises the frozen tests instead.
+                    raise ExpectationSuspected('repair cannot change tests: the independent referee judged the test expectation wrong while the actual value stayed the same', verdict)
         if repeated:
             text += chr(10) + 'WARNING: this is the same problem as the previous check, so your last change did not fix it. Do something different: re-read the failing assertion against the acceptance criteria and the examples.'
         return {'ok': False, 'text': text[:MAX_RESULT_CHARS], 'signature': sig, 'repeated': repeated, 'problems': len(own)}

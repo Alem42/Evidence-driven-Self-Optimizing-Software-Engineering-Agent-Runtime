@@ -5,13 +5,13 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
-import sqlite3
 import socket
 import os
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from masa.domain.models import MasaError
 from masa.application.console import Console
+from masa.application.ops import Ops, OpsMonitor
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure import capability
 
@@ -38,6 +38,13 @@ DEMO_GET = ('/api/session', '/api/bootstrap', '/api/languages', '/api/projects',
             '/api/workflows', '/api/bench/tasks', '/api/bench/status', '/api/bench/results')
 DEMO_POST = ('/api/triage',)  # 确定性规则预检，不调用任何模型 / deterministic pre-check, calls no model
 DEMO_MESSAGE = '演示模式（只读）：这个部署只用于展示，不能发起或修改任务。 This deployment is a read-only demo.'
+
+
+def ops_of(console):
+    """控制台的运维层（懒创建，测试里直接用 make_server 也能用）。 The console's operations layer, created lazily."""
+    if getattr(console, 'ops', None) is None:
+        console.ops = Ops(console)
+    return console.ops
 
 
 def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1', hosts=(), static_dir=None, demo=False):
@@ -89,7 +96,13 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                 return False
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 return False
-            return not api or secrets.compare_digest(self.headers.get("X-MASA-Token", "").encode(), token.encode())
+            if not api:
+                return True
+            if secrets.compare_digest(self.headers.get("X-MASA-Token", "").encode(), token.encode()):
+                return True
+            # 外部程序（看门狗、手机通知）只能用固定的运维令牌访问 /api/ops/*，且只在本机文件 ops.json 里。 External programs (watchdog, phone notifications) may reach /api/ops/* with the stable ops token kept in the local ops.json only.
+            ops_token = self.headers.get("X-MASA-Ops-Token", "")
+            return bool(ops_token) and urlsplit(self.path).path.startswith("/api/ops/") and secrets.compare_digest(ops_token.encode(), ops_of(console).sink.config()["token"].encode())
 
         def do_OPTIONS(self):
             """CORS 预检：只对白名单来源放行。 CORS preflight, allowed origins only."""
@@ -185,6 +198,10 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     result = console.projects()
                 elif len(parts)==4 and parts[:2]==['api','projects'] and parts[3]=='report' and not write:
                     result = console.project_report(parts[2])
+                elif len(parts)==4 and parts[:2]==['api','projects'] and parts[3]=='delivery' and not write:
+                    result = console.delivery(parts[2])
+                elif len(parts)==4 and parts[:2]==['api','projects'] and parts[3]=='delivery' and write:
+                    result = console.delivery(parts[2], smoke=bool(body.get('smoke')))
                 elif len(parts)==3 and parts[:2]==['api','projects'] and not write:
                     result = console.projects(parts[2])
                 elif path == "/api/settings":
@@ -248,6 +265,19 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     result = console.bench_start(body)
                 elif path == '/api/bench/stop' and write:
                     result = console.bench_stop()
+                elif path == '/api/ops/status' and not write:
+                    result = ops_of(console).status()
+                elif path == '/api/ops/pending' and not write:
+                    result = {'pending': ops_of(console).pending()}
+                elif path == '/api/ops/events' and not write:
+                    query = parse_qs(urlsplit(self.path).query)
+                    result = {'events': ops_of(console).sink.events(int((query.get('since') or ['0'])[0] or 0), int((query.get('limit') or ['200'])[0] or 200))}
+                elif path == '/api/ops/resolve' and write:
+                    result = ops_of(console).resolve(body)
+                elif path == '/api/ops/stop-all' and write:
+                    result = ops_of(console).stop_all()
+                elif path == '/api/ops/config':
+                    result = ops_of(console).sink.save_config(body) if write else ops_of(console).sink.config()
                 elif path == '/api/hardware' and not write:
                     result = console.hardware.snapshot()
                 elif path == '/api/diagnostics' and not write:
@@ -357,8 +387,12 @@ def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS, *,
         print("local models: " + ("enabled" if state["allowed"] else "DISABLED") + f" ({state['reason']}; GPU {state['vram_gb']} GB, RAM {state['ram_gb']} GB)")
         console = Console(state_dir, runner, go, project)
         server = None
+        monitor = None
         try:
             server = make_server(console, port, origins, bind=bind, hosts=hosts, static_dir=static_dir, demo=demo)
+            if not demo:  # 状态变化 → 事件流 / webhook；演示部署不需要 / state changes become events and webhooks; a demo needs none
+                monitor = OpsMonitor(ops_of(console))
+                monitor.start()
             url = f"http://{bind}:{server.server_port}"
             print(f"MASA API: {url}\nAllowed frontend origins: {', '.join(sorted(origins))}", flush=True)
             if bind in ("127.0.0.1", "localhost", "::1"):
@@ -373,6 +407,8 @@ def serve(state_dir, runner, go, project, port=8765, origins=DEFAULT_ORIGINS, *,
             # 端口绑定或 server_close 失败，也必须关闭 Console，再由 OS 释放锁。
             # Close Console even after bind/server-close failures, then release the OS lock.
             try:
+                if monitor is not None:
+                    monitor.halt.set()
                 if server is not None:
                     server.server_close()
             finally:

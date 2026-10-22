@@ -91,6 +91,8 @@ class Router:
             provider = self.factory(self.entries[candidate_id])
             # 让账本层知道：这个任务允许重试免费本地调用的遗留请求。 Tell the role ledger this task may re-attempt orphaned free local calls.
             provider.retry_unknown_calls = bool(self.policy.get('retry_unknown_local'))
+            # 付费调用的不确定状态默认暂停等人处理；只有策略明确写了 retry 才允许发起新的一次付费尝试。 Uncertain paid calls pause by default; only an explicit `retry` policy allows a new paid attempt.
+            provider.retry_unknown_paid = self.policy.get('unknown_paid_calls') == 'retry'
             self._providers[candidate_id] = provider
         return self._providers[candidate_id]
 

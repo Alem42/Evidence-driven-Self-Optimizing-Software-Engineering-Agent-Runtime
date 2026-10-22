@@ -6,7 +6,7 @@ from masa.application.checks import ownership
 from masa.application.orchestration.flow import FlowEngine
 from masa.application.orchestration.workflows import FIX_V1
 from masa.runtime.roles import RoleRuntime
-from masa.domain.models import CallCancelled, MasaError, TransportFailure
+from masa.domain.models import CallCancelled, ExpectationSuspected, MasaError, TransportFailure
 from masa.application.orchestration.limits import NoChange, NoProgress, REWRITE_AFTER_STALLS, MAX_REWRITES
 import time
 from masa.application.checks import referee
@@ -30,7 +30,10 @@ class FixFlowMixin:
         bundle=store.read(store.run(verified)['data']['project_bundle']['approval_ref'])['files']
         need=[bundle,evidence[:20000]]
         self.job.pop('referee_text',None)
-        facts={'verified':verified,'draft':None,'halted':False,'noop':False,'noop_count':0,'diagnosed':False,'diagnosis':None,'analysis':analysis}
+        facts={'verified':verified,'draft':None,'halted':False,'noop':False,'noop_count':0,'diagnosed':False,'diagnosis':None,'analysis':analysis,
+               # 工人修复（v2repair）连续“卡住且没有改善”两次，就是同样的信息再来一遍：第三次不会有新东西，转去修订测试（真实 LCS 复跑：3 次卡住 ×3 步后才转，又多花约 1/5 的 token）。V1 默认流程仍是 3 次。
+               # A worker repair (v2repair) that got stuck without improvement twice is the same information again: a third try brings nothing new, revise the tests (a real LCS rerun spent three stuck attempts of three steps before flipping, about a fifth of its tokens). The V1 default flow keeps 3.
+               'noop_limit':2 if self.job['request'].get('runtime')=='v2repair' else 3}
 
         def classify(ctx):
             primary=analysis['primary']
@@ -87,6 +90,14 @@ class FixFlowMixin:
                 return {'noop':True,'halted':False,'noop_count':int(facts.get('noop_count',0))+1}
             except NoProgress as exc:
                 return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+            except ExpectationSuspected as exc:
+                # 信号 S1 + 独立裁判：实际值一点没变、裁判多数认为测试期望错了 → 立刻转去修订测试，并把裁判的证据写进修订指令（不再攒 noop 次数）。
+                # Signal S1 + the independent referee: the actual value did not move and the referee majority judged the expectation wrong -> revise the tests at once with the referee's evidence in the instructions (no waiting for noop counts).
+                if chain=='fix:implementation' and not facts.get('flipped'):
+                    self.job['referee_text']=exc.referee_text
+                    self._emit('repair_wants_tests',{'reason':str(exc)[:200],'signal':'stable_actual_value'},verified,always=True)
+                    return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
+                raise
             except MasaError as exc:
                 # 修复实现的模型一再想改冻结的测试/go.mod/文件结构（被校验拒绝）：说明它认为问题在测试里。别让整个任务失败，
                 # 按“最强模型不改实现”同样处理——转去修订测试一次（真实评测里 wc 因此失败过一次）。
@@ -113,7 +124,7 @@ class FixFlowMixin:
         def revise_tests(ctx):
             phase('test_revision',verified,attempt+1)
             base='Fix the recorded test-file errors, including any '+self.pack.ui().get('format_name','format')+' failure. Preserve behavioral assertions and requirements.'
-            flipped=not facts.get('flipped') and (facts.get('halt_kind')=='noop' or int(facts.get('noop_count',0))>=3)
+            flipped=not facts.get('flipped') and (facts.get('halt_kind')=='noop' or int(facts.get('noop_count',0))>=int(facts.get('noop_limit',3)))
             if flipped:
                 # 最强模型多次审视后认为实现无需改动：逐条重新手算期望值（字节数要把换行和多字节字符算进去），只改算错的期望。
                 # The strongest model reviewed the implementation repeatedly and changed nothing: recompute EVERY expected value by hand and change only the wrong ones.

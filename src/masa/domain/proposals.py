@@ -252,6 +252,20 @@ def validate_triage(action):
 DIAGNOSIS_OWNERS = ('implementation', 'test', 'both', 'spec', 'unclear')
 
 
+_DANGLING = re.compile(r'(?:[=:：]|\b(?:is|are|equals|of|the|a|an|to|with)|[是为])\s*$', re.I)
+
+
+def acceptance_problem(items):
+    """Planner 的验收条款是不是被截断了（以空白、冒号、等号、连接词结尾）：返回给 Planner 的重写说明，没问题返回 None。
+    真实运行（LCS）里第 2 条以“……最长公共子序列长度 ”结尾、没有数值，Tester 只好自己猜，三个期望全错。在 346 份历史规格的 2 505 条验收里只有这一条命中，没有误报。
+    Is a Planner acceptance item cut off (ends with whitespace, a colon, an equals sign or a connective)? Returns the rewrite instruction for the Planner, or None.
+    In a real run (LCS) item 2 ended with "...longest common subsequence length " without the value, the Tester had to guess and all three expectations were wrong. Of 2,505 items in 346 historical specs only this one is flagged: no false positive."""
+    for index, item in enumerate(items or []):
+        if isinstance(item, str) and (item != item.rstrip() or _DANGLING.search(item)):
+            return f'acceptance item {index} looks cut off (it ends with {item[-24:]!r}): rewrite every acceptance item as a complete sentence that states the concrete expected value or behaviour'
+    return None
+
+
 def validate_diagnosis(action):
     """Diagnoser 的结论：谁的问题 + 依据 + 给修复者的指导。它不能改文件，也不能放宽冻结边界；
     spec/unclear 表示需要人（需求矛盾或证据不足），由工作流确定性地停下。
@@ -266,9 +280,9 @@ def validate_diagnosis(action):
     out = {'owner': action['owner']}
     for key in ('rationale', 'implementation_instructions', 'test_instructions'):
         value = action[key]
-        if not isinstance(value, str) or len(value) > 2000 or '\x00' in value:
+        if not isinstance(value, str) or '\x00' in value:
             raise MasaError(f'invalid diagnosis {key}')
-        out[key] = value.strip()
+        out[key] = value.strip()[:2000]  # 太长只截断，不为啰嗦整条拒绝（真实运行里一次 Pro 诊断因此白花）/ truncate instead of rejecting a verbose but valid diagnosis (a real Pro call was wasted that way)
     out['expectation_checks'] = _expectation_checks(action.get('expectation_checks', []))
     if out['owner'] in ('implementation', 'both') and not out['implementation_instructions']:
         raise MasaError('an implementation diagnosis needs implementation_instructions')
@@ -288,9 +302,9 @@ def _expectation_checks(value):
             raise MasaError('invalid expectation check')
         entry = {'matches': item['matches']}
         for key in ('case', 'requirement_says', 'test_expects'):
-            if not isinstance(item[key], str) or len(item[key]) > 300 or chr(0) in item[key]:
+            if not isinstance(item[key], str) or chr(0) in item[key]:
                 raise MasaError('invalid expectation check text')
-            entry[key] = item[key].strip()
+            entry[key] = item[key].strip()[:300]  # 超长只截断 / truncated, not rejected
         out.append(entry)
     return out
 

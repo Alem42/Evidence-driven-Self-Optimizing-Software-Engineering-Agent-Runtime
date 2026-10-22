@@ -26,6 +26,8 @@ DEFAULT_POLICY = {
     # 免费本地调用：崩溃遗留或没收到响应时，等服务恢复后作为新尝试重试；付费云调用永远不自动重放。
     # Free local calls: re-attempted after a crash or when no response arrived. Paid cloud calls are never replayed.
     'retry_unknown_local': True,
+    # 付费调用结果未知（进程退出前请求可能已被远端受理）：pause = 暂停并进入“待处理”（默认）；retry = 明确允许发起新的一次付费尝试。 Uncertain paid calls: pause = wait in the pending queue (default); retry = explicitly allow a new paid attempt.
+    'unknown_paid_calls': 'pause',
     'diagnose': True,  # 修复前允许 Diagnoser 诊断 / allow the Diagnoser before fixing
     'diagnose_max': 2,  # 每个任务最多诊断几次 / diagnoses per task
     # 规格与测试决定后面一切（测试写坏了，再多轮“修实现”也无效），且 token 很少：用最高等级；代码实现由低等级起步、逐级上推。
@@ -301,6 +303,10 @@ def validate_policy(policy) -> dict:
             low, high = POLICY_BOUNDS[key]
             if type(value) is not int or not low <= value <= high:
                 raise MasaError(f'{key} must be an integer in {low}..{high}')
+            out[key] = value
+        elif key == 'unknown_paid_calls':
+            if value not in ('pause', 'retry'):
+                raise MasaError('unknown_paid_calls must be pause or retry')
             out[key] = value
         elif key == 'memory_strategy':
             from masa.application.v2.memory import CHOICES

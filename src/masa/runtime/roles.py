@@ -61,7 +61,7 @@ class RoleRuntime:
             run = self.store.run(rid)
             if run['cancel_requested'] or run['status']=='cancelled' or time.time() >= run['data']['deadline_at']:
                 raise MasaError('role run cancelled or deadline expired')
-            retry_same = False
+            retry_same = paid_retry = False
             row = self.store.db.execute('SELECT * FROM role_invocations WHERE run_id=? AND purpose=? AND invocation_id=?', (rid,purpose,invocation_id)).fetchone()
             if row:
                 if row['input_ref'] != context_ref or row['route_ref'] != route_ref:
@@ -71,7 +71,13 @@ class RoleRuntime:
                 # 免费本地调用：请求遗留（进程崩溃）或没有收到响应（服务被杀）时，可以作为同一次调用的新尝试重试；
                 # 付费云调用与已收到响应的失败仍然拒绝。 Free local calls may be re-attempted; paid calls and received failures may not.
                 if not self._free_retry(rid, purpose, invocation_id, row, provider):
-                    raise MasaError('role call '+row['status']+': result unavailable; create an explicit retry revision')
+                    # 不确定的付费调用：请求可能已被远端受理而本地没收到结果，进程退出前后的真实状态无法凭空确定。默认暂停（待处理）；只有显式允许才发起新的一次付费尝试：
+                    # 策略 unknown_paid_calls = retry，或有人在待处理队列里对这一次调用选了 retry（账本里有 uncertain_call_resolved 事件）。
+                    # An uncertain paid call: the provider may have accepted the request while no result reached us, and the real state cannot be known. By default it pauses (pending); a new paid attempt is made only when explicitly allowed:
+                    # policy unknown_paid_calls = retry, or someone chose retry for this very call in the pending queue (an uncertain_call_resolved event in the ledger).
+                    if not self._paid_retry(rid, purpose, invocation_id, row, provider):
+                        raise MasaError('role call '+row['status']+': result unavailable; resolve it in the pending queue (retry) or create an explicit retry revision')
+                    paid_retry = True
                 retry_same = True
             previous=self.store.db.execute('SELECT * FROM role_invocations WHERE run_id=? AND purpose=? ORDER BY attempt_no DESC LIMIT 1',(rid,purpose)).fetchone()
             if not retry_same:
@@ -95,9 +101,14 @@ class RoleRuntime:
                 if retry_same:
                     # 同一次逻辑调用的新尝试：不再占用调用次数预算，旧尝试在事件里标记为被放弃。
                     # A new attempt of the same logical call: no extra budget; the old attempt is marked abandoned in the events.
-                    if row['status'] == 'running':
+                    if paid_retry:
+                        # 付费的新尝试是一次真实的第二次请求：占用调用次数预算。 A paid re-attempt is a real second request: it uses the call budget.
+                        if run['model_calls'] >= run['data']['budget']['model_calls']:
+                            raise MasaError('model_call_budget_exhausted')
+                        self.store.db.execute('UPDATE runs SET model_calls=model_calls+1 WHERE id=?',(rid,))
+                    if row['status'] == 'running' or paid_retry:
                         self.store._event(rid,'model_abandoned',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':row['attempt_no'],
-                                                                 'reason':'process died or request lost; local call retried'})
+                                                                 'reason':'explicit retry of an uncertain paid call' if paid_retry else 'process died or request lost; local call retried'})
                     self.store.db.execute("UPDATE role_invocations SET attempt_no=?,status='running',output_ref=NULL,started=?,finished=NULL WHERE run_id=? AND purpose=? AND invocation_id=?",
                                           (attempt_no,time.time(),rid,purpose,invocation_id))
                 else:
@@ -147,6 +158,31 @@ class RoleRuntime:
             if latest['cancel_requested'] or latest['status']=='cancelled' or time.time()>=latest['data']['deadline_at']:
                 raise MasaError('role run cancelled or deadline expired; completed response preserved')
             return output
+
+    def _unanswered(self, rid, purpose, invocation_id, row):
+        """这条调用确实没有拿到响应：进程崩溃遗留的 running，或最后一次失败是传输失败。已收到响应但被拒绝的失败不在此列（那是已知结果）。
+        The call really got no response: a running row left by a crash, or a last failure that was a transport failure. A failure after a received response is a known outcome and does not count."""
+        if row['status'] == 'running':
+            return True
+        if row['status'] != 'failed':
+            return False
+        last = [e for e in self.store.events(rid) if e['type'] == 'model_failed'
+                and e['payload'].get('step_id') == purpose and e['payload'].get('invocation_id') == invocation_id]
+        return bool(last) and last[-1]['payload'].get('transport') is True
+
+    def _paid_retry(self, rid, purpose, invocation_id, row, provider):
+        """付费调用能否作为新尝试重发：没拿到响应，并且被明确允许——策略 unknown_paid_calls = retry，或这一次调用有尚未用掉的 retry 决定。
+        May a paid call be sent again: it got no response AND it is explicitly allowed - policy unknown_paid_calls = retry, or an unused retry decision exists for this very call."""
+        if not self._unanswered(rid, purpose, invocation_id, row):
+            return False
+        if getattr(provider, 'retry_unknown_paid', False):
+            return True
+        events = self.store.events(rid)
+        granted = sum(1 for e in events if e['type'] == 'uncertain_call_resolved' and e['payload'].get('action') == 'retry'
+                      and e['payload'].get('step_id') == purpose and e['payload'].get('invocation_id') == invocation_id)
+        used = sum(1 for e in events if e['type'] == 'model_abandoned' and e['payload'].get('step_id') == purpose and e['payload'].get('invocation_id') == invocation_id
+                   and str(e['payload'].get('reason', '')).startswith('explicit retry'))
+        return granted > used
 
     def _free_retry(self, rid, purpose, invocation_id, row, provider):
         """这条未完成的调用能否作为新尝试自动重试：必须是免费的本地模型、策略允许，并且调用确实没有拿到响应

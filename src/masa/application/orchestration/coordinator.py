@@ -7,7 +7,7 @@ from masa.application.orchestration.router import Router, RoutingStop
 from masa.application.checks import ownership
 from masa.languages.registry import registry as languages
 from masa.runtime.engine import Runtime
-from masa.domain.models import ContextOverflow, MasaError, TransportFailure
+from masa.domain.models import ContextOverflow, ExpectationSuspected, MasaError, TransportFailure
 from masa.application.orchestration.limits import NoChange, NoProgress, BASE_ROUNDS, MAX_PROGRESS_BONUS, REWRITE_AFTER_STALLS, MAX_REWRITES  # noqa: F401 (re-exported)
 import time
 from masa.application.orchestration.fixflow import FixFlowMixin
@@ -168,6 +168,9 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
                     raise NoChange('the fix changed nothing')
                 if chain.startswith('fix'):self.job['noop_streak']=0
                 return value
+            except ExpectationSuspected:
+                if chain.startswith('fix'):self.job['pending_fix']=None  # 不是模型的失败：测试的期望被裁判判错 / not the model's failure: the referee judged the test expectation wrong
+                raise
             except (RoutingStop,NoChange):
                 raise  # 由工作流决定下一步 / the workflow decides what next
             except TransportFailure:

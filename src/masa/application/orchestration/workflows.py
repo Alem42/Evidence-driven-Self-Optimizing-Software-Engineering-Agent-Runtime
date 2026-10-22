@@ -106,7 +106,7 @@ def _noop_diagnose(facts, params):
 
 @guard('noop_retry')
 def _noop_retry(facts, params):
-    return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) < 3
+    return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) < int(facts.get('noop_limit', 3))
 
 
 @guard('flip_to_tests')
@@ -116,7 +116,7 @@ def _flip_to_tests(facts, params):
     if facts.get('halted') and facts.get('halt_kind') == 'noop':
         return True
     # 重试次数用尽且 Diagnoser 已看过（或不可用）：同样视为“实现没错”。 Retries exhausted and the Diagnoser already looked (or is unavailable): same conclusion.
-    return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) >= 3 and (facts.get('diagnosed') or not facts.get('can_diagnose'))
+    return bool(facts.get('noop')) and int(facts.get('noop_count', 0)) >= int(facts.get('noop_limit', 3)) and (facts.get('diagnosed') or not facts.get('can_diagnose'))
 
 
 @guard('halted')

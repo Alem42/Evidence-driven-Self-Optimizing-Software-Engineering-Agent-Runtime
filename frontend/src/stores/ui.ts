@@ -14,7 +14,7 @@ interface UiState {
   treeWidth: number;
   /** 底部面板（输出 / 追踪 / 版本 / 报告）：默认折叠，点开才加载。 Bottom panel, collapsed by default and loaded only when opened. */
   bottomOpen: boolean;
-  bottomTab: 'output' | 'plan' | 'trace' | 'versions' | 'report';
+  bottomTab: 'output' | 'plan' | 'trace' | 'versions' | 'report' | 'delivery';
   bottomHeight: number;
   /** 流程带展开成完整图。 The flow strip expanded into the full graph. */
   flowExpanded: boolean;

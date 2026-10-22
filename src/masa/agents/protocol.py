@@ -123,7 +123,12 @@ def _validate_project_roles(context, action, key):
         # Extra top-level fields (a real run had acceptance_note) are never used: drop them instead of rejecting the whole spec. A missing field is a substantive error and is still rejected, naming what is missing.
         if isinstance(action, dict):
             action = {k: v for k, v in action.items() if k in ('summary', 'module', 'entrypoint', 'files', 'acceptance')}
-        return validate_spec(action, context.get('language'))
+        spec = validate_spec(action, context.get('language'))
+        from masa.domain.proposals import acceptance_problem
+        problem = acceptance_problem(spec['acceptance'])
+        if problem:
+            raise MasaError(problem)  # 被契约拒绝的 Planner 回答会带着这句原因重写一次 / a Planner answer rejected by the contract is rewritten once with this reason
+        return spec
     if context['purpose'] == 'project_developer':
         from masa.domain.proposals import validate_files, validate_file_proposal
         if set(action) != {'files'}:

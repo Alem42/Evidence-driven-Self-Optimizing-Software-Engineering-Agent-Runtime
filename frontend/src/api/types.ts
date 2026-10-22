@@ -609,3 +609,34 @@ export interface CallDetail {
   response: { chars: number; keys: string[] | null; preview: string } | null;
   error: string | null;
 }
+
+// ───────── 交付报告（/api/projects/:id/delivery）Delivery report ─────────
+export interface DeliveryAcceptance {
+  index: number;
+  text: string;
+  status: 'verified' | 'unverified' | 'failed';
+  evidence: { operation: string; step_id: string; exit_code: number | null; status: string }[];
+  cases: number;
+  strength: string | null;
+}
+export interface Delivery {
+  task: string;
+  outcome: string;
+  complete: boolean;
+  reason?: string;
+  gate_passed?: boolean;
+  language?: string;
+  files: string[];
+  acceptance: DeliveryAcceptance[];
+  assumptions: { source: string; text: string }[];
+  independent_evidence: { kind: string; data: unknown }[];
+  open_items: { kind: string; text: string }[];
+  how_to_run: string;
+  smoke: { executed: boolean; reason?: string; exit_code?: number | null; stdout?: string };
+  cost: { calls: number; cloud_tokens: number; local_tokens: number; cache_hit_rate: number | null; wall_seconds: number | null; failed_calls: number; human_interventions: number };
+}
+export interface DeliveryReport {
+  delivery: Delivery;
+  markdown: string;
+  inconsistencies: string[];
+}

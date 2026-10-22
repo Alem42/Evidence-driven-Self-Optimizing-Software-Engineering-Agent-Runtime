@@ -160,6 +160,14 @@ class JobsMixin:
                 for role in ('project_repair',)+(('project_developer',) if runtime=='v2' else ()):
                     start.setdefault(role,min(levels))
                 policy={**(policy or {}),'start_level_by_role':start}
+        if runtime in ('v2','v2repair'):
+            # 工人循环的记忆策略：按当前模型的有效窗口自动选一档（见 docs/design/AUTO_COMPACTION.md；真实 A/B：全程 V2 的 grades、bank 各 1 次，window 对 auto 都通过，输入 token −8% / −30%，方向性）。请求里显式给出的值不改。
+            # Memory strategy of the worker loops: a tier chosen automatically from the current model's effective window (real A/B, full V2, one run each on grades and bank: both pass with window and auto, input tokens -8% / -30%, directional). An explicit request value stays.
+            policy={'memory_strategy':'auto',**(policy if isinstance(policy,dict) else {})}
+        if runtime=='v2repair':
+            # “V1 生成 + 工人修复”默认开用例审计与断言裁判：它们是已测得有效的独立证据（配对评测里审计 更好5/更差0/平12；LCS 回放里审计 ¥0.002 抓到 2–3/3 个错用例），也是信号 S1 触发仲裁的前提。请求里显式给出的值不改。
+            # "V1 generation + worker repair" turns the case audit and the assertion referee on by default: independent evidence measured to work (paired audit 5 better / 0 worse / 12 equal; the LCS replay caught 2-3 of 3 wrong cases for 0.002 CNY) and the precondition for signal S1 to trigger arbitration. Explicit request values stay.
+            policy={'test_audit':True,'assertion_referee':True,**(policy if isinstance(policy,dict) else {})}
         return policy
 
     @staticmethod
