@@ -275,9 +275,6 @@ class PythonPack(LanguagePack):
             out.update(checks.entry_problem_messages(files, [entry], entry))
         return out
 
-    def declares(self, source, name):
-        return checks.declares(source, name)
-
     def samples(self):
         return {'syntax_error': ('a.py', 'def f(:' + chr(10))}
 

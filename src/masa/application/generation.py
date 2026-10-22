@@ -16,7 +16,6 @@ from masa.infrastructure.workspaces import verify_snapshot
 
 from masa.application.checks.snippets import source_snippets  # noqa: E402
 from masa.application.checks.leaks import leak_messages  # noqa: E402
-from masa.application.checks.contract import contract_problem_messages  # noqa: E402
 from masa.languages.registry import DEFAULT_LANGUAGE, registry  # noqa: E402
 
 
@@ -103,14 +102,13 @@ class ProjectGeneration:
         if leaked:
             raise MasaError('generated Go files contain harness prompt text (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(leaked.items())[:3]))
 
-    def _syntax_errors(self, files, paths, spec=None, contract=None):
-        """确定性的就地检查（不调用模型）：提示词泄漏 → 语言包的静态检查与契约 → 语言包的语法检查，返回 {路径: 给模型的说明}。工具链缺失时语法检查视为无错误。
-        Deterministic in-stage checks (no model): prompt leaks, the pack's static checks and the contract, then the pack's parse check; {path: instruction}. A missing toolchain means no parse errors."""
+    def _syntax_errors(self, files, paths, spec=None):
+        """确定性的就地检查（不调用模型）：提示词泄漏 → 语言包的静态检查 → 语言包的语法检查，返回 {路径: 给模型的说明}。工具链缺失时语法检查视为无错误。
+        Deterministic in-stage checks (no model): prompt leaks, the pack's static checks, then the pack's parse check; {path: instruction}. A missing toolchain means no parse errors."""
         found = dict(leak_messages(files, paths, pack=self.pack))  # 提示词泄漏不需要工具链 / prompt leaks need no toolchain
         # 导入了规格里不存在的内部包、空转的测试、读输入的入口：一定出问题，生成完就地重写。 An import of a package the spec lacks, vacuous tests, an entry that reads input: rewritten right after the write.
         static = self.pack.static_messages(files, paths, spec)
-        contract_messages = contract_problem_messages(files, paths, contract, [i['path'] for i in spec['files']], pack=self.pack) if (spec and contract) else {}
-        for path, message in {**static, **contract_messages}.items():
+        for path, message in static.items():
             found[path] = (found[path] + chr(10) if path in found else '') + message
         for path, message in self.pack.parse_errors(self.executor, files, paths).items():
             found[path] = (found[path] + chr(10) if path in found else '') + message
@@ -189,7 +187,7 @@ class ProjectGeneration:
             files = self._normalize(files, list(files), rid)
             # 语法错误的草稿不值得验证：直接让本阶段带精确诊断重试（云端单次生成走协调器的阶段重试/升级）。
             # A draft that does not even parse is not worth verifying: fail the stage with exact diagnostics so it is retried/escalated.
-            broken = self._syntax_errors(files, list(files), approved['spec'], approved.get('contract'))
+            broken = self._syntax_errors(files, list(files), approved['spec'])
             if broken:
                 raise MasaError('generated Go files do not parse (fix these first): ' + ' | '.join(f'{k}: {v}' for k, v in list(broken.items())[:3]))
             validate_files(files, approved['spec'], self.pack.id)
@@ -241,7 +239,7 @@ class ProjectGeneration:
             # Right after the write, with context still warm: rewrite on a parse error using line:column (free locally, deterministic).
             for retry in range(1, SYNTAX_RETRIES + 1):
                 candidate = self._normalize({**files, **generated}, [path], rid)
-                broken = self._syntax_errors(candidate, [path], spec, approved.get('contract'))
+                broken = self._syntax_errors(candidate, [path], spec)
                 if not broken:
                     break
                 again = dict(values, previous_attempt_error='The file you just wrote was rejected by deterministic checks (syntax, harness text, or tests that cannot fail). Fix exactly these problems and return the complete file again:' + chr(10) + broken[path])
@@ -251,7 +249,7 @@ class ProjectGeneration:
                 # 重写次数用完仍不合格：这些检查都只看本文件和规格，后面的文件改变不了结论——立刻失败，不要再生成剩下的文件（真实运行里 main.go 三轮都过不了，每轮白白多写 8 个文件，把 token 上限耗光）。
                 # Rewrites exhausted and still rejected: these checks look only at this file and the spec, later files cannot change the verdict - fail now instead of writing the remaining files
                 # (a real run's main.go failed three rounds in a row, each round writing 8 more files for nothing until the token limit was gone).
-                broken = self._syntax_errors(self._normalize({**files, **generated}, [path], rid), [path], spec, approved.get('contract'))
+                broken = self._syntax_errors(self._normalize({**files, **generated}, [path], rid), [path], spec)
                 if broken:
                     raise MasaError('generated Go files do not parse (fix these first): ' + f'{path}: {broken[path]}')
             files.update(generated)

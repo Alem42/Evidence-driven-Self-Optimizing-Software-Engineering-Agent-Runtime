@@ -1,7 +1,7 @@
-"""动态角色（指挥者）的真实对照评测：随机抽低等级任务，同一任务各跑一次“关”和“开”，用独立判官复核，费用有硬上限。
-Real A/B evaluation of the dynamic roles (conductor): draw low-level tasks at random, run each task once with the conductor OFF and once ON, re-check with the independent oracle, under a hard cost cap.
+"""评测对照的真实评测（臂见 ARMS）：随机抽低等级任务，同一任务各臂各跑一次，用独立判官复核，费用有硬上限。
+Real A/B evaluation of an evidence mechanism (arms in ARMS): draw low-level tasks at random, run each task once per arm, re-check with the independent oracle, under a hard cost cap.
 
-模型分工 / model split: 最上位（规划、测试、诊断、指挥者、怀疑者、审阅者）用 deepseek-v4-pro；耗 token 的生成与修复由 deepseek-flash 完成（路由器从最低等级起步）。
+模型分工 / model split: 最上位（规划、测试、诊断）用 deepseek-v4-pro；耗 token 的生成与修复由 deepseek-flash 完成（路由器从最低等级起步）。
 Top roles use deepseek-v4-pro; the token-heavy generation and repair run on deepseek-flash (the router starts at the lowest level).
 不动用户的设置：在 .masa/p2eval/ 里复制一份配置，禁用本地模型，写入价格用于费用上限。 The user's settings are untouched: a copy lives in .masa/p2eval/ with local models off and prices set for the cost cap.
 
@@ -24,13 +24,8 @@ from masa.bench.tasks import BY_ID, TASKS  # noqa: E402
 # 保守的价格（元 / 百万 token）：Pro 取高峰价（官方：未命中缓存输入 9、输出 27），Flash 取折合人民币的上沿。价格只用于费用上限的估算。
 # Conservative prices (yuan per million tokens): Pro at the peak rate, Flash at the upper end. They only drive the cost cap.
 PRICES = {'deepseek-v4-pro': (9.0, 27.0), 'deepseek-flash': (1.0, 4.0)}
-ARMS = {'off': {'policy': {}, 'drop_edges': []}, 'on': {'policy': {'conductor': True}, 'drop_edges': []},
-        'bon2': {'policy': {'best_of_n': 2}, 'drop_edges': []}, 'bon3': {'policy': {'best_of_n': 3}, 'drop_edges': []},
-        'audit': {'policy': {'test_audit': True}, 'drop_edges': []},
-        'contract': {'policy': {'package_contract': True}, 'drop_edges': []}, 'referee': {'policy': {'assertion_referee': True}, 'drop_edges': []},
-        'ctx': {'policy': {'context_budget': True}, 'drop_edges': []},
-        'full': {'policy': {'test_audit': True, 'package_contract': True, 'assertion_referee': True}, 'drop_edges': []},
-        'lib1': {'policy': {'library': 1}, 'drop_edges': []}, 'lib2': {'policy': {'library': 2}, 'drop_edges': []}}
+ARMS = {'off': {'policy': {}}, 'audit': {'policy': {'test_audit': True}}, 'referee': {'policy': {'assertion_referee': True}},
+        'ctx': {'policy': {'context_budget': True}}, 'full': {'policy': {'test_audit': True, 'assertion_referee': True}}}
 
 
 def prepare(source, folder):
@@ -68,15 +63,11 @@ def main():
     ap.add_argument('--only', help='指定任务（逗号分隔），不随机 / explicit tasks, no sampling')
     ap.add_argument('--state', type=Path, default=ROOT / '.masa')
     ap.add_argument('--name', default='p2eval')
-    ap.add_argument('--arms', default='off,on', help='只跑哪些组（逗号分隔） / which arms to run')
-    ap.add_argument('--saved-conductor', action='store_true', help='不用覆盖项，而是把 conductor 写进（副本的）路由设置，验证“设置页开关 → 实际流程”这条路 / set the conductor in the (copied) saved routing settings instead of an override')
+    ap.add_argument('--arms', default='off,audit', help='只跑哪些组（逗号分隔） / which arms to run')
     ap.add_argument('--round', type=int, default=1, help='第几轮重复（同一任务多次，看噪声） / repetition round, to see noise')
     args = ap.parse_args()
     folder = args.state / args.name
     ids = prepare(args.state, folder)
-    if args.saved_conductor:
-        from masa.infrastructure.settings import Settings
-        Settings(folder).save_routing({'policy': {'conductor': True}})
     pool = [t.id for t in TASKS if args.min_level <= t.level <= args.max_level]
     tasks = args.only.split(',') if args.only else random.Random(args.seed).sample(pool, min(args.tasks, len(pool)))
     print(f'抽到的任务 / tasks: {tasks}（池 {pool}，seed {args.seed}）；费用上限 {args.yuan} 元，单次 {args.per_run} 元', flush=True)

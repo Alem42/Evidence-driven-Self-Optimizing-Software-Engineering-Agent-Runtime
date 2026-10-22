@@ -249,10 +249,6 @@ class LanguagePack:
         """入口规则：{路径: 说明}。 The entrypoint rule: {path: explanation}."""
         return {}
 
-    def declares(self, source, name):
-        """包的源码里是否声明了这个导出名（契约检查用）。 Does the package source declare this exported name (contract check)?"""
-        return True
-
     def format_text(self, executor, text):
         """格式化一段源码；做不到返回 None。 Format one source text, or None."""
         return None
@@ -349,7 +345,7 @@ class LanguagePack:
         return source
 
     def internal_dirs(self, spec):
-        """契约要覆盖的“内部包”目录。 Directories the package contract covers."""
+        """项目里的“内部包”目录。 The project's internal package directories."""
         entry_dir = self.entrypoint(spec).rsplit('/', 1)[0] if '/' in self.entrypoint(spec) else ''
         return sorted({i['path'].rsplit('/', 1)[0] for i in spec['files'] if self.is_source(i['path']) and '/' in i['path'] and i['path'].rsplit('/', 1)[0] != entry_dir})
 

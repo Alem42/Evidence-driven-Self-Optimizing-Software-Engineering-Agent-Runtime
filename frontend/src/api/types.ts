@@ -380,15 +380,8 @@ export interface RoutingPolicy {
   max_escalations: number;
   planner_retries: number;
   start_level_by_role: Record<string, number>;
-  conductor?: boolean;
-  conductor_max_calls?: number;
-  conductor_cascade?: boolean;
-  best_of_n?: number;
   test_audit?: boolean;
-  library?: number;
   context_budget?: boolean;
-  package_contract?: boolean;
-  planner_examples?: boolean;
   assertion_referee?: boolean;
 }
 

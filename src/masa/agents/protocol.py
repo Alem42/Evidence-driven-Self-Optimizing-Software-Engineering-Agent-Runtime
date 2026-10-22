@@ -39,31 +39,11 @@ def _test_review_prompt(context):
         'Use null case_index for absent cases. Empty findings is allowed. No hidden reasoning or credentials. Use user language.')
 
 
-PLANNER_EXAMPLES_NOTE = (
-    ' EXAMPLES RULE (this run): add a top-level field "examples": 3 to 8 objects {"name":str,"args":[str],"stdin":str,"stdout":str,"exit_code":int}. They are the ONLY place where exact expected values live, and the tests and the implementation will be built from them. '
-    'Compute every stdout BY HAND from the goal and your acceptance items, byte for byte: write the final newline as \\n, write empty output as "". Cover: a normal case, empty input, a boundary case, the error path with its exit code, and EVERY convention you had to choose '
-    '(for example input whose last line has no trailing newline: show exactly what is printed). A rule must appear in exactly one place: summary is only the design rationale and implementation hints, never restate output formats, separators or conventions there; '
-    'acceptance states the rule in words, examples show it in bytes, and they must agree.')
-EXAMPLES_NOTE = (
-    ' The spec contains concrete "examples" (args, stdin, byte-exact stdout, exit code). They are authoritative: every exact expected value in a test must be one of them or follow directly from them and from spec.acceptance; '
-    'if your own belief about the behaviour contradicts an example, the example wins. ')
-TESTER_EXAMPLES_NOTE = (' The spec examples are added to the check plan automatically as cli cases: do NOT repeat them. Return only the additional cases (boundaries and error paths they do not cover); the plan keeps 16 cases at most including the examples.')
-TESTER_GUIDANCE_NOTE = (' The spec examples are NOT added to the check plan: they are guidance. Write your own cases (4..12) and make every expected value agree with them.')
-
-
 def _project_roles_prompt(context):
     """Planner / Tester / Developer / Repair / TestRevision 共用一套提示词，按 purpose 与上下文分支；这一族提示词属于语言包。示例相关的补充句只在功能打开时追加，所以默认提示词逐字节不变。
     These roles share one prompt family that branches on purpose and context; the family belongs to the language pack. The example-related sentences are appended only when the feature is on, so default prompts stay byte-identical."""
     from masa.languages.registry import registry as languages
     text = languages.for_run(context).project_prompt(context, DEFAULT_INSTRUCTION)
-    purpose = context.get('purpose')
-    if purpose == 'project_planner' and context.get('examples_required'):
-        text += PLANNER_EXAMPLES_NOTE
-    elif isinstance(context.get('spec'), dict) and context['spec'].get('examples'):
-        merged = context.get('examples_as_tests', True) if purpose == 'project_tester' else context.get('examples_as_tests')
-        if merged is None:  # 开发/修复上下文里看检查计划里有没有并入的示例用例 / for the development and repair contexts: are example cases in the check plan?
-            merged = any(str(case.get('name', '')).startswith('example: ') for check in (context.get('checks') or []) if isinstance(check, dict) for case in check.get('cases', []) if isinstance(case, dict))
-        text += EXAMPLES_NOTE + ((TESTER_EXAMPLES_NOTE if merged else TESTER_GUIDANCE_NOTE) if purpose == 'project_tester' else (' The examples are already part of the check plan as cli cases.' if merged else ''))
     return text
 
 
@@ -139,12 +119,10 @@ def _validate_project_roles(context, action, key):
         if action.get('kind')=='clarification_request' and context.get('clarification_allowed'):
             from masa.domain.clarification import validate_question
             return validate_question(action)
-        if context.get('examples_required') and 'examples' not in action:
-            raise MasaError('the spec must contain "examples": 3 to 8 byte-exact args/stdin -> stdout/exit_code examples')
         # 多出来的顶层字段（真实运行里的 acceptance_note）从不被使用：丢掉，不为它拒绝整个规格。缺字段是实质错误，照样由校验拒绝并说明缺什么。
         # Extra top-level fields (a real run had acceptance_note) are never used: drop them instead of rejecting the whole spec. A missing field is a substantive error and is still rejected, naming what is missing.
         if isinstance(action, dict):
-            action = {k: v for k, v in action.items() if k in ('summary', 'module', 'entrypoint', 'files', 'acceptance', 'examples')}
+            action = {k: v for k, v in action.items() if k in ('summary', 'module', 'entrypoint', 'files', 'acceptance')}
         return validate_spec(action, context.get('language'))
     if context['purpose'] == 'project_developer':
         from masa.domain.proposals import validate_files, validate_file_proposal

@@ -1,7 +1,7 @@
 """V1 与 V2（以及 Planner 示例开/关）的同预算配对对照：同一批任务、同一组模型、同样的单次费用上限，独立判官判定。
 Same-budget paired comparison of V1 vs V2 (and Planner examples on/off): the same tasks, the same models, the same per-run cost cap, judged by the independent oracle.
 
-臂 / arms:  v1 = 默认流程；v2 = 包工人循环；v1x / v2x = 同上 + Planner 示例（策略 planner_examples）。
+臂 / arms:  v1 = 默认流程；v2 = 包工人循环；v2r = V1 生成 + 工人修复；v2s = v2 + 旧的字母序提示排布。
 模型 / models: `--models flash` 只用云端 Flash；`--models flash+glm` 本地 glm-4.7-flash 起步、Flash 兜底并担任 Planner/Tester/Diagnoser（Pro 一律不用）。
 
 用法 / usage:  python scripts/eval/ab_eval.py --name ab1 --language python --only upper,fizz,sum --arms v1,v2,v1x,v2x --models flash+glm --yuan 2.0 --per-run 0.3 --round 1
@@ -22,9 +22,8 @@ from masa.infrastructure.store import Store  # noqa: E402
 
 PRICES = {'deepseek-flash': (1.0, 4.0)}  # 元/百万 token（输入, 输出）/ CNY per million tokens
 ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy': {}}, 'v2r': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}}},  # 修复的工人直接用 Flash（本地 glm 当不了工人）/ the repair workers start at Flash (the local glm cannot be a worker)
-        'v1x': {'runtime': 'v1', 'policy': {'planner_examples': True}}, 'v2x': {'runtime': 'v2', 'policy': {'planner_examples': True}},
         'v2s': {'runtime': 'v2', 'policy': {}, 'layout': 'sorted'},  # 与 v2 相同，只是提示用旧的字母序排布（缓存命中率对照）/ same as v2 but with the old alphabetical prompt layout (cache hit-rate comparison)
-        'v1y': {'runtime': 'v1', 'policy': {'planner_examples': True, 'examples_as_tests': False}}, 'v2y': {'runtime': 'v2', 'policy': {'planner_examples': True, 'examples_as_tests': False}}}
+}
 
 
 def prepare(source, folder, with_local):
@@ -112,7 +111,7 @@ def main():
                                      'total_minutes': args.minutes, 'total_cloud_tokens': 5_000_000, 'language': args.language, 'runtime': spec['runtime'],
                                      'per_run_scale': args.scale, 'max_model_calls': args.max_calls})
             policy = {**spec['policy'], **({'start_level_by_role': {**spec['policy'].get('start_level_by_role', {}), 'project_developer': args.start_level}} if args.start_level else {})}
-            config['overrides'] = {'policy': policy, 'drop_edges': []}
+            config['overrides'] = {'policy': policy}
             config['keep_state'] = True
             runner = BenchRunner(folder, ROOT / '.tools/bin/masa-runner.exe', ROOT / '.tools/go/bin/go.exe', ROOT, config)
             print(f'[{task} / {arm}] 开始 …', flush=True)

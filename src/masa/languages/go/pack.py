@@ -88,9 +88,6 @@ class GoPack(LanguagePack):
         from masa.languages.go.entrypoint import entry_problem_messages
         return entry_problem_messages(files, paths)
 
-    def declares(self, source, name):
-        return tooling.declares(source, name)
-
     def format_text(self, executor, text):
         return tooling.format_text(executor, text)
 
@@ -157,7 +154,7 @@ class GoPack(LanguagePack):
         return outline_go(source)
 
     def internal_dirs(self, spec):
-        """契约要覆盖的“内部包”目录：internal/ 下含 .go 文件的目录。 Directories the package contract covers: those under internal/ that hold .go files."""
+        """内部包目录：internal/ 下含 .go 文件的目录。 Internal package directories: those under internal/ that hold .go files."""
         return sorted({i['path'].rsplit('/', 1)[0] for i in spec['files'] if i['path'].endswith('.go') and i['path'].startswith('internal/') and '/' in i['path']})
 
     def planning_seed(self):

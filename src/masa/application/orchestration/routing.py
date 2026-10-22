@@ -33,29 +33,12 @@ DEFAULT_POLICY = {
     'prefer_highest_roles': list(registry.current().top_ids()),
     'stuck_after': 4,  # 同一失败签名连续出现几次（且已用过最高等级）就停下交给人 / stop after this many identical failure signatures
     'triage_model': True,  # 规划前让本地模型复核可行性（只告警，不拦截）/ local feasibility review before planning (warn only)
-    # 指挥者（默认关闭）：规则有歧义或补丁停滞时，让模型在候选步骤里选一个；非法提议回退到规则。cascade = 先用低等级，提议非法再升级。
-    # Conductor (off by default): on ambiguity or a stall the model picks one candidate step; an illegal proposal falls back to the rules. cascade = start low, escalate on an illegal proposal.
-    'conductor': False,
-    'conductor_max_calls': 6,
-    'conductor_cascade': False,
-    # 验证选择的多次尝试（默认关闭）：修复阶段每次生成 N 个候选，逐个真实验证，选最好的。1 = 关。 Verification-selected attempts (off by default): N candidates per repair, each really verified, the best wins. 1 = off.
-    'best_of_n': 1,
     # Tester 用例审计（默认关闭）：规划后让便宜的云端模型盲推导用例期望，丢弃多数认为可疑的用例。 Tester case audit (off by default): a cheap cloud model derives expectations blindly; suspect cases are dropped.
     'test_audit': False,
     # 规模自适应的分层上下文（默认关闭）：小任务原样全给；放不下窗口的大任务才把无关文件降级为轮廓。 Scale-adaptive tiered context (off by default): small tasks get everything; only a task that does not fit the window has unrelated files degraded to outlines.
     'context_budget': False,
-    # 多包项目的包间接口契约（默认关闭）：规格里至少 3 个内部包时，写代码之前先写结构化契约，Tester / Developer / Repair 都看到同一份。 Package interface contract (off by default) for projects with three or more internal packages.
-    'package_contract': False,
-    # Planner 示例（默认关闭）：Planner 额外写 3–8 个“参数/标准输入 → 逐字节标准输出/退出码”的示例，作为全项目唯一的精确期望来源；Tester 自动并入、Developer 以它为准，任务成功后再用真实程序核对一遍（只记录，不改变裁决）。
-    # Planner examples (off by default): the Planner also writes 3-8 byte-exact args/stdin -> stdout/exit-code examples as the project's single source of exact expectations; merged into the check plan, authoritative for the Developer, and re-checked against the real program after success (recorded only, never changes the verdict).
-    'planner_examples': False,
-    # Planner 示例的用法（仅在 planner_examples 打开时有意义）：true = 示例并入 Tester 的用例（测试套件变大、更严格）；false = 示例只作为 Developer/Repair 的权威参考与成功后的黑盒核对，不并入测试。
-    # How the examples are used (only meaningful with planner_examples): true = merged into the Tester's cases (a bigger, stricter suite); false = authoritative guidance for the Developer/Repair plus the post-success black-box check, not merged into the tests.
-    'examples_as_tests': True,
     # 断言裁判（默认关闭）：失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为独立证据交给 Diagnoser；并在“测试修订没改动失败断言”时给出明确提示。 Assertion referee (off by default).
     'assertion_referee': False,
-    # 经验库（默认关闭）：0 关 / 1 只记录失败签名与被验证有效的做法 / 2 再把命中的做法注入修复指令。 Experience library (off by default): 0 off / 1 record only / 2 also inject hits into repair instructions.
-    'library': 0,
     'transport_retries': 6,
     'transport_wait_seconds': 900,
 }
@@ -220,7 +203,7 @@ def route(role: str, chain: str, candidates: list[Candidate], history: list[dict
         # 某些角色可以从更高等级起步（例如 Planner/Tester 的输出短但影响大）；没有可用的就退回到任意等级。
         # Some roles may start higher (short but decisive outputs); fall back to any level when none is usable.
         start = policy.get('start_level_by_role', {}).get(role)
-        if role in policy.get('prefer_highest_roles', ()) and not (role == 'project_conductor' and policy.get('conductor_cascade')):
+        if role in policy.get('prefer_highest_roles', ()):
             start = top  # 诊断者：判断一次，值得用最强的模型 / the diagnoser judges once, so it is worth the strongest model
         c, why = (pick(lambda lv: lv >= start) if start is not None else (None, None))
         if not c:
@@ -276,8 +259,9 @@ SKIP_TEXT = {
 }
 
 
-POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'conductor_max_calls': (1, 12), 'best_of_n': (1, 5), 'library': (0, 2), 'transport_wait_seconds': (10, 86400)}
+POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
+RETIRED_POLICY_KEYS = frozenset({'conductor', 'conductor_max_calls', 'conductor_cascade', 'best_of_n', 'library', 'package_contract', 'planner_examples', 'examples_as_tests'})  # 2026-10 减法删除的开关 / switches removed in the 2026-10 pruning
 # 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
 # The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.
 ROLES = registry.current().routable_ids()
@@ -306,7 +290,7 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
-        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'conductor', 'conductor_cascade', 'test_audit', 'context_budget', 'package_contract', 'planner_examples', 'examples_as_tests', 'assertion_referee'):
+        elif key in ('retry_unknown_local', 'triage_model', 'diagnose', 'test_audit', 'context_budget', 'assertion_referee'):
             if type(value) is not bool:
                 raise MasaError(f'{key} must be true or false')
             out[key] = value
@@ -315,10 +299,8 @@ def validate_policy(policy) -> dict:
             if type(value) is not int or not low <= value <= high:
                 raise MasaError(f'{key} must be an integer in {low}..{high}')
             out[key] = value
+        elif key in RETIRED_POLICY_KEYS:
+            continue  # 已删除的实验开关：旧的保存设置里可能还有，接受并丢弃，不让整个设置加载失败 / a removed experimental switch that old saved settings may still carry: accepted and dropped so the settings still load
         else:
             raise MasaError(f'unknown policy field: {key}')
-    # 实验性的可选角色（指挥者、怀疑者、审阅者）只在 conductor 打开时才加入“直接用最高等级”的名单；默认策略与之前完全一致。
-    # The optional experimental roles join the start-at-top list only when `conductor` is on; the default policy is exactly what it was before.
-    if out['conductor']:
-        out['prefer_highest_roles'] = list(dict.fromkeys([*out['prefer_highest_roles'], *registry.current().optional_top_ids()]))
     return out

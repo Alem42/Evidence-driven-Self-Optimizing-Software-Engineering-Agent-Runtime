@@ -41,17 +41,15 @@ class BehaviourIsUnchangedTests(unittest.TestCase):
                 self.assertEqual(json.dumps(got, ensure_ascii=False), json.dumps(GOLDEN[name]['schema'], ensure_ascii=False))
 
     def test_the_sets_the_router_and_config_derive_equal_the_old_hard_coded_ones(self):
-        """P2 在后面追加了三个可选角色（指挥者、测试怀疑者、代码审阅者）：旧的 6 个角色的集合与顺序保持不变。
-        P2 appended three optional roles (conductor, test skeptic, code reviewer): the six legacy roles keep their set and order."""
+        """可路由的角色就是最初的 6 个（指挥者、测试怀疑者、代码审阅者三个可选角色已在 2026-10 删除）。
+        The routable roles are the original six (the three optional roles conductor, test skeptic and code reviewer were removed in 2026-10)."""
         current = registry.current()
         legacy = ('project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser')
-        optional = ('project_conductor', 'test_skeptic', 'code_reviewer')
-        self.assertEqual(current.routable_ids(), legacy + optional)
-        # 默认的“直接用最高等级”名单与 P1 之前逐项相同（可选角色不在其中），只有 conductor 打开时才加入。 The default start-at-top list equals the pre-P1 one; optional roles join only when `conductor` is on.
+        self.assertEqual(current.routable_ids(), legacy)
+        # 默认的“直接用最高等级”名单与 P1 之前逐项相同。 The default start-at-top list equals the pre-P1 one.
         self.assertEqual(list(current.top_ids()), ['project_planner', 'project_tester', 'project_test_revision', 'project_diagnoser'])
-        self.assertEqual(current.optional_top_ids(), optional)
         self.assertEqual(current.config_roles(), {'project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_test_reviewer',
-                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'workflow_tuner', 'expectation_deriver', 'expectation_auditor', 'case_deriver', 'case_judge', 'package_contract', 'assertion_referee', *optional})
+                                                  'project_triage', 'project_diagnoser', 'code_generation', 'verifier', 'expectation_deriver', 'expectation_auditor', 'case_deriver', 'case_judge', 'assertion_referee'})
         self.assertEqual(routing.DEFAULT_POLICY['prefer_highest_roles'], list(current.top_ids()))
 
     def test_every_registered_role_names_an_existing_validator_and_builder(self):
@@ -96,7 +94,7 @@ class LoadTimeValidationTests(unittest.TestCase):
             'bad id': {'id': 'Bad-Id'},
             'unknown field (typo)': {'descripton': 'x'},
             'empty label': {'label': ' '},
-            'description too long for the conductor': {'description': 'x' * 121},
+            'description too long': {'description': 'x' * 121},
             'order is not an int': {'order': '1'},
             'bad level': {'level': 'middle'},
             'routable not a bool': {'routable': 'yes'},
@@ -193,7 +191,7 @@ class PublicViewTests(unittest.TestCase):
     def test_the_public_metadata_never_contains_prompts_or_output_schemas(self):
         # /api/roles 返回它：给前端和指挥者看名字、描述、权限，不泄漏提示词全文。 It backs /api/roles: names, descriptions, permissions; never the prompt text.
         for item in registry.current().public():
-            self.assertEqual(set(item), {'id', 'label', 'description', 'order', 'level', 'routable', 'permissions', 'legacy', 'when'})
+            self.assertEqual(set(item), {'id', 'label', 'description', 'order', 'level', 'routable', 'permissions', 'legacy'})
         self.assertNotIn('Return exactly one JSON object', json.dumps(registry.current().public(), ensure_ascii=False))
 
     def test_the_order_is_by_the_order_field_so_the_ui_can_rely_on_it(self):

@@ -80,8 +80,7 @@ def resolve_config(body):
 def count_mechanisms(report, store, run_ids):
     """从账本事件里数出各个 runtime 机制被触发了几次——这是“改动有没有起作用”的直接证据。
     Count how often each runtime mechanism fired, straight from ledger events: direct evidence that a change is in effect."""
-    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0,
-              'conductor': 0, 'conductor_rejected': 0, 'skeptic': 0, 'code_review': 0}
+    counts = {'imports_fixed': 0, 'syntax_rewrites': 0, 'diagnosis': 0, 'reconciled': 0, 'rewrite': 0, 'rounds_extended': 0, 'noop': 0, 'flip_to_tests': 0}
     for item in report.get('process') or []:
         kind, data = item['kind'], item['data']
         if kind == 'imports_fixed':
@@ -93,10 +92,6 @@ def count_mechanisms(report, store, run_ids):
             counts['rewrite'] += 1
         elif kind == 'rounds_extended':
             counts['rounds_extended'] += 1
-        elif kind in ('conductor_rejected', 'skeptic_verdict', 'code_review'):
-            counts[{'conductor_rejected': 'conductor_rejected', 'skeptic_verdict': 'skeptic', 'code_review': 'code_review'}[kind]] += 1
-        elif kind == 'conductor_decided':
-            counts['conductor'] += 1
         elif kind == 'noop_revision':
             counts['noop'] += 1
         elif kind == 'workflow_node' and data.get('why') == 'flip_to_tests':
@@ -117,12 +112,14 @@ class BenchRunner:
         self.main_root = Path(main_root)
         self.runner_path, self.go_path, self.project = Path(runner_path), Path(go_path), Path(project)
         self.config = config
-        # 调优器的覆盖项（策略增量 + 要去掉的边）：只作用于这次评测的任务，从不写入用户的设置。构造时就校验，不合法立即报错。
-        # The tuner's overrides (policy delta + dropped edges): they apply to this benchmark's tasks only and never touch the user's settings; validated here so an illegal one fails at once.
+        # 评测臂的策略覆盖项：只作用于这次评测的任务，从不写入用户的设置。构造时就校验，不合法立即报错。
+        # The policy overrides of an evaluation arm: they apply to this benchmark's tasks only and never touch the user's settings; validated here so an illegal one fails at once.
         self.overrides = None
         if config.get('overrides'):
-            from masa.tuning import space
-            self.overrides = space.materialize(config['overrides'])
+            from masa.application.orchestration.routing import validate_policy
+            policy = dict(config['overrides'].get('policy') or {})
+            validate_policy(policy)
+            self.overrides = {'policy': policy}
         self.clock = clock
         self.on_change = on_change or (lambda state: None)
         self.run_task = run_task or self._run_task_for_real
@@ -253,7 +250,7 @@ class BenchRunner:
         # 有未通过的运行就保留这次评测的账本（否则失败的证据随临时目录一起消失，没法排查）；只留最近 3 份。
         # Keep the ledger when any run did not pass (otherwise the evidence of a failure vanishes with the scratch directory); keep only the newest 3.
         if self.config.get('keep_state'):
-            return  # 对照评测要事后翻账本（例如指挥者为什么被拒绝）：全部保留，不裁剪 / A/B evaluations inspect the ledger afterwards (e.g. why the conductor was rejected): keep everything
+            return  # 对照评测要事后翻账本（例如为什么某次修复被拒绝）：全部保留，不裁剪 / A/B evaluations inspect the ledger afterwards (e.g. why a repair was rejected): keep everything
         failed = any(r['status'] not in (PASS, SKIPPED) for r in self.records)
         if failed and not self.config.get('discard_state'):
             kept = sorted((p for p in self.scratch.parent.iterdir() if p.is_dir()), key=lambda p: p.name) if self.scratch.parent.exists() else []
@@ -292,7 +289,7 @@ class BenchRunner:
                            **({'max_cost': limits['cost']} if limits.get('cost') else {})}}
         if self.overrides and self.overrides['policy']:
             body['policy'] = self.overrides['policy']
-        job_id = console.start_autonomous_project_job(body, workflow=self.overrides['workflow'] if self.overrides else None)['job_id']
+        job_id = console.start_autonomous_project_job(body)['job_id']
         deadline = started + limits['seconds'] + 30  # 路由层按“活跃秒数”停，这里是不依赖它的硬性墙钟线 / hard wall clock independent of the routing budget
         timed_out = False
         polls = 0

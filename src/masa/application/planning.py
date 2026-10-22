@@ -1,5 +1,4 @@
 from masa.domain.proposals import text, validate_spec, validate_checks
-from masa.application.checks.contract import wanted as contract_wanted, validate_contract
 """项目规划契约与角色编排。 Project planning contracts and role orchestration."""
 
 import time
@@ -47,7 +46,7 @@ class ProjectPlanning:
             self.store.save_metadata(rid,'project_plan',plan,event,status=status,reason=reason)
 
     def generate(self, provider, goal, on_created=None, reuse=None, resume_id=None, retry_of=None, retry_feedback=None,
-                 triage=None, triage_provider=None, audit_provider=None, contract_provider=None, language=None, examples=False, examples_as_tests=True):
+                 triage=None, triage_provider=None, audit_provider=None, language=None):
         """Planner 先规划，Tester 只消费已校验规格；两次有界调用无工具执行。 Plan then design checks in two bounded calls without execution."""
         text(goal, 16000)
         # 语言：显式给出的优先；续跑/重试/复用沿用原运行的语言；否则默认语言。 Language: explicit first; resume/retry/reuse follow the original run; else the default language.
@@ -71,7 +70,7 @@ class ProjectPlanning:
                 old=self.store.run(retry_of)['data'].get('project_plan',{})
                 for key in ('clarification','clarification_id','clarification_answers','requirement_revision','triage'):
                     if key in old:plan[key]=old[key]
-            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0)+(1 if contract_provider is not None else 0), deadline_seconds=86400),
+            rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=4+(1 if triage_provider is not None else 0)+(2*AUDIT_SAMPLES if audit_provider is not None else 0), deadline_seconds=86400),
                                                            graph=harness_policy(pack.id), project_plan=plan, parent_run_id=reuse or retry_of, language=pack.id)
         if on_created:
             on_created(rid)
@@ -96,9 +95,6 @@ class ProjectPlanning:
                 self.store.event(rid,'planner_reused',{'spec_ref':old['spec_ref'],'parent_run_id':reuse})
             else:
                 values={'goal':goal}
-                if examples or plan.get('examples_required'):
-                    values['examples_required']=True  # Planner 示例（策略 planner_examples）/ Planner examples (policy planner_examples)
-                    plan['examples_required']=True
                 # 上一次响应已收到但被契约拒绝时，带着具体原因让模型修正一次。
                 # A received-but-rejected response is retried once with the concrete rejection reason.
                 if retry_feedback:values['previous_attempt_error']=str(retry_feedback)[:1000]
@@ -123,26 +119,10 @@ class ProjectPlanning:
             plan['spec_ref'] = self.store.put(spec)
             self.update(rid, plan, 'created', 'planner_proposed')
             tester_values = {'goal':goal, 'spec':spec}
-            if spec.get('examples') and not examples_as_tests:
-                tester_values['examples_as_tests'] = False  # 示例只作参考，不并入用例 / the examples are guidance only, not merged into the cases
-            # 多包项目的包间契约（策略 package_contract，默认关闭）：规格里至少有 3 个内部包才需要；失败就忽略契约，规划照常。 Package contract for multi-package projects (policy package_contract, off by default): wanted only with three or more internal packages; a failure ignores it and planning goes on.
-            if contract_provider is not None and contract_wanted(spec, pack):
-                try:
-                    contract = validate_contract(self.call(rid, contract_provider, 'package_contract', {'goal':goal, 'spec':spec}), spec, pack)
-                    plan['contract'] = contract
-                    tester_values['contract'] = contract
-                    self.store.event(rid, 'package_contract', {'packages': len(contract['packages']), 'exports': sum(len(p['exports']) for p in contract['packages']), 'rules': len(contract['rules'])})
-                except Exception as exc:
-                    self.store.event(rid, 'package_contract_failed', {'error': str(exc)[:200]})
             # 复用 Planner 结果重试 Tester 时，带上上次被拒绝的原因：否则上下文和第一次完全一样，同样的输出会连续被拒三次（评测里 hello 因此失败）。
             # When retrying the Tester on a reused plan, include why the last answer was rejected: otherwise the context is identical and the same answer is rejected three times (a benchmark task failed this way).
             if reuse and retry_feedback:tester_values['previous_attempt_error'] = str(retry_feedback)[:1000]
             checks = self.call(rid, provider, 'project_tester', tester_values)
-            # Planner 示例确定性地并入测试检查（放在最前面），模型不转抄 / the Planner's examples are merged into the test check deterministically (first), no model re-types them
-            from masa.domain.examples import merge_into_checks
-            checks = merge_into_checks(checks, spec, pack.op_id('test')) if examples_as_tests else checks
-            if spec.get('examples'):
-                self.store.event(rid, 'planner_examples', {'count': len(spec['examples']), 'names': [e['name'] for e in spec['examples']]})
             validate_checks(checks,spec,require_coverage=False,language=pack.id)
             if audit_provider is not None:
                 self._audit_cases(rid,audit_provider,goal,spec,checks,plan)
@@ -258,7 +238,6 @@ class ProjectPlanning:
                 raise MasaError('test plan review blocked: '+next(f['message'] for f in review['findings'] if f['severity']=='blocking'))
             plan['test_review']=review
             approval = {'spec':spec, 'checks':checks, 'graph':graph.to_dict()}
-            if plan.get('contract'):approval['contract'] = plan['contract']  # Developer / Repair 的上下文会带上同一份契约 / the Developer and Repair contexts carry the same contract
             plan.update(status='approved', approval_ref=self.store.put(approval))
             if body.get('review_mode')=='automatic':plan['review_mode']='automatic'
             # 状态和审批事件一起提交，不能形成部分批准。

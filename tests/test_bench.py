@@ -299,5 +299,54 @@ class RunnerTests(unittest.TestCase):
             load_result(Path('.'), '../etc')
 
 
+class OverrideTests(unittest.TestCase):
+    """评测臂的策略覆盖项：不合法的在构造时就失败；只作用于评测的任务；HTTP 请求带不进来。
+    Policy overrides of an evaluation arm: an illegal one fails at construction, it applies to the benchmark's tasks only, and an HTTP body cannot carry it."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_an_illegal_override_fails_when_the_runner_is_built(self):
+        config = {**resolve_config({'suite': 'canary'}), 'overrides': {'policy': {'max_escalations': 99}}}
+        with self.assertRaises(MasaError):
+            BenchRunner(self.root, 'r', 'g', self.root, config)
+
+    def test_overrides_become_the_policy_of_every_task_and_never_touch_settings(self):
+        resolved = {**resolve_config({'suite': 'canary'}), 'overrides': {'policy': {'test_audit': True}}}
+        runner = BenchRunner(self.root, 'r', 'g', self.root, resolved)
+        seen = {}
+
+        class Console:
+            root = self.root
+            settings = type('S', (), {'profiles': {'p': {}}})()
+            go_path = Path('g')
+
+            def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None):
+                seen.update(body=body)
+                return {'job_id': 'j'}
+
+            def project_job(self, job_id):
+                return {'status': 'failed', 'run_id': None, 'error': 'stop here'}
+
+            def _release_local_models(self):
+                pass
+        runner.console = Console()
+        task = next(iter(resolve_config({'suite': 'canary'})['task_ids']))
+        record = runner._run_task_for_real(BY_ID[task], 0, {'cloud_tokens': 1000, 'seconds': 60})
+        self.assertEqual(record['status'], 'error')
+        self.assertEqual(seen['body']['policy'], {'test_audit': True})
+        self.assertFalse((self.root / 'routing.json').exists())  # 用户的设置没被碰 / the user's settings are untouched
+
+    def test_the_http_body_cannot_carry_overrides_or_a_workflow(self):
+        config = resolve_config({'suite': 'canary', 'workflow': {'id': 'evil'}, 'overrides': {'policy': {'test_audit': True}}})
+        self.assertNotIn('workflow', config)
+        self.assertNotIn('overrides', config)
+
+    def test_no_overrides_means_the_legacy_call(self):
+        self.assertIsNone(BenchRunner(self.root, 'r', 'g', self.root, resolve_config({'suite': 'canary'})).overrides)
+
+
 if __name__ == '__main__':
     unittest.main()

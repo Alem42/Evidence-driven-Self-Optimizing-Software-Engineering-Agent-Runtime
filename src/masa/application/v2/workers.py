@@ -239,7 +239,7 @@ class WorkerWorkspace:
         self.files[path] = candidate[path]
         self.changed = True
         self.passed.clear()
-        problems = self.generation._syntax_errors(self.files, [path], self.spec, self.approved.get('contract'))
+        problems = self.generation._syntax_errors(self.files, [path], self.spec)
         text = f'wrote {path} ({len(self.files[path])} characters)'
         if path in problems:
             text += '. Quick local check found problems, fix them first:\n' + problems[path][:900]
@@ -532,7 +532,7 @@ class V2Generation(ProjectGeneration):
                    'own_files': [{'path': p, 'purpose': purposes.get(p, '')} for p in sorted(purposes)], 'files': workspace.own_view(),
                    'interfaces': workspace.interfaces(), 'last_results': results[-KEPT_RESULTS:], 'notes': workspace.notes,
                    'step': step, 'max_steps': max_steps, 'language_notes': self.pack.worker_notes(),
-                   **({'spec_examples': spec['examples']} if spec.get('examples') else {})}
+                   }
         context.update(self.pack.worker_context(spec))  # 语言包给的额外字段（例如模块路径与内部包导入路径） / extra fields from the language pack (e.g. module path and internal import paths)
         context.update(extra or {})
         allowed = workspace.allowed_tools()

@@ -133,7 +133,6 @@ class ChecksTests(unittest.TestCase):
         self.assertIn('def total(text): ...', outline)
         self.assertIn('def run(args, stdin, stdout, stderr): ...', outline)
         self.assertNotIn('sum(', outline)  # 函数体被去掉 / bodies are removed
-        self.assertTrue(checks.declares(APP, 'run') and not checks.declares(APP, 'missing'))
         source = checks.test_function_source({'tests/test_app.py': TEST}, 'test_app.py', 9)
         self.assertIn('def test_total', source)
         self.assertNotIn('def test_run', source)

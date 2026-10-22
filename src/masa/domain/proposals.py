@@ -19,7 +19,7 @@ def validate_spec(spec, language=None):
     """校验可移植目录与标准库 CLI 规格，不相信模型输出；语言相关的规则来自语言包。 Validate portable standard-library CLI specifications; language rules come from the pack."""
     pack = _pack(language)
     layout = pack.layout
-    # examples 是可选字段（Planner 示例，策略 planner_examples）：旧规格没有它，照样合法。 `examples` is optional (the Planner's examples, policy planner_examples): old specs without it stay valid.
+    # 旧的实验（Planner 示例，已删除）留在已保存规格里的 examples 字段仍然合法，但不再使用。 `examples` left in saved specs by the removed Planner-examples experiment stays valid and is ignored.
     if not isinstance(spec, dict) or set(spec) - {'examples'} != {'summary','module','entrypoint','files','acceptance'}:
         # 说清楚缺哪个、多哪个：模型据此才能在重试时改对（真实运行里三次规划各错一个字段，旧消息只有“字段无效”，规划失败）。
         # Say which field is missing or extra so the model can correct itself on the retry (in a real run three planning attempts each got one field wrong and the old message only said "invalid fields").
@@ -27,9 +27,6 @@ def validate_spec(spec, language=None):
             missing, extra = {'summary','module','entrypoint','files','acceptance'} - set(spec), set(spec) - {'summary','module','entrypoint','files','acceptance','examples'}
             raise MasaError('invalid ProjectSpec fields' + (f'; missing: {sorted(missing)}' if missing else '') + (f'; not allowed: {sorted(extra)}' if extra else '') + '. The spec has exactly: summary, module, entrypoint, files, acceptance')
         raise MasaError('invalid ProjectSpec fields')
-    if 'examples' in spec:
-        from masa.domain.examples import validate_examples
-        validate_examples(spec['examples'])
     text(spec['summary'])
     if not re.fullmatch(layout['module_regex'], text(spec['module'], 160)):
         raise MasaError(f'invalid {pack.title} module name')

@@ -347,14 +347,6 @@ def declared_names(source):
     return names
 
 
-def declares(source, name):
-    """契约检查：包的源码（可能是几个文件拼起来的）里是否声明了这个名字。 Contract check: does the package source (possibly several files joined) declare this name?"""
-    if name in declared_names(source):
-        return True
-    # 几个文件拼接后可能不是合法模块（例如 __future__ 位置）：退回逐行匹配 / joined files may not parse as one module: fall back to a line match
-    return bool(re.search(r'(?m)^(?:(?:async\s+)?def|class)\s+%s\b|^%s\s*[:=]' % (re.escape(name), re.escape(name)), source))
-
-
 def test_function_source(files, path, line, limit=1500):
     """失败行所在的测试函数源码；找不到返回空串。 The source of the test function holding the failing line; empty when not found."""
     for name, text in files.items():

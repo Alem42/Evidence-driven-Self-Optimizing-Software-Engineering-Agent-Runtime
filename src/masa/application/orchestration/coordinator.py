@@ -6,21 +6,16 @@ from masa.application.checks.check_policy import failure_signature, format_only,
 from masa.application.orchestration.router import Router, RoutingStop
 from masa.application.orchestration import attempts
 from masa.application.checks import ownership
-from masa.application.orchestration import conductor
-from masa.application.orchestration.flow import FlowEngine, GUARDS
-from masa.roles import registry
+from masa.application.orchestration.flow import FlowEngine
 from masa.languages.registry import registry as languages
 from masa.application.orchestration.workflows import FIX_V1
 from masa.application.checks.triage import assess
 from masa.runtime.engine import Runtime
 from masa.runtime.roles import RoleRuntime
 from masa.domain.models import CallCancelled, ContextOverflow, MasaError, TransportFailure
-import os
 import time
 
 from masa.application.checks import referee
-
-conductor.check_optional_roles()  # 可选角色的 when 引用的 guard 必须存在 / the guard named by an optional role's `when` must exist
 
 
 class NoChange(MasaError):
@@ -52,7 +47,6 @@ class WorkflowCoordinator:
         self.resuming=resuming
         self.checkpoint=WorkflowCheckpoint(job)
         self._deferred=[]  # 还没有锚点 run 时先缓存的事件 / events waiting for an anchor run
-        self._library_handle=None
         self.language=(job.get('request') or {}).get('language') or languages.default_id()  # 这个任务的语言（任务期间不变）/ the task's language, fixed for its lifetime
         self.pack=languages.for_run({'language':self.language})
 
@@ -240,69 +234,10 @@ class WorkflowCoordinator:
         if reject_noop and int(self.job.get('noop_streak',0))>0:
             raise NoProgress('the fix returned the files unchanged on every attempt, including the strongest available model')
 
-    def _check_examples(self, verified, runner):
-        """策略 planner_examples：成功之后用真实程序核对 Planner 的示例（只记录，永远不影响裁决，任何错误都被吞掉）。 Policy planner_examples: after success check the Planner's examples against the real program (recorded only, never affects the verdict, any error is swallowed)."""
-        if not (self._ladder and self.router.policy.get('planner_examples')):return
-        try:
-            from masa.application.checks.examples import check_examples
-            data=self.store.run(verified)['data']
-            spec=self.store.read(self.store.read(data['project_bundle']['approval_ref'])['spec_approval_ref'])['spec']
-            report=check_examples(self.store,runner,verified,spec)
-            if report:self.job['examples']={'total':report['total'],'passed':report['passed']}
-        except Exception:
-            pass
-
     def _stopped(self, stop, run_id):
         """路由决定停止：保留证据，任务以说明结束，而不是报错。 A routing stop ends the task with a note and keeps all evidence."""
         self._emit('task_stopped',{'reason':stop.reason,'detail':stop.detail},run_id)
         self.job.update(status='completed',result={'id':run_id},note=str(stop))
-
-    # ───────────── 主流程 / main flow ─────────────
-    # ───────────── 经验库（策略 library：0 关 / 1 只记录 / 2 记录并注入）/ experience library (policy `library`: 0 off / 1 record / 2 record and inject) ─────────────
-    def _library(self):
-        # 经验库已停用（2026-10-10，用户决定）：留出任务上命中 0 次，先做失败信息结构化再谈。代码保留在 intelligence/library.py，这里的接入点整体失效；
-        # 要重新启用，恢复下面注释掉的实现即可（策略键 library 仍被接受，但目前不起作用）。
-        # The experience library is switched off (2026-10-10, the user's call): 0 hits on held-out tasks; structure the failure information first. The code stays in intelligence/library.py and every hook here is inert;
-        # to re-enable, restore the commented implementation below (the policy key `library` is still accepted but currently does nothing).
-        return None
-        # level=int(self.router.policy.get('library',0)) if self._ladder else 0
-        # if level<=0:return None
-        # if self._library_handle is None:
-        #     from masa.intelligence.library import Library, default_path
-        #     self._library_handle=Library(os.environ.get('MASA_LIBRARY') or default_path(self.store.root))
-        # return self._library_handle
-
-    def _library_settle(self, success, status):
-        """上一次修复的结果：成功就把“做法”记进库（做法来自账本事实，不是模型的自述）。 Settle the previous fix: on success store the remedy, built from ledger facts, not a model's self-report."""
-        library=self._library()
-        pending=self.job.pop('lib_pending',None)
-        if library is None or not pending:return
-        log=(self.job.get('fix_log') or [{}])[-1]
-        remedy=f"{log.get('stage','fix')}: changed {', '.join(log.get('changed') or []) or 'nothing'}"
-        note=self.job.get('lib_note')
-        if note:remedy+=' | '+str(note)[:220]
-        for sig in pending['sigs']:
-            library.record_remedy(sig,remedy,pending.get('run',''),success)
-
-    def _library_failures(self, analysis, verified):
-        library=self._library()
-        if library is None:return
-        sigs=[library.record_failure(f"{i['owner']}:{i['kind']}",i['message']) for i in analysis['items'][:20]]
-        self.job['lib_pending']={'sigs':sigs,'before':len(analysis['items']),'run':verified}
-        self.job.pop('lib_note',None)
-
-    def _library_hints(self, analysis, verified):
-        """级别 2：把命中且有成功记录的做法（至多 2 条）作为一段指导；没有命中就是空串，不增加 token。 Level 2: up to two hits with a success record as guidance; no hit means an empty string and no tokens."""
-        library=self._library()
-        if library is None or int(self.router.policy.get('library',0))<2:return ''
-        lines,seen=[],set()
-        for item in analysis['items']:
-            entry=library.lookup(f"{item['owner']}:{item['kind']}",item['message'])
-            if entry and entry['signature'] not in seen and len(lines)<2:
-                seen.add(entry['signature'])
-                lines.append('- '+entry['remedy'])
-                self.store.event(verified,'library_hit',{'signature':entry['signature'],'hits':entry['hits'],'successes':entry['successes']})
-        return ('【经验库：之前遇到过同类失败，当时这样修好了（仅供参考）】\n'+'\n'.join(lines)) if lines else ''
 
     def run(self):
         """从持久检查点推进流程。无论怎样结束（完成、失败、等待人、被取消），都释放本地模型：不能有空挂的模型。
@@ -310,9 +245,6 @@ class WorkflowCoordinator:
         try:
             self._run()
         finally:
-            if self._library_handle is not None:
-                try:self._library_handle.close()
-                except Exception:pass
             released=self.router.release()
             if released and self._ladder:
                 try:self._emit('models_released',{'models':released},always=True)
@@ -360,12 +292,6 @@ class WorkflowCoordinator:
                 resume_failed=None
                 result={'status':'failed'}
                 phase('verification',verified,attempt)
-            elif draft in self.job.get('preverified',{}):
-                # best-of-N 已经验证过被选中的候选：直接用那次验证（终态的 run 再 execute 只是返回它），不重复验证。
-                # best-of-N already verified the chosen candidate: reuse that run (executing a finished run just returns it).
-                verified=self.job['preverified'][draft]
-                phase('verification',verified,attempt)
-                result=Runtime(store,runner).execute(verified)
             else:
                 meta=store.run(draft)['data']['project_plan']
                 phase('verification',draft,attempt)
@@ -386,9 +312,6 @@ class WorkflowCoordinator:
                                 note='verification needs attention ('+str(store.run(verified)['reason'])+'); inspect the run before any repair')
                 return
             if result['status']=='succeeded':
-                self._library_settle(True,'succeeded')
-                self._check_examples(verified,runner)
-                self._maybe_review(verified)  # 只读建议，永远不影响裁决；策略 conductor 关闭时什么都不做 / advisory only, never affects the verdict; a no-op unless policy `conductor` is on
                 self.job.update(status='completed',result={'id':verified})
                 return
             if result['status']=='cancelled':
@@ -407,9 +330,6 @@ class WorkflowCoordinator:
             else:
                 self.job.pop('revision_ineffective',None)
             self.job['last_assertions']=assertions
-            pending_lib=self.job.get('lib_pending')
-            self._library_settle(bool(pending_lib) and len(analysis['items'])<int(pending_lib.get('before',0)),'failed')
-            self._library_failures(analysis,verified)
             # 上一次由模型产出的修复：只有“它负责的那一类问题还在”才算失败。本地模型修好了实现、剩下的是测试的问题，
             # 这不是它的失败，也不该因此升级。A model-made fix fails only if ITS class of problem is still present:
             # a local model that fixed the implementation must not be escalated because a test defect remains.
@@ -501,8 +421,6 @@ class WorkflowCoordinator:
                     'needs_diagnosis':bool(can and wants),
                     'rewrite_due':bool(self._ladder and primary in ('implementation','ambiguous') and int(self.job.get('stall',0))>=REWRITE_AFTER_STALLS
                                        and int(self.job.get('rewrites',0))<MAX_REWRITES and self._strongest_tried())}
-            if self._ladder and self.router.policy.get('conductor'):
-                result.update(self._conductor_facts(ctx,result,analysis,repeats,only_assertions))
             return result
 
         def diagnose(ctx):
@@ -514,7 +432,6 @@ class WorkflowCoordinator:
                 diagnosis=None
                 self._emit('diagnosis_failed',{'error':str(exc)[:200]},verified,always=True)
             self.job['diagnoses']=int(self.job.get('diagnoses',0))+1
-            if diagnosis:self.job['lib_note']=str(diagnosis.get('rationale',''))
             return {'diagnosed':True,'diagnosis':diagnosis,'can_diagnose':False}
 
         def instructions(owner):
@@ -523,15 +440,10 @@ class WorkflowCoordinator:
             if diagnosis:
                 key='implementation_instructions' if owner=='implementation' else 'test_instructions'
                 if diagnosis.get(key):parts.append('【Diagnoser 的诊断】'+diagnosis['rationale']+'\n【Diagnoser 的指导】'+diagnosis[key])
-            if facts.get('conductor_brief'):parts.append('【指挥者的指示】'+facts['conductor_brief'])
             if self.job.get('referee_text'):parts.append(self.job['referee_text'])
             if self.job.get('revision_ineffective'):
                 parts.append('The previous test revision did NOT change these failing assertions (they still fail with the same message): '+' | '.join(self.job['revision_ineffective'])
                              +'. Do not make a cosmetic edit again: recompute the expected value from the requirement and the test setup, or conclude that the implementation is wrong.')
-            parts.append(self._library_hints(analysis,verified))
-            skeptic=facts.get('skeptic')
-            if owner=='test' and skeptic and skeptic.get('verdict')=='tests_wrong' and skeptic.get('instructions'):
-                parts.append('【测试怀疑者逐条核对的结论】'+skeptic['instructions'])
             return '\n'.join(p for p in parts if p)
 
         def ctx_diagnosis():
@@ -556,7 +468,6 @@ class WorkflowCoordinator:
                     self._emit('repair_wants_tests',{'reason':str(exc)[:200]},verified,always=True)
                     return {'halted':True,'halt_kind':'noop','halt_reason':str(exc)}
                 raise
-            draft=self._best_of_n(chain,role,stage,make,draft,used,verified,generation,need)
             if used:self.job['pending_fix']={**used,'chain':chain}
             self._log_fix(stage,draft,used)
             return {'draft':draft,'noop':False,'halted':False,'halt_kind':None}
@@ -617,81 +528,10 @@ class WorkflowCoordinator:
             return run_fix('fix:ambiguous','project_test_revision','arbitration',lambda provider,fb:generation.revise_tests(
                 verified,provider,'\n'.join(x for x in (base,fb) if x),lambda rid:phase('test_revision',rid,attempt+1)))
 
-        def conduct(ctx):
-            # 指挥者：只在规则有歧义/停滞时被问一次；返回合法的候选 id，或 None（回到规则）。
-            # Conductor: asked once, only on ambiguity or a stall; returns a legal candidate id or None (back to the rules).
-            choice=self._conduct(verified,ctx,analysis,checks,bundle,attempt)
-            out={'conducted':True,'conductor_choice':choice['next'] if choice else None,'conductor_brief':choice['brief'] if choice else ''}
-            if choice and choice['next']=='halt':out['halt_reason']='conductor: '+choice['reason']
-            return out
-
-        def test_skeptic(ctx):
-            try:
-                verdict=self._skeptic(verified,analysis,checks,bundle)
-            except RoutingStop:
-                verdict=None
-            except CallCancelled:
-                raise
-            except Exception as exc:  # 只读建议：失败不能挡住修复 / advisory: a failure must not block the fix
-                verdict=None
-                self.store.event(verified,'skeptic_failed',{'error':str(exc)[:200]})
-            return {'skeptic':verdict or {'verdict':'tests_ok','cases':[],'instructions':''}}
-
         actions={'classify':classify,'diagnose':diagnose,'format_files':format_files,'fix_implementation':fix_implementation,
-                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation,
-                 'conduct':conduct,'test_skeptic':test_skeptic}
-        engine=FlowEngine(self.job['request'].get('workflow') or FIX_V1,actions,max_steps=16 if self.router.policy.get('conductor') else 12,on_step=lambda step:self._trace_step(step,verified))
+                 'revise_tests':revise_tests,'arbitrate_tests':arbitrate_tests,'rewrite_implementation':rewrite_implementation}
+        engine=FlowEngine(self.job['request'].get('workflow') or FIX_V1,actions,max_steps=12,on_step=lambda step:self._trace_step(step,verified))
         return engine.run(facts)
-
-    # ───────────── best-of-N：验证选择的多次尝试 / verification-selected multiple attempts ─────────────
-    def _best_of_n(self, chain, role, stage, make, first, used, verified, generation, need):
-        """把时间和便宜的调用换成可靠性：第一个候选之外，再让**最便宜的合格模型**生成 N-1 个候选，逐个真实验证，选“通过 > 未解决条目最少”的。
-        Gate 是独立的裁判，所以多采样不会降低可信度。策略 best_of_n=1（默认）时什么都不做。每个候选的调用都计入预算；预算不够就用已有的候选。
-        Trade time and cheap calls for reliability: besides the first candidate, the CHEAPEST eligible model produces N-1 more, each is really verified, and the best
-        (passing > fewest unresolved items) wins. The Gate is an independent judge, so extra sampling cannot weaken trust. best_of_n=1 (default) does nothing; every call counts against the budget."""
-        n=int(self.router.policy.get('best_of_n',1)) if self._ladder else 1
-        # 只对“修复实现”多采样。修订测试不行：按“能通过”来选，会偏向迁就有缺陷实现的测试（假通过）。
-        # Only for implementation repairs. Not for test revisions: choosing by "passes" would favour tests that bend to a defective implementation (false passes).
-        if n<=1 or chain!='fix:implementation':return first
-        store=self.store
-        def evaluate(draft):
-            meta=store.run(draft)['data']['project_plan']
-            ident=generation.approve(draft,{'files_ref':meta['files_ref'],'files':store.read(meta['files_ref']),'review_mode':'automatic'})
-            result=Runtime(store,self.runner).execute(ident)
-            if result['status']=='succeeded':return ident,True,0
-            checks=[(store.read(t['request_ref'])['operation'],store.read(t['result_ref'])) for t in store.tools(ident) if t['result_ref']]
-            return ident,False,len(ownership.analyse(checks,self.pack)['items']) if checks else 10**6
-        candidates=[]  # (draft, verified, passed, items, candidate id, level)
-        try:
-            ident,passed,items=evaluate(first)
-            candidates.append((first,ident,passed,items,used.get('candidate'),used.get('level')))
-        except CallCancelled:
-            raise
-        except MasaError as exc:
-            self._emit('best_of_n_skipped',{'reason':'first candidate could not be verified: '+str(exc)[:160]},verified,always=True)
-            return first
-        for _ in range(n-1):
-            if candidates[-1][2] or any(c[2] for c in candidates):break  # 已经有通过的候选：不再多花钱 / a passing candidate exists: stop spending
-            try:
-                provider,decision=self._pick(role,chain+':bon',need=need,anchor=verified,stage='best_of_n')
-            except RoutingStop:
-                break  # 预算/等级不允许：用已有的 / budget or levels do not allow it: use what exists
-            try:
-                draft=make(provider,None)
-                if not store.run(draft)['data'].get('project_plan',{}).get('changed_files'):continue  # 原样返回：没有意义 / unchanged: pointless
-                ident,passed,items=evaluate(draft)
-            except CallCancelled:
-                raise
-            except (MasaError,ContextOverflow):
-                continue  # 这个候选被校验拒绝：只是少一个样本 / rejected by validation: one sample fewer
-            entry=self.router.entry_of(provider) or {}
-            candidates.append((draft,ident,passed,items,entry.get('id'),entry.get('level')))
-        best=min(range(len(candidates)),key=lambda i:(not candidates[i][2],candidates[i][3],i))
-        draft,ident,passed,items,candidate,level=candidates[best]
-        if candidate:used.update(candidate=candidate,level=level)
-        self.job['preverified']={**self.job.get('preverified',{}),draft:ident}
-        self._emit('best_of_n',{'stage':stage,'n':n,'tried':len(candidates),'chosen':best,'passed':[bool(c[2]) for c in candidates],'unresolved':[c[3] for c in candidates]},verified,always=True)
-        return draft
 
     def _log_fix(self, stage, draft, used):
         """记录每次修复产出了什么（谁做的、改了哪些文件），Diagnoser 据此知道“已经试过什么”。
@@ -736,69 +576,6 @@ class WorkflowCoordinator:
         evidence=[{'operation':op,'output':(str(r.get('stdout',''))+'\n'+str(r.get('stderr','')))[:3000]} for op,r in checks if r.get('exit_code')!=0][:3]
         return run,approved,files,evidence
 
-    # ───────────── 指挥者与可选角色 / the conductor and the optional roles ─────────────
-    def _conductor_facts(self, ctx, rules, analysis, repeats, only_assertions):
-        """指挥者需要的确定性事实：候选节点、是否该问。只读，不产生副作用。
-        The deterministic facts the conductor needs: candidate nodes and whether to ask. Read-only."""
-        strongest=self._strongest_tried()
-        primary=rules['primary']
-        flags={'primary':primary,'format_only':rules['format_only'],'can_diagnose':rules['can_diagnose'],'diagnosed':bool(ctx.get('diagnosed')),
-               'stall':int(self.job.get('stall',0)),'repeats':repeats,'unresolved':len(analysis['items']),'strongest_tried':strongest,
-               'rewrite_possible':bool(primary in ('implementation','ambiguous') and int(self.job.get('rewrites',0))<MAX_REWRITES and strongest),
-               'halt_possible':bool(repeats>=2 and strongest)}
-        skeptic=registry.get('test_skeptic')
-        flags['skeptic_possible']=bool(skeptic and skeptic.when and not ctx.get('skeptic')
-                                       and GUARDS[skeptic.when['guard']]({'only_assertions':only_assertions},skeptic.when.get('params',{})))
-        nodes=conductor.candidate_nodes(flags)
-        return {'only_assertions':only_assertions,'conductor_flags':flags,'conductor_nodes':nodes,
-                'conductor_due':conductor.due(self.router.policy,flags,int(self.job.get('conductor_calls',0)),bool(ctx.get('conducted')),nodes)}
-
-    def _conduct(self, verified, ctx, analysis, checks, bundle, attempt):
-        """向指挥者要一个决定。任何失败（预算、崩溃、超时、非法提议）都回退到规则并留下 conductor_rejected 事件。
-        Ask the conductor for one decision. Any failure (budget, crash, timeout, illegal proposal) falls back to the rules and leaves a conductor_rejected event."""
-        store,policy=self.store,self.router.policy
-        nodes=ctx['conductor_nodes']
-        run,approved,_,_=self._failure_context(verified,analysis,checks,bundle)
-        brief=conductor.briefing(goal=run['data']['goal'],acceptance=approved['spec']['acceptance'],ownership_lines=ownership.describe(analysis),
-                                 attempt_summary=self._attempt_summary(),flags=ctx['conductor_flags'],nodes=nodes,spend=self.router.spend(verified),
-                                 budget=self.router.budget,decisions=list(self.job.get('conductor_log',[])),round_no=attempt+1)
-        self._extend_deadline(verified)
-
-        def reject(reason,proposed=None):
-            store.event(verified,'conductor_rejected',{'reason':reason,'proposed':proposed,'candidates':nodes,'fallback':'rules'})
-
-        for n in range(2 if policy.get('conductor_cascade') else 1):
-            if int(self.job.get('conductor_calls',0))>=int(policy.get('conductor_max_calls',0)):
-                reject('call_limit')
-                break
-            try:
-                provider,decision=self._pick('project_conductor','conduct',need=brief,anchor=verified,stage='conduct')
-            except RoutingStop as stop:
-                reject('routing:'+stop.reason)
-                return None
-            self.job['conductor_calls']=int(self.job.get('conductor_calls',0))+1
-            try:
-                raw=RoleRuntime(store).call(verified,provider,'project_conductor',{'briefing':brief},
-                                            invocation_id='initial' if n==0 else f'cascade{n}',freeze_key=f'conductor_snapshot_ref_{n}')
-            except CallCancelled:
-                raise
-            except Exception as exc:  # 崩溃/超时/契约不合法：不能让指挥者拖垮修复 / a crash, timeout or contract violation must not take the repair down
-                if store.run(verified)['cancel_requested']:
-                    raise
-                self._fail('conduct',decision)
-                reject(f'call_failed:{type(exc).__name__}: {str(exc)[:120]}')
-                continue
-            choice,why=conductor.check_choice(raw,nodes)
-            if choice is None:
-                self._fail('conduct',decision)  # 级联：下一次由路由器升级到更高等级 / cascade: the router escalates the next attempt
-                reject(why,raw.get('next') if isinstance(raw,dict) else None)
-                continue
-            self.job['conductor_log']=(list(self.job.get('conductor_log',[]))+[{'next':choice['next'],'reason':choice['reason']}])[-6:]
-            store.event(verified,'conductor_decided',{**choice,'candidates':nodes,'by':(provider.profile or {}).get('model'),'level':decision.level,
-                                                      'calls':int(self.job['conductor_calls']),'escalated':n>0})
-            return choice
-        return None
-
     def _referee(self, verified, analysis, bundle, samples=3):
         """断言裁判（策略 assertion_referee，默认关闭）：对失败的断言，便宜的云端模型在打乱成 A/B 的两个值里独立选 3 次，多数作为独立证据交给 Diagnoser 和修复指令。
         每次调用都经过持久角色层（计入预算、可恢复）；任何失败都返回 None，流程照旧。
@@ -831,48 +608,6 @@ class WorkflowCoordinator:
         result=referee.tally(cases,drawn)
         self.store.event(verified,'assertion_referee',{'cases':len(cases),'verdicts':{str(i):r['verdict'] for i,r in result.items()},'samples':sum(1 for d in drawn if d is not None)})
         return referee.evidence_text(cases,result) or None
-
-    def _skeptic(self, verified, analysis, checks, bundle):
-        """测试怀疑者：只读，逐条核对失败断言的期望值。结论由代码按逐条核对结果重新推导（任何一条不一致即 tests_wrong）。
-        Test Skeptic: read-only, recomputes the expected value of each failing assertion; the verdict is re-derived by code from its own per-case checks."""
-        run,approved,files,evidence=self._failure_context(verified,analysis,checks,bundle)
-        context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'files':files,'failure_evidence':evidence}
-        provider,_=self._pick('test_skeptic','skeptic',need=context,anchor=verified,stage='skeptic')
-        self._extend_deadline(verified)
-        result=RoleRuntime(self.store).call(verified,provider,'test_skeptic',context,freeze_key='skeptic_snapshot_ref')
-        wrong=[c['case'] for c in result['cases'] if not c['matches']]
-        result={**result,'verdict':'tests_wrong' if wrong else 'tests_ok'}
-        self.store.event(verified,'skeptic_verdict',{'verdict':result['verdict'],'mismatches':wrong[:6],'by':(provider.profile or {}).get('model')})
-        return result
-
-    def _maybe_review(self, verified):
-        """通过 Gate 之后的只读审阅：只在策略 conductor 开启、且这个任务经过修复时运行一次；只写 code_review 事件，不改文件、不影响结果。
-        Advisory review after the Gate passed: runs once, only with policy `conductor` on and only for a task that needed repairs; it writes a code_review event and nothing else."""
-        spec=registry.get('code_reviewer')
-        if not (self._ladder and self.router.policy.get('conductor') and spec and spec.when):
-            return
-        if not GUARDS[spec.when['guard']]({'repaired':bool(self.job.get('fix_log'))},spec.when.get('params',{})):
-            return
-        try:
-            store=self.store
-            run=store.run(verified)
-            bundle=store.read(run['data']['project_bundle']['approval_ref'])
-            approved=store.read(bundle['spec_approval_ref'])
-            files,budget={},24000
-            for path,text in bundle['files'].items():
-                if self.pack.is_source(path) and budget>0:
-                    files[path]=text[:6000];budget-=len(files[path])
-            context={'goal':run['data']['goal'],'acceptance':approved['spec']['acceptance'],'files':files}
-            provider,_=self._pick('code_reviewer','review',need=context,anchor=verified,stage='review')
-            self._extend_deadline(verified)
-            result=RoleRuntime(store).call(verified,provider,'code_reviewer',context,freeze_key='reviewer_snapshot_ref')
-            store.event(verified,'code_review',{'summary':result['summary'],'risks':[f"{r['severity']}: {r['file']}: {r['risk']}" for r in result['risks']],
-                                                'by':(provider.profile or {}).get('model')})
-        except CallCancelled:
-            raise
-        except Exception as exc:  # 建议性的：预算不够、模型失败都不影响已通过的结果 / advisory: budget or model failures never touch a passed result
-            try:self.store.event(verified,'code_review_skipped',{'reason':str(exc)[:200]})
-            except Exception:pass
 
     def _diagnose(self, verified, analysis, checks, bundle):
         """Diagnoser：只读、用最高等级、判断“谁的问题”并给出具体指导。结果持久化在角色账本里。
@@ -985,8 +720,7 @@ class WorkflowCoordinator:
                                        retry_of=retry_of,retry_feedback=planner_feedback,
                                        triage=triage if index==0 else None,triage_provider=triage_provider if index==0 else None,
                                        audit_provider=audit_provider,
-                                       contract_provider=provider if (self._ladder and self.router.policy.get('package_contract')) else None,
-                                       language=self.language,examples=bool(self._ladder and self.router.policy.get('planner_examples')),examples_as_tests=bool(self.router.policy.get('examples_as_tests',True)) if self._ladder else True)
+                                       language=self.language)
                 if store.run(plan)['data']['project_plan'].get('status')=='waiting_for_input':
                     checkpoint.update(status='waiting_for_input',result={'id':plan})
                     return None

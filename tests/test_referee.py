@@ -5,7 +5,7 @@ import unittest
 from masa.application.checks.referee import case_for, evidence_text, parse_assertion, public, tally, source_of_test_function
 from masa.application.orchestration.routing import validate_policy
 
-from test_conductor import ASSERT_LINE, ConductorCase, Scripted  # noqa: F401
+from assert_flow import ASSERT_LINE, AssertCase, Scripted  # noqa: F401
 
 
 class ParseTests(unittest.TestCase):
@@ -59,7 +59,7 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual(evidence_text([case], tally([case], [{0: 'neither'}] * 3)), '')
 
 
-class FlowTests(ConductorCase):
+class FlowTests(AssertCase):
     def referee_script(self, side):
         """裁判脚本：按选项里的值选字母（side='got' 选实现给的 3，'want' 选测试写的 4）。 Pick the letter whose value is the implementation's 3 (side='got') or the test's 4."""
         value = '3' if side == 'got' else '4'

@@ -12,7 +12,6 @@ export interface RoleInfo {
   routable: boolean;
   permissions: { reads: string[]; writes: 'none' | 'tests' | 'implementation' };
   legacy: boolean;
-  when?: { guard: string } | null;
 }
 
 /** 把角色名字写进共享的标签表。 Write the role labels into the shared label table. */
@@ -21,20 +20,12 @@ export function applyRoles(roles: RoleInfo[]): RoleInfo[] {
   return roles;
 }
 
-/** 角色分组：核心流水线 / 动态（只在指挥者开启时才可能被选中） / 离线（调优）。 Role groups: core pipeline / dynamic (only reachable with the conductor on) / offline (tuning). */
-export const DYNAMIC_ROLES = ['project_conductor', 'test_skeptic', 'code_reviewer'];
-export function roleGroups(roles: RoleInfo[]): { core: RoleInfo[]; dynamic: RoleInfo[]; offline: RoleInfo[] } {
-  const dynamic = roles.filter((r) => DYNAMIC_ROLES.includes(r.id));
-  const offline = roles.filter((r) => !r.routable && !r.legacy && !DYNAMIC_ROLES.includes(r.id) && r.permissions.writes === 'none' && r.id === 'workflow_tuner');
-  const rest = roles.filter((r) => !dynamic.includes(r) && !offline.includes(r) && !r.legacy);
-  return { core: rest, dynamic, offline };
+/** 角色分组：目前只有核心流水线（遗留角色不显示）。 Role groups: only the core pipeline is left (legacy roles are hidden). */
+export function roleGroups(roles: RoleInfo[]): { core: RoleInfo[] } {
+  return { core: roles.filter((r) => !r.legacy) };
 }
 
 export const levelText = (level: RoleInfo['level']): string => (level === 'top' ? '最高等级' : level === 'low' ? '低等级起步' : level === null ? '只用本地模型' : 'L' + level);
 export const writesText = (writes: RoleInfo['permissions']['writes']): string => ({ none: '只读', tests: '可改测试', implementation: '可改实现' })[writes];
-
-/** 指挥者的风险提示：数字来自 2026-10-06 的真实对照评测（docs/EVIDENCE.md 的 E19）。 The conductor's risk note; numbers come from the real A/B evaluation. */
-export const CONDUCTOR_RISK =
-  '实验功能，默认关闭。真实对照评测（25 次运行）里未见通过率提升：关闭 10/11 通过，开启 10/14 通过；开启后每个任务平均多花 24%～96% 的费用（额外的 Pro 调用、怀疑者、审阅者）。样本很小，结论不确定。只在你想试验时开启。';
 
 export const FALLBACK_ORDER = ['project_planner', 'project_tester', 'project_developer', 'project_repair', 'project_test_revision', 'project_diagnoser'];

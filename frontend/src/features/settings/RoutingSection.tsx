@@ -6,7 +6,6 @@ import { qk, useProfiles, useRoles } from '../../api/queries';
 import type { RoutingBudget, RoutingPolicy } from '../../api/types';
 import { useActivity } from '../../app/activity';
 import { byRouting, profileLabel, profileLevel, profileReady } from '../../entities/profiles';
-import { CONDUCTOR_RISK } from '../../entities/roles';
 import { stageLabels } from '../../entities/status';
 import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 
@@ -113,16 +112,8 @@ export function RoutingSection() {
             <input type="checkbox" checked={!!draft.policy.test_audit} onChange={(e) => setPolicy({ test_audit: e.target.checked })} />
           </Field>
         </div>
-        {/* 经验库已停用（留出任务上命中 0 次），设置项暂时隐藏；代码保留在 intelligence/library.py。 The experience library is switched off; its setting is hidden for now. */}
-        <h4>多包项目的三个实验开关（默认关闭）</h4>
-        <Notice tone="warn">来自第一次 10 文件项目（bank）的失败分析：跨包契约不一致、测试期望收敛不了。这三项只做了单元测试和 1 次受预算限制的真实运行，还没有配对评测，不要指望它们已经被证明有效。“导入检查”（生成时就地重写导入了规格里不存在的内部包的文件）是确定性的、零 token，已默认开启。</Notice>
+        <h4>断言裁判（实验，默认关闭）</h4>
         <div className="grid2">
-          <Field label="包间接口契约（规格里至少 3 个内部包时，写代码前先写结构化契约）">
-            <input type="checkbox" checked={!!draft.policy.package_contract} onChange={(e) => setPolicy({ package_contract: e.target.checked })} />
-          </Field>
-          <Field label="Planner 示例（Planner 额外写 3–8 个“参数/标准输入 → 逐字节输出/退出码”的示例，作为唯一的精确期望来源；Tester 自动并入，任务成功后用真实程序再核对一遍，只记录不改变裁决）">
-            <input type="checkbox" checked={!!draft.policy.planner_examples} onChange={(e) => setPolicy({ planner_examples: e.target.checked })} />
-          </Field>
           <Field label="断言裁判（失败断言的两个值打乱成 A/B，便宜模型独立选 3 次，多数作为 Diagnoser 的独立证据）">
             <input type="checkbox" checked={!!draft.policy.assertion_referee} onChange={(e) => setPolicy({ assertion_referee: e.target.checked })} />
           </Field>
@@ -132,30 +123,6 @@ export function RoutingSection() {
         <div className="grid2">
           <Field label="启用分层上下文">
             <input type="checkbox" checked={!!draft.policy.context_budget} onChange={(e) => setPolicy({ context_budget: e.target.checked })} />
-          </Field>
-        </div>
-        <h4>多次尝试（best-of-N，实验，默认 1 = 关）</h4>
-        <p className="hint">修复实现失败时，让最便宜的合格模型再生成 N-1 个候选，逐个真实验证，选通过的（或未解决条目最少的）。第一个候选通过就不再多花钱；只对“修复实现”生效，不对修订测试生效。真实评测（6 个任务配对）里通过率没有变化（4/6 对 4/6）、费用约 +15%，额外采样只在 1 个任务里触发且没有改善；主要失败（测试期望算错）不是它能解决的。</p>
-        <div className="grid2">
-          <Field label="每次修复的候选数 N（1–5）">
-            <input type="number" min={1} max={5} value={draft.policy.best_of_n ?? 1} onChange={(e) => setPolicy({ best_of_n: Number(e.target.value) })} />
-          </Field>
-        </div>
-        <h4>指挥者（实验，默认关闭）</h4>
-        <Notice tone="warn">{CONDUCTOR_RISK}</Notice>
-        <p className="hint">只在补丁停滞或同一失败反复出现时，才让最强模型在已注册的候选步骤里选一个（它不能终止任务）；不合法的提议会被拒绝并回到规则。默认流程就是之前测试正常的那一套，不受这个开关影响。</p>
-        <div className="grid2">
-          <Field label="启用指挥者">
-            <input type="checkbox" checked={!!draft.policy.conductor} onChange={(e) => {
-              if (e.target.checked && !window.confirm('开启实验性的指挥者？ ' + CONDUCTOR_RISK)) return;
-              setPolicy({ conductor: e.target.checked });
-            }} />
-          </Field>
-          <Field label="每个任务最多询问次数">
-            <input type="number" min={1} max={12} value={draft.policy.conductor_max_calls ?? 6} onChange={(e) => setPolicy({ conductor_max_calls: Number(e.target.value) })} />
-          </Field>
-          <Field label="级联（先低等级，提议不合法再升级）">
-            <input type="checkbox" checked={!!draft.policy.conductor_cascade} onChange={(e) => setPolicy({ conductor_cascade: e.target.checked })} />
           </Field>
         </div>
         <h4>按角色的起始等级</h4>

@@ -7,7 +7,6 @@ Behaviour is byte-for-byte unchanged (see tests/test_local_generation.py and tes
 """
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -20,7 +19,6 @@ from masa.languages.go.testlint import test_problem_messages
 # 失败证据里值得保留的诊断行。 Diagnostic lines worth keeping in failure evidence.
 FAILURE_MARKERS = r'(?i)(?:\.go:\d+|no Go files in |import cycle|FAIL|panic:|undefined:|imported and not used|expected|want |exit code|build failed)'
 _LOCATION = r'([\w./\\-]+\.go):(\d+)(?::\d+)?'
-_DECLARATION = r'(?m)^(?:func(?:\s*\([^)]*\))?\s+%s\b|type\s+%s\b|var\s+%s\b|const\s+%s\b|\t%s\b)'
 
 
 def gofmt_path(executor):
@@ -89,11 +87,6 @@ def static_messages(files, paths, spec=None):
     """不需要工具链的就地检查：空转测试、读输入的 main.go、导入了规格里没有的内部包。 Toolchain-free in-stage checks: vacuous tests, a main.go that reads input, imports of packages the spec lacks."""
     unknown = unknown_import_messages(files, paths, spec['module'], [i['path'] for i in spec['files']]) if spec else {}
     return {**test_problem_messages(files, paths), **entry_problem_messages(files, paths), **unknown}
-
-
-def declares(source, name):
-    """包的源码里是否声明了这个导出名（契约检查）。 Does the package source declare this exported name (contract check)?"""
-    return bool(re.search(_DECLARATION % ((re.escape(name),) * 5), source))
 
 
 def format_text(executor, text):

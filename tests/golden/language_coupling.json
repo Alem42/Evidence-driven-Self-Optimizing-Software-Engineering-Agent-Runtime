@@ -2,9 +2,6 @@
  "application/checks/__init__.py": {
   "gofmt": 1
  },
- "application/checks/contract.py": {
-  "go_word": 2
- },
  "application/checks/triage.py": {
   "go_file": 1,
   "go_template": 1,
@@ -56,9 +53,6 @@
  "infrastructure/workspaces.py": {
   "go_mod": 1
  },
- "intelligence/library.py": {
-  "go_file": 1
- },
  "intelligence/repair_context.py": {
   "go_file": 1,
   "pack_import": 1
@@ -79,15 +73,6 @@
   "go_word": 1,
   "gofmt": 1
  },
- "roles/specs/code_reviewer.prompt.md": {
-  "go_word": 1
- },
- "roles/specs/package_contract.prompt.md": {
-  "go_word": 1
- },
- "roles/specs/project_conductor.prompt.md": {
-  "go_word": 1
- },
  "roles/specs/project_diagnoser.prompt.md": {
   "go_word": 1
  },
@@ -97,12 +82,6 @@
  "roles/specs/project_triage.prompt.md": {
   "go_file": 1,
   "go_template": 1,
-  "go_word": 1
- },
- "roles/specs/test_skeptic.prompt.md": {
-  "go_word": 1
- },
- "roles/specs/workflow_tuner.prompt.md": {
   "go_word": 1
  },
  "runtime/engine.py": {
