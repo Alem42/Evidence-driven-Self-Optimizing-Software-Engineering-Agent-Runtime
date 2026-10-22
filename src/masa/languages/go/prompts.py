@@ -69,6 +69,8 @@ def project_roles_prompt(context, default_instruction):
             'Explain meaningful edge cases in purpose. For optional numeric flags test explicit zero separately from omission '
             'when zero is within the specified domain. '
             'ASSUMPTIONS. 0..6 short strings: each names a point the goal left open and the convention you chose for it; the same fact must also appear as a concrete acceptance item. '
+            'Never use an assumption to quietly remove something the goal implies or a reasonable user would expect (for example nested blocks, a second input format, a boundary case): support it. '
+            'If you really decide not to support something, write that assumption as a string that STARTS WITH "LIMITATION: " and say exactly what is not supported, so the user sees the cut. '
             'Never invent requirements the goal does not imply.')
     elif context['purpose']=='project_test_revision':
         instruction=common+('You are Tester revising broken tests after a real failed check. '

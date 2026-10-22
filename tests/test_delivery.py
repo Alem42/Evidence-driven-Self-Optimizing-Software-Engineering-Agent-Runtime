@@ -58,6 +58,18 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn('未完成 / 部分验证', text)
         self.assertLess(text.index('未完成与已知缺陷'), text.index('验收项 → 证据'))
 
+    def test_a_declared_limitation_makes_the_delivery_incomplete_and_shows_up_first(self):
+        """Architect 明说“不支持”的东西是被砍掉的范围，不是假设：必须出现在未完成项里，交付不算完整。 A declared LIMITATION is cut scope and must appear among the open items."""
+        plan = self.store.run(self.plan)['data']['project_plan']
+        plan['assumptions'] = ['空输入按 0 处理', 'LIMITATION: 模板块不支持嵌套']
+        with self.store.transaction():
+            self.store.save_metadata(self.plan, 'project_plan', plan, 'assumptions_recorded')
+        d = delivery.build(self.store, self.plan)
+        self.assertFalse(d['complete'])
+        self.assertEqual([i['text'] for i in d['open_items'] if i['kind'] == 'declared_limitation'], ['模板块不支持嵌套'])
+        self.assertIn('空输入按 0 处理', [a['text'] for a in d['assumptions']])
+        self.assertIn('模板块不支持嵌套', delivery.render(d).split('验收项 → 证据')[0])
+
     def test_a_failed_gate_is_never_called_a_delivery(self):
         self.store.set_status(self.verified, 'failed', 'gate_fail')
         d = delivery.build(self.store, self.plan)

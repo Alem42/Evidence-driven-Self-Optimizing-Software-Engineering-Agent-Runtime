@@ -108,6 +108,18 @@ class RoutePolicyTests(unittest.TestCase):
         d = decide([{'candidate': 'local', 'level': 1}], spend={**SPEND, 'cost': 0.99}, budget={**BUDGET, 'max_cost': 1.0}, need=2000)
         self.assertEqual((d.action, d.reason), ('stop', 'budget_cost'))
 
+    def test_settings_saved_before_the_merge_still_load_and_keep_their_meaning(self):
+        """旧设置里的 project_planner / project_tester 现在是 project_architect：策略键与模型的角色白名单要跟着走，否则设置加载失败或这个模型再也当不了规划者。
+        Settings saved before the Planner/Tester merge still load, and a model allowed to plan can still plan."""
+        from masa.application.orchestration.router import _candidate_from
+        from masa.application.orchestration.routing import validate_policy
+        policy = validate_policy({'start_level_by_role': {'project_planner': 2, 'project_tester': 3}, 'prefer_highest_roles': ['project_planner', 'project_tester', 'project_diagnoser']})
+        self.assertEqual(policy['start_level_by_role'], {'project_architect': 3})  # 取较高的那个 / the higher one wins
+        self.assertEqual(policy['prefer_highest_roles'], ['project_architect', 'project_diagnoser'])
+        entry = {'id': 'x', 'level': 2, 'priority': 0, 'model_type': 'cloud', 'model': 'm', 'roles': ['project_planner', 'project_tester'], 'context_limit': 65536, 'max_output_tokens': 4096}
+        self.assertIn('project_architect', _candidate_from(entry).roles)
+        self.assertEqual(_candidate_from({**entry, 'roles': []}).roles, ())  # 空白名单 = 允许全部，不能被改成只允许一个 / an empty allow-list still means every role
+
     def test_role_restrictions_and_unavailable_candidates(self):
         only_cloud_plans = Candidate('cloud', 2, 0, 'cloud', 'big', roles=('project_architect',), context_limit=65536, max_output=4096)
         d = decide([], (LOCAL, only_cloud_plans))

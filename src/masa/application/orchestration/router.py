@@ -22,9 +22,18 @@ class RoutingStop(MasaError):
         super().__init__(f'routing stopped: {STOP_TEXT.get(reason, reason)}' + (f' ({detail})' if detail else ''))
 
 
+def _roles_of(entry):
+    """模型配置里的角色白名单。旧配置写着 project_planner / project_tester：它们合并成了 project_architect，白名单要跟着带上，否则这个模型就再也当不了规划者。
+    A model profile's role allow-list. Old profiles name project_planner / project_tester, which were merged into project_architect; the allow-list must follow or that model could never plan again."""
+    roles = tuple(entry.get('roles') or ())
+    if roles and ('project_planner' in roles or 'project_tester' in roles) and 'project_architect' not in roles:
+        roles += ('project_architect',)
+    return roles
+
+
 def _candidate_from(entry) -> Candidate:
     return Candidate(id=entry['id'], level=entry['level'], priority=entry['priority'], model_type=entry['model_type'],
-                     model=entry['model'], roles=tuple(entry.get('roles') or ()), context_limit=entry['context_limit'],
+                     model=entry['model'], roles=_roles_of(entry), context_limit=entry['context_limit'],
                      max_output=entry['max_output_tokens'], price_in=entry.get('price_in'), price_out=entry.get('price_out'),
                      digest=entry.get('digest'))
 

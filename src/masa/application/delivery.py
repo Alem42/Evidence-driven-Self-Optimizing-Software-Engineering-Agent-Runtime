@@ -109,6 +109,9 @@ def build(store, rid, runner=None, run_smoke=False):
     for tool in report['tools']:
         if tool['run_id'] == final['id'] and tool['kind'] == 'tool' and tool['exit_code'] not in (0, None):
             open_items.append({'kind': 'failing_check', 'text': f"Check {tool['operation']} exited with {tool['exit_code']} in the final verification."})
+    # Architect 明说“不支持”的东西（LIMITATION: …）不是假设而是被砍掉的范围，必须出现在未完成项里，人才会看到。
+    # What the Architect said it will NOT support (LIMITATION: ...) is not an assumption but cut scope and must show up among the open items.
+    open_items += [{'kind': 'declared_limitation', 'text': str(item)[len('LIMITATION:'):].strip()} for item in (plan.get('assumptions') or []) if str(item).startswith('LIMITATION:')]
     open_items += [{'kind': 'unverified_acceptance', 'text': f"Acceptance item {a['index'] + 1} has no check that covers it: {a['text']}"} for a in acceptance if a['status'] == 'unverified']
     open_items += [{'kind': 'stopped', 'text': str(p['data'])[:200]} for p in report['process'] if p['kind'] == 'task_stopped']
 
@@ -117,7 +120,7 @@ def build(store, rid, runner=None, run_smoke=False):
     for member in {v['run_id'] for v in report['versions']}:
         interventions += sum(1 for e in store.events(member) if e['type'] in ('user_input', 'uncertain_call_resolved'))
     run_hint = f"python -m {spec.get('module')}" if pack.id == 'python' else 'go run ./cmd/app' if pack.id == 'go' else pack.entrypoint(spec)
-    return {**delivery, 'complete': gate_passed and not [a for a in acceptance if a['status'] != 'verified'], 'gate_passed': gate_passed, 'language': pack.id,
+    return {**delivery, 'complete': gate_passed and not [a for a in acceptance if a['status'] != 'verified'] and not [i for i in open_items if i['kind'] == 'declared_limitation'], 'gate_passed': gate_passed, 'language': pack.id,
             'files': sorted(bundle.get('files') or {}),
             'acceptance': acceptance, 'assumptions': assumptions, 'independent_evidence': [{'kind': p['kind'], 'data': p['data']} for p in independent], 'open_items': open_items,
             'how_to_run': run_hint, 'smoke': smoke(store, runner, final, pack) if run_smoke else {'executed': False, 'reason': 'not requested'},

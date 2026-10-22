@@ -282,6 +282,7 @@ SKIP_TEXT = {
 
 POLICY_BOUNDS = {'max_escalations': (0, 5), 'planner_retries': (1, 4), 'transport_retries': (0, 20), 'stuck_after': (3, 10), 'diagnose_max': (0, 6), 'transport_wait_seconds': (10, 86400)}
 CHAINS = ('planning', 'generation', 'fix')
+RENAMED_ROLES = {'project_planner': 'project_architect', 'project_tester': 'project_architect'}  # 2026-10 合并 / merged in 2026-10
 RETIRED_POLICY_KEYS = frozenset({'conductor', 'conductor_max_calls', 'conductor_cascade', 'best_of_n', 'library', 'package_contract', 'planner_examples', 'examples_as_tests'})  # 2026-10 减法删除的开关 / switches removed in the 2026-10 pruning
 # 路由器的角色表来自 RoleSpec 注册表（按 order）；这个常量只是导入时的快照，校验时用 registry.routable_ids() 取最新的。
 # The router's role table comes from the RoleSpec registry (ordered); this constant is an import-time snapshot, validation asks the registry for the live set.
@@ -304,10 +305,12 @@ def validate_policy(policy) -> dict:
             if not isinstance(value, dict):
                 raise MasaError('start_level_by_role must be an object')
             for role, level in value.items():
+                role = RENAMED_ROLES.get(role, role)  # 旧设置里的 project_planner / project_tester 现在是 project_architect / old saved settings name the merged roles
                 if role not in registry.current().routable_ids() or type(level) is not int or not 1 <= level <= 100:
                     raise MasaError('start_level_by_role needs known roles and levels 1..100')
-                out['start_level_by_role'][role] = level
+                out['start_level_by_role'][role] = max(level, out['start_level_by_role'].get(role, 0))
         elif key == 'prefer_highest_roles':
+            value = list(dict.fromkeys(RENAMED_ROLES.get(r, r) for r in value)) if isinstance(value, list) else value
             if not isinstance(value, list) or any(r not in registry.current().routable_ids() for r in value):
                 raise MasaError('prefer_highest_roles needs known roles')
             out[key] = list(value)
