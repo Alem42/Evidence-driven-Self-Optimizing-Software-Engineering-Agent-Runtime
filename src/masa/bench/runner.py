@@ -22,11 +22,13 @@ from masa.bench import oracle
 from masa.bench.report import ERROR, FALSE_PASS, GATE_FAIL, PASS, SKIPPED, STOPPED, TIMEOUT, aggregate
 from masa.bench.tasks import BY_ID, SUITES, TASKS
 from masa.bench.tasks_large import LARGE_TASKS
+from masa.bench.tasks_stress import STRESS_TASKS
 from masa.bench.tasks_vague import VAGUE_TASKS
 from masa.infrastructure.proc import NO_WINDOW
 
 # 大项目任务（等级 10）不在默认套餐里，但可以按任务 id 运行。 Large-project tasks (level 10) are not in the default suites but can be run by task id.
 BY_ID.update({task.id: task for task in LARGE_TASKS})
+BY_ID.update({task.id: task for task in STRESS_TASKS})  # 压力任务：只观察，不评分 / stress tasks: observed, not scored
 BY_ID.update({task.id: task for task in VAGUE_TASKS})  # 模糊任务（VagueBench v0）：同样按任务 id 运行 / vague tasks (VagueBench v0): also run by task id
 
 SETTINGS_FILES = ('provider.json', 'provider-keys.local.json', 'routing.json', 'token-calibration.json')

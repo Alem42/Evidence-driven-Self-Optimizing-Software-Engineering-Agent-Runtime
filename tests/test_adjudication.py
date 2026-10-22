@@ -21,5 +21,28 @@ class AdjudicationTests(AssertCase):
         self.assertEqual(self.nodes(store)[:2], [('classify', 'diagnose'), ('diagnose', 'repair')])
 
 
+class DiagnoserInputTests(AssertCase):
+    """Diagnoser 的输入：它调用的实现源码、Architect 当初的用例与假设、它自己以前的裁决（P0 复盘 §5.2：“进入 Diagnoser 的方式遮挡了 Planner 和 Tester”）。
+    What the Diagnoser sees: the implementation under test, the cases and assumptions the Architect wrote, its own earlier rulings."""
+
+    def test_the_diagnoser_sees_the_architect_materials_the_code_under_test_and_its_earlier_ruling(self):
+        import copy
+        from test_project_plan import CHECKS, SPEC
+        checks = copy.deepcopy(CHECKS)
+        checks[0]['cases'] = [{'name': 'counts', 'input': 'two words', 'expected': 'stdout 2', 'level': 'cli'}]
+        impl = {'owner': 'implementation', 'rationale': 'first ruling', 'implementation_instructions': 'fix it', 'test_instructions': '', 'expectation_checks': []}
+        world, store, job, local, cloud = self.run_assert(local_script={'project_architect': {'spec': SPEC, 'checks': checks, 'assumptions': ['empty input counts 0']}}, cloud_diagnosis=impl)
+        contexts = [c for c in cloud.contexts if c['purpose'] == 'project_diagnoser']
+        self.assertGreaterEqual(len(contexts), 1)
+        first = contexts[0]
+        self.assertEqual(first['architect_cases'], [{'name': 'counts', 'input': 'two words', 'expected': 'stdout 2'}])
+        self.assertEqual(first['assumptions'], ['empty input counts 0'])
+        self.assertIn('internal/app/app_test.go', first['files'])
+        self.assertIn('internal/app/app.go', first['files'])  # 被测的实现也给了 / the implementation under test is supplied too
+        self.assertNotIn('previous_rulings', first)
+        if len(contexts) > 1:
+            self.assertEqual(contexts[1]['previous_rulings'][0]['rationale'], 'first ruling')
+
+
 if __name__ == '__main__':
     unittest.main()
