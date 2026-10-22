@@ -9,8 +9,10 @@
  },
  "application/console.py": {
   "go_file": 2,
-  "op_ids": 1,
   "pack_import": 1
+ },
+ "application/console_jobs.py": {
+  "op_ids": 1
  },
  "application/generation.py": {
   "go_file": 4,
@@ -18,7 +20,7 @@
   "go_word": 4,
   "gofmt": 2
  },
- "application/orchestration/coordinator.py": {
+ "application/orchestration/fixflow.py": {
   "go_file": 2,
   "go_mod": 1
  },
