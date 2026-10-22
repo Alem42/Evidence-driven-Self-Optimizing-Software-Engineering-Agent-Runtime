@@ -127,6 +127,12 @@ class FixFlowMixin:
             phase('test_revision',verified,attempt+1)
             base='Fix the recorded test-file errors, including any '+self.pack.ui().get('format_name','format')+' failure. Preserve behavioral assertions and requirements.'
             flipped=not facts.get('flipped') and (facts.get('halt_kind') in ('expectation_suspected','noop','wants_tests') or int(facts.get('noop_count',0))>=int(facts.get('noop_limit',3)))
+            # 这次修订测试的依据写进账本，交付报告据此说明“测试为什么被改”：确定性分类 / Diagnoser 的逐条核对 / 裁判多数 + 实际值不变 / 无裁决者时的旧捷径。
+            # The basis of this test revision goes into the ledger and the delivery report says why the tests changed: deterministic classification / the Diagnoser's per-case check / referee majority + stable actual value / the old shortcut when there is no adjudicator.
+            verdict=(facts.get('diagnosis') or {}).get('owner')
+            basis=('referee_and_stable_actual_value' if facts.get('halt_kind')=='expectation_suspected' else 'diagnosis' if verdict in ('test','both')
+                   else 'deterministic_classification' if facts.get('primary')=='test' and not facts.get('diagnosed') else 'legacy_shortcut_no_adjudicator')
+            self._emit('test_revision_basis',{'basis':basis},verified,always=True)
             if flipped:
                 # 最强模型多次审视后认为实现无需改动：逐条重新手算期望值（字节数要把换行和多字节字符算进去），只改算错的期望。
                 # The strongest model reviewed the implementation repeatedly and changed nothing: recompute EVERY expected value by hand and change only the wrong ones.

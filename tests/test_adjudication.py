@@ -13,6 +13,7 @@ class AdjudicationTests(AssertCase):
         path = self.nodes(store)
         self.assertEqual(path[:2], [('classify', 'diagnose'), ('diagnose', 'revise')], path)  # 断言失败的第一轮就请裁决者，裁决后先改测试 / the first assertion failure is adjudicated, then the test is corrected first
         self.assertNotIn(('diagnose', 'repair'), path)
+        self.assertEqual({e['basis'] for e in self.events(store, 'test_revision_basis')}, {'diagnosis'})  # 改测试的依据写进了账本 / the basis of the revision is in the ledger
 
     def test_an_implementation_verdict_repairs_the_implementation(self):
         impl = {'owner': 'implementation', 'rationale': 'r', 'implementation_instructions': 'fix the code', 'test_instructions': '', 'expectation_checks': []}

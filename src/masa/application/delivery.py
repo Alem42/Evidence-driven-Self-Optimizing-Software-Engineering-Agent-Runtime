@@ -92,7 +92,14 @@ def build(store, rid, runner=None, run_smoke=False):
     for note in notes:
         assumptions.append({'source': 'user', 'text': f'You added during the run: {str(note)[:200]}'})
     if revisions:
-        assumptions.append({'source': 'harness', 'text': f'The tests were revised {revisions} time(s) by the harness after failed verifications: those expectations were not written by you.'})
+        bases = [e['payload'].get('basis') for member in {v['run_id'] for v in report['versions']} for e in store.events(member) if e['type'] == 'test_revision_basis']
+        weak = [b for b in bases if b == 'legacy_shortcut_no_adjudicator']
+        text = f'The tests were revised {revisions} time(s) by the harness after failed verifications: those expectations were not written by you.'
+        if bases:
+            text += ' Basis: ' + ', '.join(f'{b} x{bases.count(b)}' for b in sorted(set(bases))) + '.'
+        if weak:
+            text += ' WARNING: at least one revision rested only on "the implementation could not be fixed" (no adjudicator was available), which is not independent evidence that the test was wrong.'
+        assumptions.append({'source': 'harness', 'text': text})
     assumptions.append({'source': 'default', 'text': f'Language: {pack.title}; project layout and entry point follow the language pack ({pack.entrypoint(spec)}).'})
 
     independent = [p for p in report['process'] if p['kind'] in ('case_audit', 'assertion_referee')]

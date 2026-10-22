@@ -1,0 +1,66 @@
+{
+  "id": "qa_adversary",
+  "label": "对抗性测试输入",
+  "description": "没看过实现，只凭目标和验收项提出能击穿合理实现的新输入（不给期望）；通过后加固的一部分（默认关闭）",
+  "order": 123,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "known_inputs"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "qa_adversary.prompt.md",
+  "max_output_tokens": 3000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": [
+      "inputs"
+    ],
+    "properties": {
+      "inputs": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 12,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "args",
+            "stdin"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "args": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "stdin": {
+              "type": "string",
+              "maxLength": 800
+            },
+            "why": {
+              "type": "string",
+              "maxLength": 240
+            }
+          }
+        }
+      }
+    }
+  }
+}

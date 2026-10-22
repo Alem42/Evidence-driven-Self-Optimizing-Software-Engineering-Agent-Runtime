@@ -25,7 +25,7 @@ def final_files(state, bench_id):
         store.close()
 
 
-def main(folders):
+def main(folders, out=None):
     rows = []
     for folder in folders:
         state = Path(folder)
@@ -38,9 +38,11 @@ def main(folders):
             else:
                 result = judge(files, task, None, run.get('language') or 'python')
                 verdict = 'pass' if result['passed'] else 'fail' if result.get('built') else 'no build'
-            rows.append((state.name, run['task'], run['arm'], run.get('round', 1), run['status'], verdict, run['cost']))
+            rows.append((state.name, run['task'], run['arm'], run.get('round', 1), run['status'], verdict, run['cost'], run.get('calls'), run.get('cloud_tokens'), run.get('seconds'), run.get('verifications')))
     print(f"{'folder':14} {'task':12} {'arm':5} {'rd':>2}  {'then':10} {'now':8} {'cost':>7}")
-    for folder, task, arm, rnd, then, now, cost in rows:
+    if out:
+        Path(out).write_text(json.dumps([dict(zip(('folder', 'task', 'arm', 'round', 'then', 'now', 'cost', 'calls', 'cloud_tokens', 'seconds', 'verifications'), r)) for r in rows], ensure_ascii=False, indent=1), encoding='utf-8')
+    for folder, task, arm, rnd, then, now, cost, *_ in rows:
         flag = '  <-- changed' if (then == 'pass') != (now == 'pass') and then in ('pass', 'false_pass') else ''
         print(f'{folder:14} {task:12} {arm:5} {rnd:>2}  {then:10} {now:8} {cost:7.4f}{flag}')
     return 0
@@ -49,4 +51,10 @@ def main(folders):
 if __name__ == '__main__':
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.exit(main(sys.argv[1:]))
+    arguments = sys.argv[1:]
+    target = None
+    if '--out' in arguments:
+        position = arguments.index('--out')
+        target = arguments[position + 1]
+        del arguments[position:position + 2]
+    sys.exit(main(arguments, target))

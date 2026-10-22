@@ -59,6 +59,10 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.policy({'runtime': 'v2'})['memory_strategy'], 'auto')  # 工人循环按窗口自动选记忆策略 / the worker loops pick their memory tier from the window
         self.assertEqual(self.policy({'runtime': 'v2repair', 'policy': {'memory_strategy': 'window'}})['memory_strategy'], 'window')
         self.assertFalse(self.policy({'runtime': 'v2repair', 'policy': {'test_audit': False}})['test_audit'])
+        # 可执行的验收用例：v2repair 默认开，请求里显式关闭的不改；V1 默认流程完全不受影响。 Executable acceptance cases: on by default for v2repair, an explicit off stays, the V1 default flow is untouched.
+        self.assertTrue(self.policy({'runtime': 'v2repair'})['acceptance_cases'])
+        self.assertFalse(self.policy({'runtime': 'v2repair', 'policy': {'acceptance_cases': False}})['acceptance_cases'])
+        self.assertNotIn('acceptance_cases', self.policy({'runtime': 'v2'}) or {})
 
 
 class StableActualValueTests(unittest.TestCase):

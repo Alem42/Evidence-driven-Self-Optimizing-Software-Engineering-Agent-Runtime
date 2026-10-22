@@ -168,6 +168,11 @@ class JobsMixin:
             # “V1 生成 + 工人修复”默认开用例审计与断言裁判：它们是已测得有效的独立证据（配对评测里审计 更好5/更差0/平12；LCS 回放里审计 ¥0.002 抓到 2–3/3 个错用例），也是信号 S1 触发仲裁的前提。请求里显式给出的值不改。
             # "V1 generation + worker repair" turns the case audit and the assertion referee on by default: independent evidence measured to work (paired audit 5 better / 0 worse / 12 equal; the LCS replay caught 2-3 of 3 wrong cases for 0.002 CNY) and the precondition for signal S1 to trigger arbitration. Explicit request values stay.
             policy={'test_audit':True,'assertion_referee':True,**(policy if isinstance(policy,dict) else {})}
+            # 可执行的验收用例也默认开（只对声明了 acceptance 能力的语言包，目前只有 Python；其它语言包不受影响）。证据是**无退步**而不是**有提升**：40+ 次真实运行里通过率 91%（20/22）对 89%（25/28），每次花费 ¥0.0465 对 ¥0.0485，
+            # 变异测试里它对浅层缺陷没有比单元测试多抓；它的价值在结构上（用例由程序确定性地变成测试、模型改不了、失败直接指出用例和输入）。要关掉就把策略 acceptance_cases 设为 false。
+            # Executable acceptance cases are on by default too (only for packs with the acceptance capability, currently Python). The evidence is NON-REGRESSION, not improvement: pass rate 91% (20/22) vs 89% (25/28), CNY 0.0465 vs 0.0485 per run;
+            # in mutation testing it catches no more shallow defects than the unit tests. Its value is structural (cases become tests deterministically, no model can edit them, a failure names the case and its input). Set the policy acceptance_cases to false to switch it off.
+            policy={'acceptance_cases':True,**(policy if isinstance(policy,dict) else {})}
         return policy
 
     @staticmethod

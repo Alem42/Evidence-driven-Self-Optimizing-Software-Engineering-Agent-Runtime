@@ -93,17 +93,19 @@ cd runner; go test ./...                       # Go runner
 requirement
    │  pre-check (rules; optional local review)
    ▼
-Planner ──► spec + acceptance criteria        (strong model, once; deterministic gate checks the spec)
-Tester  ──► check plan + cases                (optional blind-derivation audit of expected values)
+Architect ─► spec + acceptance criteria + check plan + cases + assumptions   (strong model, ONE call; deterministic gate checks every part;
+   │          optional blind-derivation audit of expected values; for Python the cases can be structured black-box cases that the harness
+   │          turns into tests/test_acceptance.py deterministically)
    │  approved & FROZEN
    ▼
 Generate files ──► per-file syntax check, import repair, in-place rewrite
    ▼
 Verify in sandbox ──► Gate: real tests / static analysis / format, snapshot matches, tool ledger matches
    ├─ pass ──► report with evidence
-   └─ fail ──► ownership analysis ─► Diagnoser (who is wrong: code or test?)
+   └─ fail ──► ownership analysis ─► Diagnoser = the Architect in adjudication mode (the only way a test gets revised)
                  ├─ code wrong ─► reopen ONLY the failing package (worker loop, writes limited to that package, tests frozen)
-                 └─ test wrong ─► revise tests in a new version (old versions are never overwritten)
+                 ├─ test wrong ─► revise tests in a new version (old versions are never overwritten)
+                 └─ "cannot fix the code" is NOT evidence that the test is wrong: ask the Diagnoser once, then hand over to a human
 ```
 
 ## Architecture / 架构
@@ -185,6 +187,8 @@ All numbers are small samples and indicate direction, not statistical significan
 - **Experiments that did *not* pay off** (removed in the 2026-10 pruning; tag `archive/pre-prune-2026-10` keeps them): LLM "conductor" scheduling (3/7 vs 6/7 passes, 24–96% dearer), best-of-N repair sampling, an experience library, planner examples, a package contract, an offline workflow tuner.
 - **Worker memory:** the latest failing check had already left the verbatim 3-step window on **21%** of late worker steps (replay over 264 ledgers); digest lines + pinned items + recall keep it at about +11% input; the strategy is chosen from the model's effective context window. A real A/B on two 10-file tasks passed with both strategies (n=1).
 - **Unattended operation (minimal):** crash recovery has three outcomes - reuse a stored result, pause an uncertain paid call as *pending* (never resent), or retry only when explicitly allowed; `masa watch` restarts the service after a crash (2 hard kills, 2 restarts) and an ops API/webhook exposes status, pending items and events.
+- **Planner + Tester merged into one Architect call (2026-10-23):** about 25 real Flash-only runs per arm on the nine-task VagueBench ruler plus larger tasks, judged by the independent oracle: pass rate 89% (25/28, Architect) / 91% (20/22, Architect + executable acceptance cases) vs 76% (19/25, old two-role flow); cost per run CNY 0.0485 / 0.0465 vs 0.0650. Directional only - the differences are not statistically significant, the point is *no regression* and fewer expensive tails. The first run of the ruler also exposed a real bug (a Markdown-to-HTML task was ruled infeasible by the pre-check because it mentioned HTML).
+- **How weak are the model-written tests against shallow bugs?** In mutation testing (single-point mutants of the final code) the unit tests caught 32/33 of the mutants the independent oracle rejects; the generated acceptance tests caught about as many. Shallow weakness is NOT where false passes come from - they come from scenarios nobody wrote down (a leap-day search horizon, prerelease ordering across versions), which mutation cannot reveal.
 - **Honest status of the last end-to-end check:** bank, grades and 3 LCS runs passed with Flash only (about 1.4 CNY in total); one inventory run was a **false pass** (Gate passed, the independent oracle failed) - model-written tests from one family can be wrong together, which is what the next phase (property/differential checks) targets.
 - **Local models:** a 17.9 GB local model could not reliably act as a tool-using repair worker on a 16 GB GPU; today the local model is used for pre-checks and first drafts, and cloud Flash handles repair. The "local small model grinds, cloud model supervises" goal is the design direction; a local pass@k study is still to be done.
 
@@ -192,7 +196,7 @@ All numbers are small samples and indicate direction, not statistical significan
 
 - Languages: Go and Python only; tasks are small, well-specified modules (about 1–10 files), not large repositories.
 - A Gate pass means the selected checks passed; it does not prove business correctness.
-- If the tests themselves are wrong, repeated repairs are wasted; the audit and a "stuck → arbitrate" signal reduce this but do not eliminate it.
+- If the tests themselves are wrong, repeated repairs are wasted; the audit, the stable-actual-value signal and the Diagnoser's per-case check reduce this but do not eliminate it. Tests, audit, referee and Diagnoser are all model-written, and errors of one model family are correlated.
 - Bring-your-own-tests entry (human-written tests, frozen as-is) and requirement versioning are designed but not implemented.
 - Hybrid (local-first) mode is not yet proven cheaper or better than a cloud-only run.
 

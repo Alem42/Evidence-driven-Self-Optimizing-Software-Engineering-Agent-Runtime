@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -22,11 +23,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
 from masa.bench.oracle import judge  # noqa: E402
 from masa.bench.runner import BY_ID  # noqa: E402
+from masa.infrastructure.runner import Runner  # noqa: E402
 from masa.infrastructure.store import Store  # noqa: E402
 from masa.languages.python import mutants  # noqa: E402
 from masa.languages.registry import registry  # noqa: E402
 
 PACK = registry.get('python')
+RUNNER = Runner(ROOT / '.tools/bin/masa-runner.exe')
 ACCEPTANCE = 'tests/test_acceptance.py'
 NO_WINDOW = {'creationflags': 0x08000000} if os.name == 'nt' else {}
 ENV = {k: v for k, v in os.environ.items() if k.upper() in ('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PATH')}
@@ -40,18 +43,11 @@ def write(directory, files):
 
 
 def passes(directory):
-    """这一套测试在这个目录上全部通过吗（超时算没通过，并结束整棵进程树：变异体可能死循环）。 Does the suite pass on this directory (a timeout counts as failing and the whole process tree is killed: a mutant may loop forever)?"""
-    process = subprocess.Popen([sys.executable, '-E', '-s', '-B', '-X', 'utf8', '-m', 'unittest', 'discover', '-s', 'tests'], cwd=directory, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, env=ENV, stdin=subprocess.DEVNULL, **NO_WINDOW)
-    try:
-        return process.wait(timeout=40) == 0
-    except subprocess.TimeoutExpired:
-        if os.name == 'nt':
-            subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True, **NO_WINDOW)
-        else:
-            process.kill()
-        process.wait()
-        return False
+    """这一套测试在这个目录上全部通过吗：交给**项目自己的受控运行器**（超时、作业对象 kill-on-close、内存与进程上限）——变异体可能死循环，自己起子进程会留下孤儿进程。
+    Does the suite pass on this directory: handed to the project's own controlled runner (timeout, Job Object with kill-on-close, memory and process limits) - a mutant may loop forever and spawning processes ourselves leaves orphans."""
+    request = {'protocol_version': 1, 'request_id': uuid.uuid4().hex, 'snapshot_id': 'mutation-probe', 'operation': PACK.op_id('test'), 'timeout_ms': 40000, 'max_output_bytes': 65536}
+    result = RUNNER.execute(request, Path(directory), lambda: False)
+    return result.get('status') == 'completed' and result.get('exit_code') == 0
 
 
 def bundle_of(state, bench_id):

@@ -292,6 +292,7 @@ class EvidenceGateTests(FixFlowCase):
         store, job = self.run_task(local, cloud, world, policy={'diagnose': False})
         path = [(s['node'], s['to']) for s in self.trace(store)]
         self.assertIn(('repair', 'revise'), path)
+        self.assertIn('legacy_shortcut_no_adjudicator', [e['basis'] for e in self.events(store, 'test_revision_basis')])  # 弱依据被如实标出 / the weak basis is labelled as such
 
 
 class ResidencyTests(FixFlowCase):

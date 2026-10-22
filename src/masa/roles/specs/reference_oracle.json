@@ -1,0 +1,38 @@
+{
+  "id": "reference_oracle",
+  "label": "参考实现（交叉核对用）",
+  "description": "没看过项目的任何代码和测试，凭目标和验收项写一个最直白、暴力的单文件参考程序，用来和真正的实现做差分核对（默认关闭）",
+  "order": 124,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "reference_oracle.prompt.md",
+  "max_output_tokens": 6000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": [
+      "lines"
+    ],
+    "properties": {
+      "lines": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 400,
+        "items": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    }
+  }
+}
