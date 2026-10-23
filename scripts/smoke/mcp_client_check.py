@@ -28,7 +28,7 @@ async def main():
             good = await session.call_tool('verify_project', {'files': GOOD})
             bad = await session.call_tool('verify_project', {'files': BAD, 'checks': ['go_test']})
             refused = await session.call_tool('verify_project', {'files': {'go.mod': 'x', '../evil.go': 'x'}})
-            route = await session.call_tool('route_preview', {'role': 'project_planner', 'candidates': CANDIDATES})
+            route = await session.call_tool('route_preview', {'role': 'project_architect', 'candidates': CANDIDATES})
             paid = await session.call_tool('run_benchmark', {})
             parse = lambda r: json.loads(r.content[0].text) if not r.isError else {'error': r.content[0].text[:140]}  # noqa: E731
             result = {'good_passed': parse(good).get('passed'), 'bad_passed': parse(bad).get('passed'), 'traversal_refused': refused.isError,

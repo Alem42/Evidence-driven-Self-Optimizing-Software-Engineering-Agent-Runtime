@@ -93,6 +93,19 @@ class RunnerIntegrationTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 1, result)
         self.assertEqual(path.read_text(), original)
 
+    def test_published_snapshot_is_not_written_by_the_code_under_test(self):
+        """被测代码往当前目录写文件（数据库、存档）不许改动已发布的快照；它只在隔离副本里跑。
+        Code under test writing into the current directory (a database, a save file) must not touch the published snapshot; it runs in an isolated copy."""
+        published = Path(self.temp.name) / "workspaces" / uuid.uuid4().hex
+        published.parent.mkdir()
+        shutil.copytree(self.workspace, published)
+        (published / "save_test.go").write_text('package fixture\nimport ("os"; "testing")\nfunc TestSave(t *testing.T) {\n if err := os.WriteFile("save.db", []byte("x"), 0o644); err != nil { t.Fatal(err) }\n}\n')
+        before = sorted(p.name for p in published.iterdir())
+        result = self.runner.execute(self.request(), published, lambda: False)
+        self.assertEqual((result["status"], result["exit_code"]), ("completed", 0), result)
+        self.assertEqual(sorted(p.name for p in published.iterdir()), before)
+        self.assertEqual([p.name for p in published.parent.iterdir()], [published.name])
+
     def test_large_output_and_secret_environment(self):
         code = '''package fixture
 import ("fmt"; "os"; "strings"; "testing")

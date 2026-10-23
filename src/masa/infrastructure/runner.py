@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import tempfile
 import threading
 import time
+import uuid
 
 from masa.domain.models import MasaError, canonical
 from masa.languages.registry import registry
@@ -24,6 +26,24 @@ class Runner:
             raise MasaError("runner or Go binary missing; run scripts/build.ps1 first")
 
     def execute(self, request: dict, workspace: Path, cancelled) -> dict:
+        """在**隔离副本**里执行：已发布的快照目录（`<state>/workspaces/<run id>`）是证据，被测代码和测试不许改它。
+        以前直接在快照目录里跑，凡是把数据写进当前目录的程序（数据库文件、存档、缓存）都会让引擎的“工作区没变”检查失败，整个验证以 `snapshot_mismatch` 结束，
+        没有任何修复机会——压力任务（迷你数据库、冒险游戏、项目管理工具）一上来就这样死掉。副本的目录名是 32 位十六进制（回溯里的路径仍能还原成项目内的相对路径）。
+        Run in an ISOLATED COPY: the published snapshot directory is evidence and the code under test and its tests must not change it. Before, tools ran in the snapshot itself, so any program that
+        writes data into the current directory (a database file, a save file, a cache) made the engine's "workspace unchanged" check fail and the whole verification ended as snapshot_mismatch without any
+        chance of repair - the stress tasks (a mini database, an adventure game, a project manager) died exactly like that. The copy's name is 32 hex digits so traceback paths still map to project-relative ones."""
+        isolated = None
+        if workspace.parent.name == "workspaces":
+            isolated = workspace.parent / uuid.uuid4().hex
+            shutil.copytree(workspace, isolated)
+            workspace = isolated
+        try:
+            return self._execute_with_ops(request, workspace, cancelled)
+        finally:
+            if isolated is not None:
+                shutil.rmtree(isolated, ignore_errors=True)
+
+    def _execute_with_ops(self, request: dict, workspace: Path, cancelled) -> dict:
         # 操作怎么执行由语言包生成的清单决定；请求里只有操作名。 How an operation runs comes from a pack-generated table; the request carries only the operation name.
         pack = registry.pack_of_operation(request["operation"])
         ops = pack.runner_ops(self)

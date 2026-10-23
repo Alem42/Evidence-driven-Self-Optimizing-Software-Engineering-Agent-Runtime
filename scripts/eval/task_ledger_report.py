@@ -33,7 +33,7 @@ def prices(state):
 def phase_of(purpose, model, repair_of):
     if purpose == 'package_worker':
         return 'repair workers'
-    return {'project_triage': 'triage', 'project_planner': 'planning', 'project_tester': 'planning', 'project_developer': 'first draft', 'project_diagnoser': 'diagnoser',
+    return {'project_triage': 'triage', 'project_architect': 'planning', 'project_planner': 'planning', 'project_tester': 'planning', 'project_developer': 'first draft', 'project_diagnoser': 'diagnoser',
             'project_test_revision': 'test revision', 'project_repair': 'repair (patch)', 'assertion_referee': 'referee', 'case_deriver': 'audit', 'case_judge': 'audit'}.get(purpose, purpose)
 
 
