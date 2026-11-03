@@ -153,7 +153,14 @@ class Router:
         if self.mode == 'fixed' or not anchor_run:
             return {'calls': 0, 'cloud_calls': 0, 'local_calls': 0, 'cloud_tokens': 0, 'active_seconds': 0, 'cost': 0.0, 'cost_known': True, 'reserved_calls': 0}
         from masa.application.usage import task_report
-        return spend_from_report(task_report(self.store, anchor_run), self.prices)
+        spent = spend_from_report(task_report(self.store, anchor_run), self.prices)
+        # 工作项在已有项目的版本链上继续：任务报告汇总整条链（项目的全部历史），预算只算这个任务自己。开始时记下的链上花费在这里减掉。
+        # A work item continues an existing project's version chain: the task report sums the whole chain (the project's history), the budget counts only this task. The chain's spend recorded at the start is subtracted here.
+        offset = self.snapshot.get('spend_offset') or {}
+        for key in ('calls', 'cloud_calls', 'local_calls', 'cloud_tokens', 'active_seconds', 'cost'):
+            if key in offset and isinstance(spent.get(key), (int, float)):
+                spent[key] = max(0, round(spent[key] - offset[key], 6))
+        return spent
 
     def decide(self, role, chain, history, *, anchor_run=None, need=None):
         """返回 (Decision, provider|None, spend)。stop 时 provider 为 None。 Provider is None on a stop decision."""

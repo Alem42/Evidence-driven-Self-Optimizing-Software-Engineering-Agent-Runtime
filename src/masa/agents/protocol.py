@@ -114,6 +114,10 @@ def _validate_project_roles(context, action, key):
             raise MasaError('invalid test revision proposal')
         validate_test_revision(action['files'],context['original_files'],context.get('language'))
         return action['files']
+    if context['purpose'] == 'project_architect' and context.get('change_request'):
+        # 变更模式（在已验证的项目上加一个功能）：只返回增量，由规划层与基线合并 / change mode: only the delta, merged with the baseline by the planning layer
+        from masa.domain.proposals import validate_change
+        return validate_change(action, context.get('language'))
     if context['purpose'] == 'project_architect':
         if action.get('kind')=='clarification_request' and context.get('clarification_allowed'):
             from masa.domain.clarification import validate_question

@@ -348,8 +348,11 @@ class ProjectGeneration:
         saved=next((row for row in roles.states(rid) if row['purpose']==purpose),None)
         # 免费本地模型的未完成调用可由 RoleRuntime 作为新尝试重试；其余仍要求显式新修订。
         # A free local call may be re-attempted by RoleRuntime; anything else still needs an explicit new revision.
-        retryable=bool(saved) and saved['status']!='completed' and getattr(provider,'retry_unknown_calls',False) \
-            and (getattr(provider,'config',None) or {}).get('model_type')=='local'
+        # 付费调用：只有策略 unknown_paid_calls = retry 明确允许时才发起新的一次尝试（与 RoleRuntime 的规则一致；以前这里连明确允许也拒绝）。
+        # A paid call: a new attempt only when the policy unknown_paid_calls = retry explicitly allows it (the same rule as RoleRuntime; this used to refuse even then).
+        retryable=bool(saved) and saved['status']!='completed' and (
+            (getattr(provider,'retry_unknown_calls',False) and (getattr(provider,'config',None) or {}).get('model_type')=='local')
+            or getattr(provider,'retry_unknown_paid',False))
         if not saved or (saved['status']!='completed' and not retryable):
             raise MasaError('revision result unavailable; create an explicit retry revision')
         # 使用原始输入和原始模型配置校验缓存身份，恢复时仍执行所有提案约束。
@@ -469,6 +472,35 @@ class ProjectGeneration:
         if on_created:on_created(rid)
         self.store.event(rid,'test_format_applied',{'files_ref':metadata['files_ref'],'paths':format_paths})
         self.planning.update(rid,metadata,'paused','project_test_format_review_requested')
+        return rid
+
+    def change_draft(self, parent, base_files, on_created=None):
+        """工作项的草稿，不调用模型：基线的全部文件 + 按新规格确定性重新生成的验收测试（新用例此时必然失败）+ 新计划文件的占位。
+        之后的验证失败由正常的修复流程接手：修复工人对着冻结的（新旧）用例把功能实现出来。
+        A work item's draft without any model call: every baseline file + the acceptance tests regenerated from the new spec (the new cases fail at this point) + placeholders for newly planned files.
+        The failing verification is then handled by the normal repair flow: the repair workers implement the feature against the frozen (old and new) cases."""
+        self._use(parent)
+        original = self.store.run(parent)
+        plan = original['data'].get('project_plan', {})
+        if plan.get('status') != 'approved' or not plan.get('change_of') or original['cancel_requested']:
+            raise MasaError('approve the change plan first')
+        approved = self.store.read(plan['approval_ref'])
+        spec = approved['spec']
+        files = {p: t for p, t in base_files.items() if p in {f['path'] for f in spec['files']}}
+        files.update(self.pack.seed_files(spec))
+        purposes = {f['path']: f['purpose'] for f in spec['files']}
+        added = sorted(p for p in purposes if p not in files)
+        for path in added:
+            files[path] = self.pack.placeholder(path, purposes[path])
+        files = validate_files(files, spec, self.pack.id)
+        metadata = {'kind': 'code', 'status': 'awaiting_review', 'spec_approval_ref': plan['approval_ref'], 'provider': plan.get('provider') or {},
+                    'change_draft': True, 'added_files': added, 'files_ref': self.store.put(files)}
+        rid = Runtime(self.store, self.executor).create(Path(original['data']['workspace']), original['data']['goal'], Budget(model_calls=1, tool_calls=3, deadline_seconds=86400),
+                                                       graph=Runtime.compile_project_checks(spec, approved['checks'], self.pack.id), parent_run_id=parent, project_plan=metadata)
+        if on_created:
+            on_created(rid)
+        self.store.event(rid, 'change_draft', {'added_files': added, 'cases': len(spec.get('cases') or [])})
+        self.planning.update(rid, metadata, 'paused', 'project_code_review_requested')
         return rid
 
     def reverify(self, interrupted):

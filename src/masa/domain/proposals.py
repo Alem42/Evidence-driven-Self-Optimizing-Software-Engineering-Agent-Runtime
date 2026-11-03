@@ -15,12 +15,28 @@ def _pack(language=None):
     return registry.for_run({'language': language})
 
 
+# 一次规划的上限，以及“累积规格”（带 history：在已验证的项目上逐个加功能，工作项）的上限。一次规划的提示词与这些上限都没变。
+# Limits of a one-shot plan, and of an ACCUMULATED spec (one with a history: features added one by one on a verified project, work items). One-shot prompts and limits are unchanged.
+ONE_SHOT = {'acceptance': 24, 'bytes': 40000}
+ACCUMULATED = {'acceptance': 80, 'bytes': 160000, 'files': 48, 'history': 100}
+
+
+def _history(value):
+    if not isinstance(value, list) or not 1 <= len(value) <= ACCUMULATED['history']:
+        raise MasaError(f"spec.history must list 1..{ACCUMULATED['history']} applied changes")
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {'no', 'change', 'summary'} or type(item['no']) is not int:
+            raise MasaError('spec.history entries are exactly {no, change, summary}')
+        text(item['change'], 4000)
+        text(item['summary'], 2000)
+
+
 def validate_spec(spec, language=None):
     """校验可移植目录与标准库 CLI 规格，不相信模型输出；语言相关的规则来自语言包。 Validate portable standard-library CLI specifications; language rules come from the pack."""
     pack = _pack(language)
     layout = pack.layout
     # 旧的实验（Planner 示例，已删除）留在已保存规格里的 examples 字段仍然合法，但不再使用。 `examples` left in saved specs by the removed Planner-examples experiment stays valid and is ignored.
-    optional = {'examples'} | ({'cases'} if pack.supports('acceptance') else set())
+    optional = {'examples'} | ({'cases', 'history'} if pack.supports('acceptance') else set())
     if not isinstance(spec, dict) or set(spec) - optional != {'summary','module','entrypoint','files','acceptance'}:
         # 说清楚缺哪个、多哪个：模型据此才能在重试时改对（真实运行里三次规划各错一个字段，旧消息只有“字段无效”，规划失败）。
         # Say which field is missing or extra so the model can correct itself on the retry (in a real run three planning attempts each got one field wrong and the old message only said "invalid fields").
@@ -34,9 +50,13 @@ def validate_spec(spec, language=None):
     entry = pack.entrypoint(spec)
     if spec['entrypoint'] != entry:
         raise MasaError(f'entrypoint must be {entry}')
+    accumulated = 'history' in spec
+    if accumulated:
+        _history(spec['history'])
+    limits = ACCUMULATED if accumulated else {**ONE_SHOT, 'files': layout['max_files']}
     files = spec['files']
-    if not isinstance(files, list) or not layout['min_files'] <= len(files) <= layout['max_files']:
-        raise MasaError(f"project requires {layout['min_files']}..{layout['max_files']} files")
+    if not isinstance(files, list) or not layout['min_files'] <= len(files) <= limits['files']:
+        raise MasaError(f"project requires {layout['min_files']}..{limits['files']} files")
     names = set()
     for item in files:
         if not isinstance(item, dict) or set(item) != {'path','purpose'}:
@@ -60,12 +80,12 @@ def validate_spec(spec, language=None):
     if any(any(other.startswith(n + '/') for other in names) for n in names):
         raise MasaError('file/directory path conflict')
     acceptance = spec['acceptance']
-    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= 24:
-        raise MasaError('provide 1..24 acceptance criteria')
+    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= limits['acceptance']:
+        raise MasaError(f"provide 1..{limits['acceptance']} acceptance criteria")
     for criterion in acceptance:
         text(criterion)
-    if len(canonical(spec).encode('utf-8')) > 40000:
-        raise MasaError('project specification exceeds 40 KB')
+    if len(canonical(spec).encode('utf-8')) > limits['bytes']:
+        raise MasaError(f"project specification exceeds {limits['bytes'] // 1000} KB")
     pack.validate_spec(spec)  # 语言包的额外规则（例如 Python 的包必须有 __init__.py）/ extra language rules (e.g. Python packages need __init__.py)
     return spec
 
@@ -319,6 +339,103 @@ def validate_architect(action, language=None, structured=False):
     except MasaError as exc:
         raise MasaError('checks: ' + str(exc) + '. Contract reminder: "checks" is a list of 1 to 3 objects, each with EXACTLY operation, purpose, acceptance_indices (zero-based integers valid for spec.acceptance) and, only when concrete cases are given, cases (each exactly name, input, expected, level).') from None
     return {'spec': spec, 'checks': checks, 'assumptions': _assumptions(action.get('assumptions'))}
+
+
+MAX_CHANGE_ACCEPTANCE = 8
+MAX_CHANGE_FILES = 8
+
+
+def validate_change(action, language=None):
+    """变更模式下 Architect 的回答（在已验证的项目上加一个功能）：只是增量——新验收项、新黑盒用例、要新增或改用途的文件、要退役的旧用例。
+    合并成完整规格由 merge_change 做（它要看基线）；这里只检查形状并规范化，错误标明字段，重试时模型才知道改哪里。
+    The Architect's answer in change mode (one feature on a verified project) is only a delta: new acceptance items, new black-box cases, files to add or re-purpose, old cases to retire.
+    merge_change builds the full spec (it needs the baseline); this only checks the shape and normalises it, naming the field so a retry knows what to fix."""
+    if not isinstance(action, dict):
+        raise MasaError('invalid change answer: expected {"change":{"summary","acceptance","files","cases","retire"},"assumptions":[...]}')
+    raw = action['change'] if isinstance(action.get('change'), dict) else action
+    pack = _pack(language)
+    if not pack.supports('acceptance'):
+        raise MasaError(f'{pack.title} projects cannot be extended yet: change mode needs executable acceptance cases')
+    try:
+        summary = text(raw.get('summary'), 2000)
+    except MasaError:
+        raise MasaError('change.summary must be a short nonempty description of the change') from None
+    acceptance = raw.get('acceptance')
+    if not isinstance(acceptance, list) or not 1 <= len(acceptance) <= MAX_CHANGE_ACCEPTANCE:
+        raise MasaError(f'change.acceptance must list 1..{MAX_CHANGE_ACCEPTANCE} NEW acceptance items (existing ones stay in force and are not repeated)')
+    for item in acceptance:
+        text(item)
+    problem = acceptance_problem(acceptance)
+    if problem:
+        raise MasaError('change.' + problem)
+    files = raw.get('files', [])
+    if not isinstance(files, list) or len(files) > MAX_CHANGE_FILES or any(not isinstance(f, dict) or set(f) != {'path', 'purpose'} for f in files):
+        raise MasaError(f'change.files must be a list of at most {MAX_CHANGE_FILES} objects with exactly path and purpose ([] when the existing files suffice)')
+    for item in files:
+        text(item['path'], 180)
+        text(item['purpose'])
+        if pack.is_test(item['path']):
+            raise MasaError(f"change.files: {item['path']} is a test file; the cases are the tests of a change, do not plan test files")
+    retire = raw.get('retire', [])
+    if not isinstance(retire, list) or any(type(i) is not int or i < 0 for i in retire):
+        raise MasaError('change.retire must be a list of zero-based indices into current_cases')
+    try:
+        cases = pack.normalize_cases(raw.get('cases'), len(acceptance))
+    except MasaError as exc:
+        raise MasaError('change.' + str(exc).replace('spec.', '')) from None
+    if len(cases) > 12:
+        raise MasaError('change.cases: at most 12 new cases for one change')
+    return {'summary': summary.strip(), 'acceptance': [a.strip() for a in acceptance], 'files': files, 'cases': cases, 'retire': sorted(set(retire)),
+            'assumptions': _assumptions(action.get('assumptions'))}
+
+
+def merge_change(spec, checks, change, language=None):
+    """把增量合并进基线规格：验收项追加；新用例追加（它们的 accepts 从“新验收项的下标”换算成合并后的下标）；退役的旧用例去掉；新文件加入、旧文件可改用途；
+    模块、入口和已有文件一个都不能少。检查计划沿用基线的，测试检查覆盖全部验收项，它的自由文本用例只放这次的新用例（工人与 Diagnoser 看的是“这次要做什么”，旧用例照样作为回归测试运行）。
+    返回 (合并后的规格, 检查计划, 被退役的用例)。
+    Merge a delta into the baseline spec: acceptance items are appended; new cases are appended (their accepts move from indices into the NEW items to merged indices); retired old cases are removed;
+    new files are added and existing ones may change purpose; module, entrypoint and every existing file stay. The check plan is the baseline's, its test check covers every acceptance item and its free-text cases
+    are only this change's new cases (workers and the Diagnoser see "what to do now"; the old cases still run as regression tests). Returns (merged spec, check plan, retired cases)."""
+    pack = _pack(language)
+    base_cases = list(spec.get('cases') or [])
+    if any(i >= len(base_cases) for i in change['retire']):
+        raise MasaError(f'change.retire: there are only {len(base_cases)} current cases (indices 0..{len(base_cases) - 1})')
+    offset = len(spec['acceptance'])
+    acceptance = list(spec['acceptance']) + [a for a in change['acceptance'] if a not in spec['acceptance']]
+    index_of = {i: acceptance.index(a) for i, a in enumerate(change['acceptance'])}
+    new_cases = [{**c, 'accepts': sorted({index_of[i] for i in c['accepts'] if i in index_of})} for c in change['cases']]
+    retired = [base_cases[i] for i in change['retire']]
+    cases = [c for i, c in enumerate(base_cases) if i not in set(change['retire'])] + new_cases
+    by_path = {f['path']: dict(f) for f in spec['files']}
+    for item in change['files']:
+        by_path[item['path']] = {'path': item['path'], 'purpose': item['purpose']}
+    files = list(by_path.values())
+    # 新的子包目录需要 __init__.py：由程序补上（它是空文件，属于确定性工作）。 New package directories need an __init__.py: added by the harness (an empty file, deterministic work).
+    names = {f['path'] for f in files}
+    for path in sorted(names):
+        if path.startswith(spec['module'] + '/') and pack.is_code(path) and '/' in path:
+            directory = path.rsplit('/', 1)[0]
+            while directory.startswith(spec['module']):
+                marker = f'{directory}/__init__.py'
+                if marker not in names and pack.supports('acceptance'):
+                    files.append({'path': marker, 'purpose': 'package marker (empty)'})
+                    names.add(marker)
+                if '/' not in directory:
+                    break
+                directory = directory.rsplit('/', 1)[0]
+    history = list(spec.get('history') or []) + [{'no': len(spec.get('history') or []) + 1, 'change': change.get('request') or change['summary'], 'summary': change['summary']}]
+    merged = {**spec, 'files': files, 'acceptance': acceptance, 'cases': cases, 'history': history}
+    validate_spec(merged, language)
+    test_op = pack.op_id('test')
+    plan = []
+    for check in checks:
+        check = {k: v for k, v in check.items() if k != 'cases'}
+        if check['operation'] == test_op:
+            check['acceptance_indices'] = sorted(set(check['acceptance_indices']) | set(range(offset, len(acceptance))) | set(pack.accepted_indices(cases)))
+            check['cases'] = [pack.describe_case(c) for c in new_cases][:16]
+        plan.append(check)
+    plan = validate_checks(plan, merged, require_coverage=False, language=language)
+    return merged, plan, retired
 
 
 def validate_diagnosis(action):

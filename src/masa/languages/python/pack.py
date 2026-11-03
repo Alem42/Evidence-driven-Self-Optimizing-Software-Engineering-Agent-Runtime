@@ -187,6 +187,11 @@ class PythonPack(LanguagePack):
     def allow_empty(self, path):
         return str(path).rsplit('/', 1)[-1] == '__init__.py'
 
+    def placeholder(self, path, purpose):
+        if str(path).rsplit('/', 1)[-1] == '__init__.py':
+            return ''
+        return '"""' + str(purpose).replace('"""', "'''")[:300] + ' (not implemented yet)."""' + chr(10)
+
     acceptance_path = acceptance.PATH
 
     def normalize_cases(self, cases, acceptance_count):
@@ -194,6 +199,15 @@ class PythonPack(LanguagePack):
 
     def describe_case(self, case):
         return acceptance.describe(case)
+
+    def cases_in_files(self, files, acceptance_count):
+        cases = acceptance.cases_in(files.get(acceptance.PATH))
+        if cases is None:
+            return None
+        try:
+            return acceptance.validate_cases(cases, acceptance_count)
+        except MasaError:
+            return None
 
     def accepted_indices(self, cases):
         return acceptance.accepted_indices(cases)

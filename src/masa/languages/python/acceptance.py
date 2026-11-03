@@ -16,7 +16,7 @@ import json
 from masa.domain.models import MasaError
 
 PATH = 'tests/test_acceptance.py'
-MAX_CASES = 24
+MAX_CASES = 160  # 一次规划仍只写 4..12 个；累积的规格（逐个加功能，每个功能的用例都留作回归测试）才会更多 / one plan still writes 4..12; only an accumulated spec (features added one by one, each feature's cases kept as regression tests) has more
 CASE_KEYS = {'name', 'accepts', 'args', 'stdin', 'stdout', 'exit_code', 'stderr_nonempty'}
 REQUIRED = {'name', 'args', 'stdin', 'stdout', 'exit_code'}
 LIMIT = 1000  # 一个字符串字段的长度上限 / length cap of one string field
@@ -114,6 +114,26 @@ for number, case in enumerate(CASES, 1):
 if __name__ == '__main__':
     unittest.main()
 '''
+
+
+def cases_in(text):
+    """从验收测试文件里读回用例数据（CASES 字面量）；读不出就返回 None。测试修订可以改这个文件（例如 Diagnoser 判出某个期望写错了），
+    规格里的 spec.cases 却还是旧的：下一次从规格重新生成文件时，改正会被悄悄撤销（R1 第 3 步真实发生过）。所以基线以**验证过的文件**为准。
+    Read the case data (the CASES literal) back from the acceptance file; None when it cannot be read. A test revision may change this file (e.g. the Diagnoser found a wrong expectation) while spec.cases
+    stays old: regenerating the file from the spec would silently undo the correction (it happened at R1 step 3). So a baseline trusts the VERIFIED file."""
+    import ast
+    try:
+        tree = ast.parse(text or '')
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], 'id', None) == 'CASES':
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            return value if isinstance(value, list) else None
+    return None
 
 
 def source(spec):

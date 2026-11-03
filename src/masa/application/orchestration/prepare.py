@@ -6,6 +6,56 @@ import time
 
 
 class PrepareMixin:
+    def _prepare_change(self, planning, generation, goal):
+        """工作项：变更规划（Architect 只写增量，被契约拒绝时带原因重试）→ 自动批准 → 不调用模型的草稿（旧代码 + 新的验收测试）。之后与新项目走同一个验证与修复循环。
+        A work item: change planning (the Architect writes only the delta; a rejected answer is retried with the reason) -> automatic approval -> a draft without any model call (old code + the new
+        acceptance tests). From there it is the same verification and repair loop as a new project."""
+        store=self.store
+        phase=self._phase
+        checkpoint=self.job
+        request=self.job['request']
+        # 进程在修复/测试修订中途被杀：接着那个修订做（与 _prepare 相同），而不是回到原来的草稿重新分类——R1 的 kill -9 测试里，丢掉的测试修订让流程转去“修”一个正确的实现，什么也没改，最后停下。
+        # The process died in the middle of a repair / test revision: continue that revision (as _prepare does) instead of going back to the original draft and re-classifying - in R1's kill -9 test the lost
+        # test revision sent the flow to "repair" a correct implementation, which changed nothing and halted.
+        if self.resuming and checkpoint.get('phase') in {'repair','test_revision'} and checkpoint.get('run_id'):
+            revision=checkpoint['run_id']
+            draft=generation.resume_revision(revision,self._provider_of(revision))
+            checkpoint['draft_id']=draft
+            return draft
+        if checkpoint.get('draft_id'):
+            return checkpoint['draft_id']
+        base=planning.baseline(request['change_of'])
+        plan=checkpoint.get('plan_id')
+        if self.resuming and not plan and checkpoint.get('phase')=='planning' and checkpoint.get('run_id'):
+            saved=store.run(checkpoint['run_id'])['data'].get('project_plan',{})
+            if saved.get('status') in {'awaiting_review','approved'}:
+                plan=checkpoint['run_id'];checkpoint['plan_id']=plan
+        feedback=None
+        retry_of=None
+        decision=None
+        for retry in range((1+int(self.router.policy.get('planner_retries',1))) if not plan else 0):
+            try:
+                provider,decision=self._pick('project_architect','planning',need=[base['spec'],base['files'],request['change']],stage='planning')
+                plan=planning.extend(provider,base,request['change'],lambda rid:phase('planning',rid),retry_of=retry_of,retry_feedback=feedback,language=self.language)
+                checkpoint['plan_id']=plan
+                break
+            except RoutingStop:
+                raise
+            except MasaError:
+                failed_id=self.job['run_id']
+                reason=self._retryable(failed_id) if retry<int(self.router.policy.get('planner_retries',1)) else None
+                if not reason:raise
+                self._fail('planning',decision)
+                feedback=reason;retry_of=failed_id
+                phase('planning_retry',failed_id)
+        meta=store.run(plan)['data']['project_plan']
+        if meta['status']!='approved':planning.approve(plan,{'spec_ref':meta['spec_ref'],'checks_ref':meta['checks_ref'],
+                               'spec':store.read(meta['spec_ref']),'checks':store.read(meta['checks_ref']),'review_mode':'automatic'})
+        phase('generation',plan)
+        draft=generation.change_draft(plan,base['files'],lambda rid:phase('generation',rid))
+        checkpoint['draft_id']=draft
+        return draft
+
     def _prepare(self, planning, generation, goal):
         """规划（含澄清、预检）→ 批准 → 生成，返回待验证的草稿 id；等待用户、被拦下时返回 None。
         Plan (clarification, triage) → approve → generate; returns the draft id, or None when waiting for the user or blocked."""

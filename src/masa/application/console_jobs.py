@@ -9,6 +9,7 @@ from masa.application.generation import ProjectGeneration
 from masa.application.orchestration.router import Router, build_snapshot
 from masa.infrastructure.ollama import OllamaControl
 from masa.infrastructure import capability
+from masa.languages.registry import registry as languages
 
 
 class JobsMixin:
@@ -196,6 +197,27 @@ class JobsMixin:
         request.update(goal=goal,continue_from=rid,auto_verify=True)
         return self.start_autonomous_project_job(request)
 
+    def change_project(self, verified, body):
+        """工作项：在一次通过了的验证之上加一个功能（body.change 是自然语言的变更请求）。沿用基线的语言；运行方式固定为“V1 生成 + 工人修复”（实现由修复工人对着新旧用例完成）。
+        A work item: add one feature on top of a passed verification (body.change is the change request in natural language). The baseline's language is kept; the runtime is "V1 generation + worker
+        repair" (the repair workers implement the change against the old and new cases)."""
+        body=dict(body or {})
+        change=body.get('change')
+        if not isinstance(change,str) or not change.strip() or len(change)>4000:
+            raise MasaError('change must be a nonempty request of at most 4000 characters')
+        store=Store(self.root)
+        try:
+            run=store.run(verified)
+            if run['status']!='succeeded' or not run['data'].get('project_bundle'):
+                raise MasaError('a change starts from a PASSED project verification')
+            language=run['data'].get('language')
+            goal=run['data']['goal']
+        finally:store.close()
+        if not languages.for_run({'language':language}).supports('acceptance'):
+            raise MasaError('this language cannot be extended yet: change mode needs executable acceptance cases')
+        body.update(goal=goal,change_of=verified,change=change.strip(),language=language,runtime='v2repair',auto_verify=True)
+        return self.start_autonomous_project_job(body)
+
     def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
@@ -220,6 +242,15 @@ class JobsMixin:
             if not resume_job and body.get('routing')=='ladder':
                 routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._runtime_policy(body),
                                        profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
+                if body.get('change_of'):
+                    # 工作项沿用项目的版本链：把链上已有的花费记下来，预算只算这个任务自己（见 Router.spend）。 A work item continues the project's chain: record the chain's spend so the budget counts only this task (see Router.spend).
+                    from masa.application.usage import task_report
+                    from masa.application.orchestration.routing import spend_from_report
+                    store=Store(self.root)
+                    try:
+                        prices={c['model']:(c.get('price_in'),c.get('price_out')) for c in routing['candidates']}
+                        routing['spend_offset']=spend_from_report(task_report(store,body['change_of']),prices)
+                    finally:store.close()
             snapshot=previous.get('model_snapshot') if resume_job else None
             if routing:
                 provider=None
@@ -240,6 +271,7 @@ class JobsMixin:
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
                               'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
                               'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':body['runtime']} if body.get('runtime') in ('v2','v2repair') else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
+                                         **({'change_of':body['change_of'],'change':body['change']} if body.get('change_of') else {}),
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
             from masa.application.orchestration.coordinator import WorkflowCoordinator
             def work():

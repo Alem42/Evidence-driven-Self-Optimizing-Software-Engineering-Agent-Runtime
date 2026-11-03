@@ -17,6 +17,28 @@ def project_roles_prompt(context, default_instruction):
               'NEVER copy them into source code, comments or string literals. '
               'If the input contains previous_attempt_error (or feedback saying a previous attempt was rejected), your last response '
               'was rejected by validation for exactly that reason: return a complete corrected response that fixes it. ')
+    if context['purpose'] == 'project_architect' and context.get('change_request'):
+        # 变更模式（工作项）：在已验证的项目上加一个功能，只写增量；旧用例冻结为回归测试。 Change mode (a work item): one feature on a verified project, only the delta; old cases are frozen regression tests.
+        return common + (
+            'You are Architect extending an EXISTING, VERIFIED project: current_spec (its requirements), current_cases (its executable black-box acceptance cases, numbered from 0, all passing now) '
+            'and current_files (its source). change_request describes ONE new feature or change; the original goal is in goal. '
+            'Return exactly {"change":{"summary":"what changes and where in the code (under 500 characters)","acceptance":["NEW acceptance item"],'
+            '"files":[{"path":"<module>/<package>/<name>.py","purpose":"responsibility"}],'
+            '"cases":[{"name":"case","accepts":[0],"args":[],"stdin":"literal input","stdout":"exact stdout","exit_code":0}],"retire":[]},"assumptions":[]}. '
+            'acceptance: ONLY the requirements this change adds (1..8 complete sentences with concrete values). Every existing requirement stays in force: never repeat it. '
+            'cases: 3..12 NEW cases for this change; accepts are zero-based indices into YOUR new acceptance list. The harness appends them to tests/test_acceptance.py and runs '
+            '`python -m <module> <args>` with the given stdin from the project root, then compares the standard output (trailing whitespace on lines and trailing blank lines are ignored) and the exit code. '
+            'Each case is ONE separate run of the program: a case can never rely on state left by another case. Every case is exactly {"name","accepts","args","stdin","stdout","exit_code"} (optionally "stderr_nonempty":true). '
+            'Nobody will run the implementation to obtain an expected stdout and a wrong one sends the project into a long, expensive repair loop: keep inputs tiny, '
+            'derive each expected stdout step by step from current_spec, the existing output format visible in current_cases and current_files, and the change request. '
+            'Follow the output conventions the project already has exactly (separators, headers, number formats, error handling, exit codes). '
+            'The existing cases keep running as regression tests: a new case must never contradict one of them. Only when the change request DELIBERATELY changes an existing behaviour, '
+            'list the superseded current_cases indices in retire and explain it in summary; otherwise retire is []. '
+            'files: implementation files to ADD (under <module>/, each in an existing or new package directory) or existing paths whose responsibility changes; [] when the existing files suffice. '
+            'Never list test files (the cases are the tests of this change), never remove or rename a file, keep module and entrypoint. '
+            'Prefer extending the existing modules over adding layers; add a file only for a clearly separate responsibility. '
+            'assumptions: 0..6 short strings naming a point the change request left open and the convention you chose; a deliberate cut STARTS WITH "LIMITATION: ". '
+            'Never invent requirements the change request does not imply.')
     if context['purpose'] == 'project_architect':
         if context.get('clarification_allowed'):
             common += ('If a missing business requirement affects interfaces or test expectations, ask before planning. '
@@ -181,6 +203,12 @@ def project_roles_prompt(context, default_instruction):
 def transport_hint(context):
     """本地（ollama）传输的补充说明。 Extra text for the local (ollama) transport."""
     purpose = context.get('purpose')
+    if purpose == 'project_architect' and context.get('change_request'):
+        return ''  # 变更模式的回答没有 checks / a change-mode answer has no checks
+    if purpose == 'project_architect' and context.get('acceptance_cases'):
+        # 结构化用例写在 spec.cases：以前这句也要求“py_test 里写 cases”，与上面的契约正好矛盾（gemma4 三次都照做，规划全部被拒）。
+        # Structured cases live in spec.cases: this sentence used to ask for cases inside py_test too, contradicting the contract above (gemma4 obeyed three times and every plan was rejected).
+        return ' Local transport override: the top-level "checks" MUST be an OBJECT keyed by py_test (required) and/or py_static (optional), not an array. Each value has purpose and acceptance_indices only; the executable cases belong in spec.cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
     if purpose == 'project_architect':
         return ' Local transport override: the top-level "checks" MUST be an OBJECT keyed by py_test (required) and/or py_static (optional), not an array. Each value has purpose, acceptance_indices and for py_test cases. Omit operation fields: the key supplies the operation. All business rules above still apply.'
     if purpose == 'project_developer' and context.get('generation_mode') != 'files-v1':

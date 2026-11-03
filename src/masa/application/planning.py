@@ -1,4 +1,4 @@
-from masa.domain.proposals import text, validate_spec, validate_checks
+from masa.domain.proposals import text, validate_spec, validate_checks, merge_change
 """项目规划契约与角色编排。 Project planning contracts and role orchestration."""
 
 import time
@@ -149,6 +149,88 @@ class ProjectPlanning:
             plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
             self.update(rid, plan, 'failed', 'project_planning_failed')
             raise stage_error(exc, f'project planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
+
+    def baseline(self, verified):
+        """一次通过了的验证 → 它的规格、检查计划、文件，以及最初的目标与这是第几次变更。工作项（在已验证的项目上加功能）从这里出发。
+        A passed verification -> its spec, check plan, files, the original goal and how many changes came before. A work item (a feature on a verified project) starts here."""
+        run = self.store.run(verified)
+        data = run['data']
+        if run['status'] != 'succeeded' or not data.get('project_bundle'):
+            raise MasaError('a change starts from a PASSED project verification')
+        bundle = self.store.read(data['project_bundle']['approval_ref'])
+        approved = self.store.read(bundle['spec_approval_ref'])
+        spec = approved['spec']
+        # 用例以验证过的文件为准：测试修订改过的期望不能在下一次合并时被规格里的旧版本悄悄撤销（见 acceptance.cases_in）。
+        # The cases come from the verified file: an expectation a test revision corrected must not be silently undone by the spec's old copy at the next merge (see acceptance.cases_in).
+        verified_cases = registry.for_run(data).cases_in_files(bundle['files'], len(spec['acceptance'])) if spec.get('cases') else None
+        if verified_cases is not None and verified_cases != spec.get('cases'):
+            spec = {**spec, 'cases': verified_cases}
+        lineage, root_goal, changes = verified, data['goal'], 0
+        # 沿父链找到最近的变更规划：它记着最初的目标和变更序号 / walk the parents to the latest change plan: it holds the original goal and the change number
+        seen = set()
+        while lineage and lineage not in seen:
+            seen.add(lineage)
+            parent = self.store.run(lineage)['data']
+            plan = parent.get('project_plan') or {}
+            if plan.get('change_of'):
+                root_goal, changes = plan['root_goal'], plan['change_no']
+                break
+            lineage = parent.get('parent_run_id')
+        return {'run': verified, 'spec': spec, 'checks': approved['checks'], 'files': bundle['files'], 'root_goal': root_goal, 'changes': changes,
+                'cases_from_file': spec is not approved['spec']}
+
+    def extend(self, provider, base, change, on_created=None, retry_of=None, retry_feedback=None, language=None):
+        """工作项：在已验证的项目上加一个功能。Architect 只写增量（新验收项、新黑盒用例、要加的文件、要退役的旧用例），程序把它合并进基线规格；
+        旧用例全部保留为冻结的回归测试。规划完就停在待审（自动流程随即批准）。
+        A work item: one feature on a verified project. The Architect writes only the delta (new acceptance items, new black-box cases, files to add, old cases to retire) and the harness merges it into the
+        baseline spec; every old case stays as a frozen regression test. Planning stops awaiting review (the automatic flow approves it right away)."""
+        text(change, 4000)
+        pack = registry.for_run({'language': language} if language else self.store.run(base['run'])['data'])
+        number = base['changes'] + 1
+        goal = (base['root_goal'] + chr(10) * 2 + f'[Change {number}] ' + change.strip())[:16000]
+        seed = self.store.root / 'planning-seeds' / uuid.uuid4().hex
+        seed.mkdir(parents=True)
+        for name, content in pack.planning_seed().items():
+            (seed / name).write_text(content, encoding='utf-8')
+        plan = {'status': 'planning', 'provider': provider.profile, 'template': pack.layout['template'], 'dependencies': [],
+                'change_of': base['run'], 'change_no': number, 'change': change.strip(), 'root_goal': base['root_goal']}
+        rid = Runtime(self.store, self.executor).create(seed, goal, Budget(model_calls=2, deadline_seconds=86400), graph=harness_policy(pack.id), project_plan=plan,
+                                                       parent_run_id=retry_of or base['run'], language=pack.id)
+        if on_created:
+            on_created(rid)
+        if base.get('cases_from_file'):
+            self.store.event(rid, 'cases_from_verified_file', {'cases': len(base['spec']['cases']), 'why': 'a test revision changed the acceptance file after the spec was approved'})
+        try:
+            outline = pack.outline
+            shown, total = {}, 0
+            # 源码全给，太大才把最大的文件降为轮廓：Architect 要照着已有的输出格式写期望值，看不到格式就会写错。 Source in full; only when too big do the largest files become outlines: the Architect copies the existing output format into its expectations.
+            for path, content in sorted(base['files'].items(), key=lambda item: len(item[1])):
+                if path == pack.acceptance_path:
+                    continue
+                total += len(content)
+                shown[path] = content if total <= 90000 or not pack.is_source(path) else '# OUTLINE ONLY (bodies omitted)' + chr(10) + outline(content)
+            values = {'goal': base['root_goal'], 'change_request': change.strip(), 'current_spec': {k: v for k, v in base['spec'].items() if k != 'cases'},
+                      'current_cases': [{'index': i, **c} for i, c in enumerate(base['spec'].get('cases') or [])], 'current_files': shown}
+            if retry_feedback:
+                values['previous_attempt_error'] = str(retry_feedback)[:1000]
+            delta = RoleRuntime(self.store).call(rid, provider, 'project_architect', values)
+            spec, checks, retired = merge_change(base['spec'], base['checks'], {**delta, 'request': change.strip()}, pack.id)
+            plan.update(spec_ref=self.store.put(spec), change_summary=delta['summary'], new_cases=len(delta['cases']), new_acceptance=len(delta['acceptance']),
+                        retired_cases=[c['name'] for c in retired])
+            if delta.get('assumptions'):
+                plan['assumptions'] = delta['assumptions']
+            if retired:
+                self.store.event(rid, 'cases_retired', {'cases': [c['name'] for c in retired], 'why': delta['summary'][:500]})
+            Runtime.compile_project_checks(spec, checks, pack.id)
+            plan['test_review'] = review_test_plan(spec, checks, pack.id)
+            plan.update(status='awaiting_review', checks_ref=self.store.put(checks))
+            self.update(rid, plan, 'paused', 'project_review_requested')
+            return rid
+        except Exception as exc:
+            plan['status'] = 'failed'
+            plan['error'] = str(exc) if isinstance(exc, MasaError) else 'local processing failure'
+            self.update(rid, plan, 'failed', 'project_planning_failed')
+            raise stage_error(exc, f'change planning failed; run {rid}: ' + (str(exc) if isinstance(exc, MasaError) else 'local processing failure')) from None
 
     def record_triage_block(self, goal, triage, language=None):
         """确定会失败的需求：不调用任何模型，只留下一条带原因和改写建议的失败记录，方便在历史里看到为什么。

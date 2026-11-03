@@ -1,0 +1,58 @@
+{
+  "id": "blind_oracle",
+  "label": "盲推导期望（结构化）",
+  "description": "没看过实现，只凭目标和验收项为每个输入推导精确的标准输出与退出码（结构化，可以确定性比较）；只给加固探针用（默认关闭）",
+  "order": 125,
+  "level": "low",
+  "optional": true,
+  "routable": false,
+  "config_allowed": true,
+  "permissions": {
+    "reads": [
+      "goal",
+      "acceptance",
+      "inputs"
+    ],
+    "writes": "none"
+  },
+  "validator": "json_schema",
+  "prompt": "blind_oracle.prompt.md",
+  "max_output_tokens": 6000,
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": [
+      "answers"
+    ],
+    "properties": {
+      "answers": {
+        "type": "array",
+        "maxItems": 40,
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "index",
+            "stdout",
+            "exit_code"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stdout": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "exit_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        }
+      }
+    }
+  }
+}

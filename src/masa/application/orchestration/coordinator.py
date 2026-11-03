@@ -235,8 +235,8 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         store,runner=self.store,self.runner
         goal=self.job['request']['goal']
         phase=self._phase
-        origin=self.job['request'].get('continue_from')
-        if origin:  # 从某个失败的验证继续：沿用那个运行的语言 / continuing from a failed verification: keep that run's language
+        origin=self.job['request'].get('continue_from') or self.job['request'].get('change_of')
+        if origin:  # 从某个失败的验证继续、或在某个通过的项目上加功能：沿用那个运行的语言 / continuing from a failed verification, or extending a passed project: keep that run's language
             self.pack=languages.for_run(store.run(origin)['data']);self.language=self.pack.id
         if self._ladder and not self.job.get('budget_emitted'):
             self._emit('task_budget',self.router.describe())
@@ -262,6 +262,8 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         if continue_from:
             self._seed_history_from_lineage(continue_from)
             draft=None
+        elif self.job['request'].get('change_of'):  # 工作项：在已验证的项目上加一个功能 / a work item: one feature on a verified project
+            draft=self._prepare_change(planning,generation,goal)
         else:
             draft=self._prepare(planning,generation,goal)
             if draft is None:

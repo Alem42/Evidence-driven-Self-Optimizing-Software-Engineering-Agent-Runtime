@@ -43,6 +43,21 @@ def response_schema(context):
                                      'properties':{path:string}}}}
     if purpose!='project_architect':
         return 'json'
+    # 结构化的可执行验收用例（spec.cases）：一个用例的形状 / one structured executable acceptance case (spec.cases)
+    accept_case={'type':'object','additionalProperties':False,'required':['name','accepts','args','stdin','stdout','exit_code'],
+                 'properties':{'name':{'type':'string','minLength':1},'accepts':{'type':'array','items':{'type':'integer','minimum':0}},
+                               'args':{'type':'array','items':string},'stdin':string,'stdout':string,'exit_code':{'type':'integer','minimum':0,'maximum':255},
+                               'stderr_nonempty':{'type':'boolean'}}}
+    if context.get('change_request'):
+        # 变更模式（在已验证的项目上加一个功能）：只返回增量 / change mode (one feature on a verified project): only the delta
+        change={'type':'object','additionalProperties':False,'required':['summary','acceptance','files','cases'],
+                'properties':{'summary':string,'acceptance':{'type':'array','minItems':1,'maxItems':8,'items':string},
+                              'files':{'type':'array','maxItems':8,'items':{'type':'object','additionalProperties':False,'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
+                              'cases':{'type':'array','minItems':3,'maxItems':12,'items':accept_case},
+                              'retire':{'type':'array','maxItems':8,'items':{'type':'integer','minimum':0}}}}
+        return {'type':'object','additionalProperties':False,'required':['change'],
+                'properties':{'change':change,'assumptions':{'type':'array','maxItems':6,'items':string}}}
+    structured=bool(context.get('acceptance_cases')) and pack.supports('acceptance')
     # Architect = 规格 + 检查计划 + 假设，一次回答 / one answer: spec + check plan + assumptions
     case={'type':'object','additionalProperties':False,'required':['name','input','expected','level'],
           'properties':{'name':{'type':'string','minLength':1},'input':string,
@@ -53,8 +68,10 @@ def response_schema(context):
                 'cases':{'type':'array','minItems':1,'maxItems':16,'items':case}}}
     # 名称作为键避免重复工具，绕过本地不完整的 tuple schema 支持。
     # Named keys prevent duplicate operations without relying on unsupported tuple schemas.
-    test={**check,'required':check['required']+['cases']}
     static={**check,'properties':{k:v for k,v in check['properties'].items() if k!='cases'}}
+    # 有结构化用例时，用例写在 spec.cases 里，检查里不能再要求 cases：以前这里总是要求，本地模型在约束解码下根本写不出合法的规划（gemma4 三次都把用例写进了检查）。
+    # With structured cases the cases live in spec.cases and a check must not require them: this used to always require them, so under constrained decoding a local model could never produce a valid plan (gemma4 put the cases into the checks three times).
+    test=static if structured else {**check,'required':check['required']+['cases']}
     checks={'type':'object','additionalProperties':False,'required':[pack.op_id('test')],
             'properties':{pack.op_id(kind):(test if kind=='test' else static) for kind in ('test','static','format') if kind in pack.operations}}
     spec={'type':'object','additionalProperties':False,
@@ -63,6 +80,8 @@ def response_schema(context):
                 'files':{'type':'array','minItems':pack.layout['min_files'],'maxItems':pack.layout['max_files'],'items':{'type':'object','additionalProperties':False,
                     'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                 'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string}}}
+    if structured:
+        spec={**spec,'required':spec['required']+['cases'],'properties':{**spec['properties'],'cases':{'type':'array','minItems':3,'maxItems':12,'items':accept_case}}}
     answer={'type':'object','additionalProperties':False,'required':['spec','checks'],
             'properties':{'spec':spec,'checks':checks,'assumptions':{'type':'array','maxItems':6,'items':string}}}
     if not context.get('clarification_allowed'):
