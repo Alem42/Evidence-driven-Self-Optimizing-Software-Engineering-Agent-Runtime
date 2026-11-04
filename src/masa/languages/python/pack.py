@@ -205,7 +205,7 @@ class PythonPack(LanguagePack):
         if cases is None:
             return None
         try:
-            return acceptance.validate_cases(cases, acceptance_count)
+            return acceptance.validate_cases(cases, acceptance_count, acceptance.ACCUMULATED_CASES)
         except MasaError:
             return None
 
@@ -228,7 +228,7 @@ class PythonPack(LanguagePack):
         module = spec['module']
         names = {f['path'] for f in spec['files']}
         if 'cases' in spec:
-            acceptance.validate_cases(spec['cases'], len(spec['acceptance']))
+            acceptance.validate_cases(spec['cases'], len(spec['acceptance']), acceptance.ACCUMULATED_CASES if 'history' in spec else acceptance.MAX_CASES)
             if acceptance.PATH not in names:
                 raise MasaError(f'a spec with cases must list {acceptance.PATH} among its files')
         for path in names:

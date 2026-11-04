@@ -16,16 +16,17 @@ import json
 from masa.domain.models import MasaError
 
 PATH = 'tests/test_acceptance.py'
-MAX_CASES = 160  # 一次规划仍只写 4..12 个；累积的规格（逐个加功能，每个功能的用例都留作回归测试）才会更多 / one plan still writes 4..12; only an accumulated spec (features added one by one, each feature's cases kept as regression tests) has more
+MAX_CASES = 24
+ACCUMULATED_CASES = 160  # 累积的规格（带 history：逐个加功能，每个功能的用例都留作回归测试）/ an accumulated spec (with a history: features added one by one, each feature's cases kept as regression tests)
 CASE_KEYS = {'name', 'accepts', 'args', 'stdin', 'stdout', 'exit_code', 'stderr_nonempty'}
 REQUIRED = {'name', 'args', 'stdin', 'stdout', 'exit_code'}
 LIMIT = 1000  # 一个字符串字段的长度上限 / length cap of one string field
 
 
-def validate_cases(cases, acceptance_count):
+def validate_cases(cases, acceptance_count, limit=MAX_CASES):
     """校验并规范化 spec.cases；错误信息说清楚是哪个用例的哪个字段，模型重试时才知道改哪里。 Validate and normalise spec.cases; errors name the case and field so a retry knows what to fix."""
-    if not isinstance(cases, list) or not 3 <= len(cases) <= MAX_CASES:
-        raise MasaError(f'spec.cases must be a list of 3..{MAX_CASES} acceptance cases')
+    if not isinstance(cases, list) or not 3 <= len(cases) <= limit:
+        raise MasaError(f'spec.cases must be a list of 3..{limit} acceptance cases')
     out = []
     for index, case in enumerate(cases):
         where = f'spec.cases[{index}]'
