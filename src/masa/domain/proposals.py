@@ -341,7 +341,7 @@ def validate_architect(action, language=None, structured=False):
     return {'spec': spec, 'checks': checks, 'assumptions': _assumptions(action.get('assumptions'))}
 
 
-MAX_CHANGE_ACCEPTANCE = 8
+MAX_CHANGE_ACCEPTANCE = 12  # R1：事务这样规则多的功能要 9 条以上，8 条的上限让第一次规划失败 / R1: a rule-heavy feature (transactions) needs 9+ items; a cap of 8 failed its first plan
 MAX_CHANGE_FILES = 8
 
 

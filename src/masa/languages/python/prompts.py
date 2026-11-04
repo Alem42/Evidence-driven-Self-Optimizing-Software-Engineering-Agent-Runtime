@@ -25,7 +25,7 @@ def project_roles_prompt(context, default_instruction):
             'Return exactly {"change":{"summary":"what changes and where in the code (under 500 characters)","acceptance":["NEW acceptance item"],'
             '"files":[{"path":"<module>/<package>/<name>.py","purpose":"responsibility"}],'
             '"cases":[{"name":"case","accepts":[0],"args":[],"stdin":"literal input","stdout":"exact stdout","exit_code":0}],"retire":[]},"assumptions":[]}. '
-            'acceptance: ONLY the requirements this change adds (1..8 complete sentences with concrete values). Every existing requirement stays in force: never repeat it. '
+            'acceptance: ONLY the requirements this change adds (1..12 complete sentences with concrete values). Every existing requirement stays in force: never repeat it. '
             'cases: 3..12 NEW cases for this change; accepts are zero-based indices into YOUR new acceptance list. The harness appends them to tests/test_acceptance.py and runs '
             '`python -m <module> <args>` with the given stdin from the project root, then compares the standard output (trailing whitespace on lines and trailing blank lines are ignored) and the exit code. '
             'Each case is ONE separate run of the program: a case can never rely on state left by another case. Every case is exactly {"name","accepts","args","stdin","stdout","exit_code"} (optionally "stderr_nonempty":true). '

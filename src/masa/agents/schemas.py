@@ -51,7 +51,7 @@ def response_schema(context):
     if context.get('change_request'):
         # 变更模式（在已验证的项目上加一个功能）：只返回增量 / change mode (one feature on a verified project): only the delta
         change={'type':'object','additionalProperties':False,'required':['summary','acceptance','files','cases'],
-                'properties':{'summary':string,'acceptance':{'type':'array','minItems':1,'maxItems':8,'items':string},
+                'properties':{'summary':string,'acceptance':{'type':'array','minItems':1,'maxItems':12,'items':string},
                               'files':{'type':'array','maxItems':8,'items':{'type':'object','additionalProperties':False,'required':['path','purpose'],'properties':{'path':string,'purpose':string}}},
                               'cases':{'type':'array','minItems':3,'maxItems':12,'items':accept_case},
                               'retire':{'type':'array','maxItems':8,'items':{'type':'integer','minimum':0}}}}

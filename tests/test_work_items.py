@@ -108,6 +108,28 @@ class VerifiedCasesTests(unittest.TestCase):
         self.assertIsNone(registry.get('go').cases_in_files({}, 3))
 
 
+class ProblemCountTests(unittest.TestCase):
+    def test_every_failing_acceptance_case_is_its_own_problem(self):
+        """R1 第 10 步：所有验收用例都在同一行断言失败，消息开头相同；以前去重只看前 80 个字符，6 个失败与 1 个失败都算 1 个问题，工人的改进被丢掉。
+        R1 step 10: every acceptance case fails on the same assertion line with the same start; deduplicating on 80 characters made 6 failures and 1 failure both "1 problem" and the worker's progress was discarded."""
+        from masa.languages.registry import registry
+        pack = registry.get('python')
+
+        def block(number, got, want):
+            return ('=' * 70 + '\n' + f'FAIL: test_{number:02d} (tests.test_acceptance.AcceptanceTests.test_{number:02d})\n' + '-' * 70 + '\n'
+                    'Traceback (most recent call last):\n'
+                    '  File "./tests/test_acceptance.py", line 130, in test\n'
+                    "    self.assertEqual(normalise(stdout), normalise(case['stdout']), label)\n"
+                    f"AssertionError: '{got}' != '{want}' : case {number} | args=[] stdin=\"STATS\\n\"\n\n")
+        six = ''.join(block(n, '', f'skus: {n}') for n in range(1, 7))
+        one = block(4, 'skus: 1\\nunits: 8', 'skus: 1\\nunits: 6')
+        result = lambda text: [('py_test', {'status': 'completed', 'exit_code': 1, 'stdout': '', 'stderr': text + 'FAILED (failures=1)\n'})]
+        self.assertEqual(len(pack.parse_failures(result(six))), 6)
+        self.assertEqual(len(pack.parse_failures(result(one))), 1)
+        # 同一个失败报告两次（同一位置、同一消息）仍然只算一次 / the same failure reported twice (same place, same message) still counts once
+        self.assertEqual(len(pack.parse_failures(result(one + one))), 1)
+
+
 class ResumeTests(unittest.TestCase):
     def test_a_change_job_killed_mid_revision_continues_that_revision(self):
         """R1 的 kill -9 测试：进程在测试修订中途被杀，恢复后必须接着那个修订，而不是回到原草稿重新分类（那会去“修”正确的实现）。

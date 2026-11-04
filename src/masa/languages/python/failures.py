@@ -237,7 +237,11 @@ def parse_failures(checks, test_operation, static_operation):
     items, seen = [], set()
 
     def add(owner, kind, path, line, message):
-        key = (owner, kind, path, message[:80])
+        # 去重按整条消息（保存的 240 字符）：以前只看前 80 个字符，而验收测试的每个用例都在同一行断言失败、消息开头完全相同（那一行源码），
+        # 6 个失败的用例和 1 个失败的用例都算“1 个问题”——R1 第 10 步工人把 6 个修到只剩 1 个，却被判“没有变好”，改进被丢掉。
+        # Deduplicate on the whole stored message (240 characters): it used to look at the first 80 only, and every acceptance case fails on the same assertion line with an identical start (that source line),
+        # so 6 failing cases and 1 failing case were both "1 problem" - at R1 step 10 the worker took 6 failures down to 1 and was judged "not better", its improvement discarded.
+        key = (owner, kind, path, line, message[:240])
         if key not in seen and len(items) < 40:
             seen.add(key)
             items.append({'owner': owner, 'kind': kind, 'path': path, 'line': line, 'message': message[:240]})
