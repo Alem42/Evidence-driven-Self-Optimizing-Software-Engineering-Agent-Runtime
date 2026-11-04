@@ -47,6 +47,13 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(test['cases'][0], {'name': 'sum of three', 'input': 'args=[]; stdin="1 2 3"', 'expected': 'stdout="6\\n"; exit code 0', 'level': 'cli'})
         self.assertEqual(test['acceptance_indices'], [0])  # 覆盖关系来自用例的 accepts / coverage comes from the cases' accepts
 
+    def test_more_than_sixteen_cases_are_accepted_and_all_stay_executable(self):
+        """R1 一次写完 12 个功能：20 多个结构化用例时，检查计划里推导出的描述超过 16 个，规划被拒。 R1 one-shot of 12 features: with 20+ structured cases the derived descriptions exceeded 16 and the plan was rejected."""
+        many = [dict(CASES[0], name=f'case {i}', stdin=str(i), stdout=f'{i}\n') for i in range(20)]
+        out = validate_response(CONTEXT, answer(cases=many), '')
+        self.assertEqual(len(out['spec']['cases']), 20)  # 可执行的用例全部保留 / every executable case stays
+        self.assertEqual(len(next(c for c in out['checks'] if c['operation'] == 'py_test')['cases']), 16)
+
     def test_without_the_flag_nothing_changes_and_cases_are_ignored(self):
         legacy = answer()
         legacy['checks'][0]['cases'] = [{'name': 'x', 'input': '1', 'expected': '1', 'level': 'cli'}]

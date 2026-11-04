@@ -331,7 +331,9 @@ def validate_architect(action, language=None, structured=False):
         checks = [dict(c) if isinstance(c, dict) else c for c in checks]
         for check in checks:
             if isinstance(check, dict) and check.get('operation') == pack.op_id('test'):
-                check['cases'] = [pack.describe_case(c) for c in spec['cases']]  # 与 spec.cases 一一对应（审计按下标丢弃）/ one to one with spec.cases (the audit drops by index)
+                # 与 spec.cases 按下标对应（审计按下标丢弃）；检查计划的自由文本用例最多 16 个，可执行的用例文件里仍有全部用例——以前超过 16 个结构化用例的规划一律被拒（R1 一次写完 12 个功能时真实发生）。
+                # Index-aligned with spec.cases (the audit drops by index); the check plan holds at most 16 free-text cases while the executable file keeps every case - a plan with more than 16 structured cases used to be rejected outright (it happened when R1 wrote all 12 features at once).
+                check['cases'] = [pack.describe_case(c) for c in spec['cases']][:16]
                 if isinstance(check.get('acceptance_indices'), list):
                     check['acceptance_indices'] = sorted(set(check['acceptance_indices']) | set(pack.accepted_indices(spec['cases'])))
     try:
