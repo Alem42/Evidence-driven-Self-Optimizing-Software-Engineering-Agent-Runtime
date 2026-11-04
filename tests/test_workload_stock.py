@@ -19,6 +19,7 @@ class ReferenceTests(unittest.TestCase):
         self.check(0, lines('ADD a 2', 'REMOVE a 3', 'REMOVE a 2', 'REPORT', 'STOCK a'), lines('(empty)', 'a: 0'), 1)
         self.check(0, '\n\nADD B 1\nADD a 1\nADD A 2\n  REPORT  \n', lines('A: 2', 'B: 1', 'a: 1'), 0)
         self.check(0, lines('add a 1'), '', 1)  # 第 8 个功能之前命令名区分大小写 / case-sensitive before feature 8
+        self.check(0, 'ADD a 1\rSTOCK a', lines('a: 1'), 0)  # a lone CR ends a line too (Python text-mode stdin) / 单独 CR 也是换行
 
     def test_prices_and_report_format(self):
         self.check(1, lines('PRICE a 2', 'ADD a 3', 'ADD b 4', 'PRICE b 0.25', 'VALUE', 'PRICE a 1', 'VALUE'), lines('total value: 7.00', 'total value: 4.00'), 0)

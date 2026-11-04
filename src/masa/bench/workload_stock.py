@@ -252,7 +252,9 @@ def run(level, args, stdin):
             strict = True
     errors = 0
     try:
-        for raw in stdin.replace('\r\n', '\n').split('\n'):
+        # 与 Python 文本模式的标准输入一致：CRLF 与单独的 CR 都是换行（R3 的一个对抗输入用了单独的 CR，参考实现以前把它当成同一行，造成一次假的“假通过”）。
+        # Like Python's text-mode stdin: CRLF and a lone CR both end a line (an R3 adversarial input used a lone CR and the reference used to treat it as one line, producing a spurious "false pass").
+        for raw in stdin.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
             line = raw.strip()
             if not line or (level >= 8 and line.startswith('#')):
                 continue
