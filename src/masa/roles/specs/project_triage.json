@@ -1,7 +1,7 @@
 {
   "id": "project_triage",
   "label": "可行性初筛",
-  "description": "判断需求能否在 Go 标准库命令行项目下自动验证（只告警，只用本地模型）",
+  "description": "判断需求能否在所选语言的标准库命令行项目下自动验证（只告警，只用本地模型）",
   "order": 70,
   "level": null,
   "routable": false,

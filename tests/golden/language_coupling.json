@@ -75,12 +75,7 @@
   "go_word": 1,
   "gofmt": 1
  },
- "roles/specs/project_triage.json": {
-  "go_word": 1
- },
  "roles/specs/project_triage.prompt.md": {
-  "go_file": 1,
-  "go_template": 1,
   "go_word": 1
  },
  "runtime/engine.py": {

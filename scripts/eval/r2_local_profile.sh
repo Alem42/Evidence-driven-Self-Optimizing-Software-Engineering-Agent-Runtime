@@ -14,7 +14,7 @@ for spec in $1; do
     [ -f "$STATE/r2.stop" ] && { echo "stopped by r2.stop"; echo "FINISHED-9"; exit 9; }
     echo "=== $(date +%H:%M:%S) $model $task round $round"
     PYTHONPATH=src PYTHONIOENCODING=utf-8 python scripts/eval/ab_eval.py --name "$name" --only "$task" --arms "${R2_ARM:-v2rL}" --models "${R2_MODE:-local}:$model" \
-      --state "$STATE" --source "$STATE/p2eval_final" --round "$round" --yuan "${R2_YUAN:-0.5}" --per-run "${R2_PER_RUN:-0.3}" --scale "$scale" --max-calls 80 --minutes 45 2>&1 | grep -v "开始 …"
+      --state "$STATE" --source "$STATE/p2eval_final" --round "$round" --yuan "${R2_YUAN:-0.5}" --per-run "${R2_PER_RUN:-0.3}" --scale "$scale" --max-calls 80 --minutes 45 --local-ctx "${R2_CTX:-16384}" 2>&1 | grep -v "开始 …"
   done
 done
 curl -s -m 10 http://127.0.0.1:11434/api/ps
