@@ -25,7 +25,7 @@ ARMS = {'v1': {'runtime': 'v1', 'policy': {}}, 'v2': {'runtime': 'v2', 'policy':
         'v2rm': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}, 'memory_strategy': 'auto'}},  # 同 v2r，但包工人用按窗口自动选择的记忆策略 / like v2r, but the workers use the window-adaptive memory strategy
         'v2ra': {'runtime': 'v2repair', 'policy': {'start_level_by_role': {'project_repair': 2}, 'acceptance_cases': True}},  # 同 v2r，但 Architect 写结构化的可执行验收用例 / like v2r, but the Architect writes structured executable acceptance cases
         'v2rL': {'runtime': 'v2repair', 'policy': {'acceptance_cases': False}},  # 全本地能力档案（R2）：同 v2r，但不要求结构化验收用例（小模型常把它写错位置，规划阶段就死，量不到能力）/ the all-local profile (R2): like v2r without structured acceptance cases (small models misplace them and die at planning, which measures nothing)
-        'v2rH': {'runtime': 'v2repair', 'policy': {}},  # 混合（--models hybrid:<本地>）：默认 v2repair 策略（验收用例开），云端只做定义与裁决 / hybrid: the default v2repair policy (acceptance cases on), the cloud only defines and judges
+        'v2rH': {'runtime': 'v2repair', 'policy': {'max_escalations': 0}},  # 混合（--models hybrid:<本地>）：默认 v2repair 策略（验收用例开），云端只做定义与裁决 / hybrid: the default v2repair policy (acceptance cases on), the cloud only defines and judges
         'v2m': {'runtime': 'v2', 'policy': {'memory_strategy': 'auto'}},  # 全程 V2 + 按窗口自动选择的记忆策略（长循环才看得出差别）/ full V2 + the window-adaptive memory strategy (only long loops show a difference)
         'v2s': {'runtime': 'v2', 'policy': {}, 'layout': 'sorted'},  # 与 v2 相同，只是提示用旧的字母序排布（缓存命中率对照）/ same as v2 but with the old alphabetical prompt layout (cache hit-rate comparison)
 }
@@ -51,7 +51,9 @@ def prepare_local(source, folder, model, context):
     return ids
 
 
-JUDGING_ROLES = ['project_architect', 'project_diagnoser', 'project_test_revision', 'assertion_referee', 'case_deriver', 'case_judge']
+# project_developer 也在里面：本地写实现时，测试由更强的模型先写（调用角色就是 project_developer）；混合臂同时关掉升级（max_escalations=0），所以云端永远不会接手实现。
+# project_developer is included: with a local implementer the tests are written first by the stronger model (called as project_developer); the hybrid arm also disables escalation (max_escalations=0), so the cloud never takes over the implementation.
+JUDGING_ROLES = ['project_architect', 'project_developer', 'project_diagnoser', 'project_test_revision', 'assertion_referee', 'case_deriver', 'case_judge']
 
 
 def prepare_hybrid(source, folder, model, context):

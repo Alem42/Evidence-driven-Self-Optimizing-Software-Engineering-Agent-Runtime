@@ -5,6 +5,12 @@ from masa.domain.models import MasaError, TransportFailure
 import time
 
 
+def may_play(provider, role):
+    """这个提供方的配置允许它承担这个角色吗（roles 为空 = 全部允许）。 Does the provider's profile allow this role (empty roles = every role)?"""
+    roles = (getattr(provider, 'config', None) or {}).get('roles') or []
+    return not roles or role in roles
+
+
 class PrepareMixin:
     def _prepare_change(self, planning, generation, goal):
         """工作项：变更规划（Architect 只写增量，被契约拒绝时带原因重试）→ 自动批准 → 不调用模型的草稿（旧代码 + 新的验收测试）。之后与新项目走同一个验证与修复循环。
@@ -162,7 +168,9 @@ class PrepareMixin:
                     test_provider=None
                     if self._ladder and (getattr(provider,'config',None) or {}).get('model_type')=='local':
                         candidate,_=self._pick('project_architect','gen_tests',need=[goal,approved],stage='generation',release=False)
-                        if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local':
+                        # 测试作者按 Architect 等级挑，但调用的角色是 project_developer：配置了角色白名单、不许写代码的模型不能当测试作者（混合评测里每次生成都因此被拒）。
+                        # The test author is picked at the Architect's level but is CALLED as project_developer: a model whose allow-list forbids that role cannot be the test author (in the hybrid evaluation every generation was refused for this).
+                        if candidate is not provider and (getattr(candidate,'config',None) or {}).get('model_type')!='local' and may_play(candidate,'project_developer'):
                             test_provider=candidate
                     # 云端整包生成被截断后，本任务的生成改为逐文件（记在 job 里，之后的重试不再回到整包）。
                     # After a cloud whole-bundle answer was cut off, generation for this task goes file by file (remembered in the job).

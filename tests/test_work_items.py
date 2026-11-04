@@ -130,6 +130,17 @@ class ProblemCountTests(unittest.TestCase):
         self.assertEqual(len(pack.parse_failures(result(one + one))), 1)
 
 
+class TestAuthorRoleTests(unittest.TestCase):
+    def test_a_test_author_must_be_allowed_to_play_the_developer_role(self):
+        """混合评测：云端模型只许做 Architect/Diagnoser，却被挑去当测试作者（调用角色是 project_developer），每次生成都被拒。 Hybrid evaluation: a cloud model allowed only Architect/Diagnoser was picked as the test author (called as project_developer) and every generation was refused."""
+        from types import SimpleNamespace
+        from masa.application.orchestration.prepare import may_play
+        self.assertTrue(may_play(SimpleNamespace(config={'roles': []}), 'project_developer'))
+        self.assertTrue(may_play(SimpleNamespace(config={'roles': ['project_developer']}), 'project_developer'))
+        self.assertFalse(may_play(SimpleNamespace(config={'roles': ['project_architect']}), 'project_developer'))
+        self.assertTrue(may_play(SimpleNamespace(), 'project_developer'))
+
+
 class ResumeTests(unittest.TestCase):
     def test_a_change_job_killed_mid_revision_continues_that_revision(self):
         """R1 的 kill -9 测试：进程在测试修订中途被杀，恢复后必须接着那个修订，而不是回到原草稿重新分类（那会去“修”正确的实现）。
