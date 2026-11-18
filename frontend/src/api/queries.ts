@@ -16,6 +16,7 @@ export const qk = {
   results: (id: string, rev: string) => ['results', id, rev] as const,
   logs: (id: string) => ['logs', id] as const,
   ollama: ['ollama'] as const,
+  localRuntimes: ['local', 'runtimes'] as const,
   report: (id: string) => ['report', id] as const,
   live: (id: string) => ['live', id] as const,
   calls: (id: string) => ['calls', id] as const,

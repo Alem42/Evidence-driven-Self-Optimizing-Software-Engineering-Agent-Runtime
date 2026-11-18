@@ -123,8 +123,8 @@ export function ModelsSection() {
           </div>
           <label className="check"><input type="checkbox" checked={values.enabled !== false} onChange={(e) => set({ enabled: e.target.checked })} /> 启用此模型</label>
           <Field label="配置名称"><input required value={values.name ?? ''} onChange={(e) => set({ name: e.target.value })} /></Field>
-          <Field label="Base URL"><input required value={values.base_url ?? ''} onChange={(e) => set({ base_url: e.target.value })} /></Field>
-          <Field label="模型 ID" hint={local ? 'Ollama 填完整 tag，例如 gemma4:12b' : undefined}><input required value={values.model ?? ''} onChange={(e) => set({ model: e.target.value })} /></Field>
+          <Field label="Base URL" hint={local ? (values.protocol === 'openai' ? 'llama.cpp / Strata：http://127.0.0.1:端口/v1（地址要带 /v1，端口与启动服务时一致）' : 'Ollama：http://127.0.0.1:11434') : undefined}><input required value={values.base_url ?? ''} onChange={(e) => set({ base_url: e.target.value })} /></Field>
+          <Field label="模型 ID" hint={local ? (values.protocol === 'openai' ? 'llama.cpp 填启动时的 --alias（可在「本地运行时」页看到服务实际报告的名字）' : 'Ollama 填完整 tag，例如 gemma4:12b') : undefined}><input required value={values.model ?? ''} onChange={(e) => set({ model: e.target.value })} /></Field>
           {!local && (
             <>
               <Field label="API Key" hint="密钥不回显；留空保留已有密钥。修改后先保存再测试。">
