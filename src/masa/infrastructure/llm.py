@@ -232,8 +232,9 @@ class ChatProvider:
         if context.get('user_notes'):  # 只有用户追加了提示时才出现，默认的提示词逐字节不变 / only when the user added notes, so default prompts stay byte-identical
             from masa.runtime.user_input import NOTES_INSTRUCTION
             instruction += NOTES_INSTRUCTION
-        if self.config['protocol']=='ollama':
-            # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
+        if self.config['model_type']=='local':
+            # 本地传输的补充说明因语言而异：由语言包给出。对 Ollama 与 llama.cpp 等本地兼容服务一视同仁（以前只给 Ollama，换服务后小模型就少了这段提示）。
+            # The local-transport additions differ by language: they come from the language pack. Applied to every local server (Ollama and OpenAI-compatible ones such as llama.cpp), not only Ollama.
             instruction+=languages.for_run(context).transport_hint(context)
         # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
         # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
@@ -248,6 +249,14 @@ class ChatProvider:
             self.config["token_parameter"]: self.config["max_output_tokens"],
             "stream": streaming,
         }
+        if self.config['model_type']=='local' and self.config['protocol']=='openai':
+            # llama.cpp 的 llama-server 把 json_schema 转成语法约束解码，等价于 Ollama 的 format=schema：弱模型无法写出越界的动作（实测 12 个角色里 11 个契约都被接受，剩下一个只是输出被截断）。
+            # 开发者角色在整包模式下与 Ollama 一样只要求“是 JSON”。
+            # llama-server turns json_schema into grammar-constrained decoding, the equivalent of Ollama's format=schema: a weak model cannot emit an out-of-contract action.
+            # The developer role in whole-bundle mode only asks for plain JSON, as on Ollama.
+            schema='json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context)
+            if schema!='json':
+                payload['response_format']={'type':'json_schema','json_schema':{'name':'action','strict':True,'schema':schema}}
         if streaming:
             payload['stream_options'] = {'include_usage': True}  # OpenAI 兼容服务在末尾块里给用量 / usage arrives in a trailing chunk
         if self.config["thinking"] != "auto":
@@ -396,7 +405,7 @@ class ChatProvider:
                 'top_keys':[str(k).replace(self.key,'[REDACTED]')[:80] if self.key else str(k)[:80] for k in list(action)[:8]] if isinstance(action,dict) else []}
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
-        if self.config['protocol']=='ollama' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):
+        if self.config['model_type']=='local' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):  # 约束解码给出的是“以操作名为键”的形状，所有本地服务都要归一化 / constrained decoding yields the keyed-by-operation shape, so every local server needs the normalisation
             # 仅归一化本地传输形状；原业务校验仍拒绝非法工具和内容。
             # Normalize transport shape only; business validation still rejects invalid tools/content.
             checks=[]
