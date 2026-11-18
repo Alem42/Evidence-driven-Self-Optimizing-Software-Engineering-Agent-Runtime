@@ -63,6 +63,10 @@ def validate_config(config):
     if 'streaming' in config:
         if type(config['streaming']) is not bool:raise MasaError('invalid streaming')
         values['streaming']=config['streaming']
+    if 'temperature' in config:  # 可选采样温度：未设置时完全沿用服务端默认，旧配置与旧调用身份不变 / optional sampling temperature; unset keeps the server default and every old identity
+        value=config['temperature']
+        if type(value) not in {int,float} or not math.isfinite(value) or not 0<=value<=2:raise MasaError('invalid temperature')
+        values['temperature']=value
     for name in ('input_price_per_million','output_price_per_million'):
         value=config.get(name)
         if value is not None and (type(value) not in {int,float} or not math.isfinite(value) or value<0):raise MasaError('invalid '+name)
@@ -178,6 +182,13 @@ class ChatProvider:
         self.on_progress = None
         self.on_text = None  # 实时输出：RoleRuntime 在每次调用前设置 / live output: set by RoleRuntime before every call
 
+    def _opener(self):
+        """本地模型永远直连（空代理表）：系统代理环境变量没有绕过 127.0.0.1 时，请求会被代理吞掉，表现为“无响应”。云端仍遵循系统代理。
+        Local models always connect directly (empty proxy map): when the proxy environment does not exempt 127.0.0.1 the request is swallowed and looks like "no response". Cloud calls still follow the system proxy."""
+        if self.config['model_type'] == 'local':
+            return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        return urllib.request.build_opener(NoRedirect())
+
     def unload(self):
         """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
         Release the local model from VRAM right away (Ollama: keep_alive=0). Best effort: never raises."""
@@ -187,7 +198,7 @@ class ChatProvider:
         request = urllib.request.Request(self.config['base_url'].rstrip('/') + '/api/generate', data=body,
                                          headers={'Content-Type': 'application/json'}, method='POST')
         try:
-            with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+            with self._opener().open(request, timeout=15) as response:
                 response.read(4096)
             self.loaded = False
             return True
@@ -198,7 +209,7 @@ class ChatProvider:
         """本地服务是否在响应（Ollama: /api/version；兼容服务: /models）。 Is the local server answering?"""
         path = '/api/version' if self.config['protocol'] == 'ollama' else '/models'
         try:
-            with urllib.request.build_opener(NoRedirect()).open(self.config['base_url'].rstrip('/') + path, timeout=timeout) as response:
+            with self._opener().open(self.config['base_url'].rstrip('/') + path, timeout=timeout) as response:
                 response.read(1024)
             return True
         except (OSError, urllib.error.URLError, ValueError):
@@ -232,8 +243,9 @@ class ChatProvider:
         if context.get('user_notes'):  # 只有用户追加了提示时才出现，默认的提示词逐字节不变 / only when the user added notes, so default prompts stay byte-identical
             from masa.runtime.user_input import NOTES_INSTRUCTION
             instruction += NOTES_INSTRUCTION
-        if self.config['protocol']=='ollama':
-            # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
+        if self.config['model_type']=='local':
+            # 本地传输的补充说明因语言而异：由语言包给出。对 Ollama 与 llama.cpp 等本地兼容服务一视同仁（以前只给 Ollama，换服务后小模型就少了这段提示）。
+            # The local-transport additions differ by language: they come from the language pack. Applied to every local server (Ollama and OpenAI-compatible ones such as llama.cpp), not only Ollama.
             instruction+=languages.for_run(context).transport_hint(context)
         # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
         # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
@@ -248,6 +260,16 @@ class ChatProvider:
             self.config["token_parameter"]: self.config["max_output_tokens"],
             "stream": streaming,
         }
+        if self.config['model_type']=='local' and self.config['protocol']=='openai':
+            # llama.cpp 的 llama-server 把 json_schema 转成语法约束解码，等价于 Ollama 的 format=schema：弱模型无法写出越界的动作（实测 12 个角色里 11 个契约都被接受，剩下一个只是输出被截断）。
+            # 开发者角色在整包模式下与 Ollama 一样只要求“是 JSON”。
+            # llama-server turns json_schema into grammar-constrained decoding, the equivalent of Ollama's format=schema: a weak model cannot emit an out-of-contract action.
+            # The developer role in whole-bundle mode only asks for plain JSON, as on Ollama.
+            schema='json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context)
+            if schema!='json':
+                payload['response_format']={'type':'json_schema','json_schema':{'name':'action','strict':True,'schema':schema}}
+        if 'temperature' in self.config:
+            payload['temperature'] = self.config['temperature']
         if streaming:
             payload['stream_options'] = {'include_usage': True}  # OpenAI 兼容服务在末尾块里给用量 / usage arrives in a trailing chunk
         if self.config["thinking"] != "auto":
@@ -259,7 +281,7 @@ class ChatProvider:
             # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
             # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
             payload={'keep_alive':LOCAL_KEEP_ALIVE,'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':streaming,
-                     'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
+                     'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens'],**({'temperature':self.config['temperature']} if 'temperature' in self.config else {})}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'
         if self.config['model_type'] == 'local':
@@ -287,7 +309,7 @@ class ChatProvider:
         try:
             # 不读取错误响应正文，避免上游回显密钥或请求内容进入日志。
             # Never expose upstream error bodies, which may echo credentials or request contents.
-            response = urllib.request.build_opener(NoRedirect()).open(
+            response = self._opener().open(
                 # 连接阶段的时限；读取阶段由流式读取循环自己控制。本地模型要等到加载完成才会有响应头（冷加载可达几十秒到几分钟），所以用“首字”时限而不是 30 秒——30 秒会把加载掐断，下一次再从头加载（真实运行里连续失败 4 次）。
                 # Connect-phase limit; the read phase is governed by the stream loop. A local model sends no response headers until it has loaded (a cold load takes tens of seconds to minutes), so it gets the first-token limit instead of 30 s:
                 # 30 s aborted the load and the next try started cold again (four failures in a row in a real run).
@@ -396,7 +418,7 @@ class ChatProvider:
                 'top_keys':[str(k).replace(self.key,'[REDACTED]')[:80] if self.key else str(k)[:80] for k in list(action)[:8]] if isinstance(action,dict) else []}
         except (KeyError, IndexError, TypeError, ValueError, AttributeError):
             raise MasaError("invalid model response envelope or JSON action") from None
-        if self.config['protocol']=='ollama' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):
+        if self.config['model_type']=='local' and purpose=='project_tester' and isinstance(action,dict) and isinstance(action.get('checks'),dict):  # 约束解码给出的是“以操作名为键”的形状，所有本地服务都要归一化 / constrained decoding yields the keyed-by-operation shape, so every local server needs the normalisation
             # 仅归一化本地传输形状；原业务校验仍拒绝非法工具和内容。
             # Normalize transport shape only; business validation still rejects invalid tools/content.
             checks=[]

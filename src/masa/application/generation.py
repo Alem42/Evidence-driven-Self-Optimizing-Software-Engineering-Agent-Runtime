@@ -157,7 +157,7 @@ class ProjectGeneration:
             snapshot = getattr(provider, 'snapshot', {}) or {}
             frozen_config = snapshot.get('config', {}) if isinstance(snapshot, dict) else {}
             local_files = (config.get('model_type') == 'local'
-                           and frozen_config.get('protocol', snapshot.get('protocol')) == 'ollama')
+                           and frozen_config.get('protocol', snapshot.get('protocol')) in ('ollama', 'openai'))  # 本地 = Ollama 或 llama.cpp 等兼容服务 / local = Ollama or an OpenAI-compatible server such as llama.cpp
             # 云端默认一次生成全部文件（省调用）；一旦输出被截断（项目大、超过单次输出上限），就改成逐文件生成：
             # 每次只写一个文件，不再受整包输出上限约束（评测里 L9 的 regex 因此死在生成阶段）。
             # Cloud models generate everything in one call by default (fewer calls); once the output is cut off (a big project over the single-call limit)

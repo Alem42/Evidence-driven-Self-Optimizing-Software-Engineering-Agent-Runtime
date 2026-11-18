@@ -6,6 +6,7 @@ import { qk } from '../../api/queries';
 import { useActivity } from '../../app/activity';
 import { gib, nsToSeconds } from '../../entities/text';
 import { Button, Card, Notice, Spinner } from '../../shared/ui';
+import { LocalServers } from './LocalServers';
 
 interface OllamaModel { name: string; size: number; digest: string; details?: { parameter_size?: string; quantization_level?: string } }
 interface OllamaRunning { name: string; size: number; size_vram: number; context_length?: number }
@@ -48,8 +49,9 @@ export function LocalSection() {
   const m = result?.metrics;
   return (
     <div className="stack">
+      <LocalServers />
       <Card
-        title={catalog.data ? `本地模型 · Ollama ${catalog.data.version}` : '本地模型 · Ollama'}
+        title={catalog.data ? `本地模型 · Ollama ${catalog.data.version}` : '本地模型 · Ollama（未运行时此处为空）'}
         subtitle="固定连接 127.0.0.1:11434。选择用于新任务；加载/释放影响本机内存；执行中的任务不会切换。"
         actions={<Button size="sm" onClick={() => catalog.refetch()} disabled={catalog.isFetching}>刷新</Button>}
       >
