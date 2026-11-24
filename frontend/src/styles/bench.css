@@ -1,38 +1,47 @@
 /* ───────── benchmark ───────── */
 .bench { display: flex; flex-direction: column; gap: 14px; }
-.bench .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
-.bench-tasks { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
-.bench-kpis { gap: 10px; }
-.kpi { display: flex; flex-direction: column; min-width: 130px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.kpi strong { font-size: 20px; }
-.kpi small { font-size: 11px; }
+.bench h2 { margin: 0; }
+.bench-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
+.bench-fields .field { min-width: 0; }
+.bench-fields select { width: 100%; }
+.bench-picker { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.bench-tasks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  gap: 6px 14px;
+  max-height: 220px;
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.bench-disclosure > summary { padding: 4px 0; }
+.bench-disclosure[open] > .bench-fields { margin: 8px 0; }
+.bench-disclosure p { margin-top: 8px; overflow-wrap: anywhere; }
+.bench-summary { display: flex; flex-wrap: wrap; gap: 14px 32px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bench-summary > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; }
+.bench-summary > div > span { flex-basis: 100%; color: var(--muted); }
+.bench-summary strong { font-size: 20px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.bench-summary small { color: var(--muted); }
+.bench-outcomes { border-bottom: 1px solid var(--line); }
+.bench-task-result + .bench-task-result { border-top: 1px solid var(--line); }
+.bench-task-result > summary { padding: 9px 0; }
+.bench-task-result > summary strong { color: var(--text); margin-left: 4px; }
+.bench-outcome-labels { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: 12px; font-size: 12px; font-weight: 600; }
+.bench-attempts { list-style: none; margin: 0; padding: 0 0 10px 18px; color: var(--muted); }
+.bench-attempts li + li { margin-top: 8px; }
+.bench-attempts p { margin: 2px 0 0; overflow-wrap: anywhere; }
 .bench-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .bench-table th, .bench-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.bench-table .runs span { display: inline-block; min-width: 18px; text-align: center; font-weight: 700; cursor: help; }
 .run-pass { color: var(--ok, #2e7d32); }
 .run-gate_fail, .run-error { color: var(--bad, #c0392b); }
-.run-false_pass { color: #d35400; }
-.run-stopped, .run-timeout { color: #b9770e; }
+.run-false_pass, .run-stopped, .run-timeout { color: var(--warn, #b9770e); }
 .run-skipped { color: var(--muted); }
-.rate-bar { display: inline-block; width: 70px; height: 8px; background: var(--line); border-radius: 4px; vertical-align: middle; overflow: hidden; }
-.rate-bar i { display: block; height: 100%; }
-.rate-bar .ok { background: var(--ok, #2e7d32); }
-.rate-bar .mid { background: #d4a017; }
-.rate-bar .bad { background: var(--bad, #c0392b); }
-.delta-good { color: var(--ok, #2e7d32); font-size: 12px; }
-.delta-bad { color: var(--bad, #c0392b); font-size: 12px; }
-.chip-static.dim { opacity: 0.5; }
 .scroll-x { overflow-x: auto; }
-
-/* live progress */
-.bench-live { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 15px; }
-.bench-live .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent, #4c6ef5); animation: bench-spin 0.9s linear infinite; }
+.bench-progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.bench-queue { margin: 8px 0 0; max-height: 240px; overflow: auto; padding-left: 20px; font-size: 13px; }
+.bench-queue li + li { margin-top: 3px; }
 @keyframes bench-spin { to { transform: rotate(360deg); } }
-.bench-current { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.bench-queue { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 0; margin: 10px 0 0; font-size: 12.5px; }
-.bench-queue .q-mark { display: inline-block; min-width: 14px; font-weight: 700; }
-.bench-queue .q-now { color: var(--accent, #4c6ef5); font-weight: 600; }
-.bench-queue .q-wait { color: var(--muted); }
 
 /* streaming indicator in the top bar */
 .chip-static .spin { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent, #4c6ef5); animation: bench-spin 0.9s linear infinite; vertical-align: -1px; }

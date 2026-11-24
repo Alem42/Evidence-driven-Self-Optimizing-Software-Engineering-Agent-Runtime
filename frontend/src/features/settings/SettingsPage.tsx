@@ -22,9 +22,9 @@ const MAIN = [
   ['local', '本地运行时', 'Strata、llama.cpp、Ollama 模型启停'],
   ['routing', '路由与预算', '默认预算与策略（可编辑）'],
   ['languages', '语言', '语言包：默认语言、工具链与解释器配置'],
-  ['bench', '评测', '一键跑固定任务集，看通过率与成本'],
 ] as const;
 const ADVANCED = [
+  ['bench', '开发评测', '运行测试集，查看通过率与资源用量'],
   ['roles', '动态角色', '角色清单、指挥者状态与触发条件'],
   ['experiments', '实验结果', '不同设置的影响：测试可靠性、A/B、上下文（表与图）'],
   ['harness', 'Harness', 'runner 与后端能力'],

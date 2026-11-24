@@ -1,63 +1,60 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
-import type { BenchCatalog, BenchRecord, BenchResult, BenchRow, BenchStatus, BenchSummary } from '../../api/bench-types';
-import { Badge, Button, Card, Field, Notice, Segmented } from '../../shared/ui';
+import type { BenchCatalog, BenchRecord, BenchResult, BenchStatus, BenchSummary } from '../../api/bench-types';
+import { useBenchTasks, useProfiles } from '../../api/queries';
+import { byRouting, profileLabel, profileReady } from '../../entities/profiles';
 import { fmtDuration, fmtTokens } from '../../entities/report';
 import { stageLabels } from '../../entities/status';
+import { Badge, Button, Card, Field, Notice } from '../../shared/ui';
 import { useUi } from '../../stores/ui';
-import { useProfiles } from '../../api/queries';
-import { byRouting, profileLevel } from '../../entities/profiles';
-import { Link } from 'react-router-dom';
 
-// 一键评测：套餐 + 三层上限（单次运行 / 整个评测 / 随时停止）+ 结果表 + 与历史对比。
-// One-click benchmark: presets, three layers of limits, a results table and comparison with history.
-const GLYPH: Record<BenchStatus, [string, string]> = {
-  pass: ['✓', '通过'],
-  false_pass: ['≠', '假通过：系统的 Gate 通过了，但独立判官发现输出不对'],
-  gate_fail: ['✗', '未通过'],
-  stopped: ['■', '预算/路由停止'],
-  timeout: ['⏱', '超时'],
-  error: ['!', '出错'],
-  skipped: ['·', '跳过（超出评测上限）'],
+const SUITE_NAMES: Record<string, string> = {
+  canary: '最小检查', quick: '快速回归', standard: '标准回归', full: '全量回归', custom: '自选任务',
 };
-const MECH: Record<string, string> = {
-  imports_fixed: '自动修 import',
-  syntax_rewrites: '语法门重写',
-  diagnosis: 'Diagnoser',
-  reconciled: '核对改判',
-  rewrite: '整体重写',
-  rounds_extended: '延长轮数',
-  noop: '无改动拒收',
-  flip_to_tests: '转修测试',
+const OUTCOMES: Record<BenchStatus, string> = {
+  pass: '通过', false_pass: '假通过', gate_fail: '未通过', stopped: '提前停止', timeout: '超时', error: '出错', skipped: '未运行',
 };
-const pct = (x: number | null | undefined) => (x == null ? '—' : Math.round(x * 100) + '%');
-const num = (x: number | null | undefined) => (x == null ? '—' : String(x));
+const MECHANISMS: Record<string, string> = {
+  imports_fixed: '修复导入', syntax_rewrites: '语法重写', diagnosis: '失败诊断', reconciled: '核对改判',
+  rewrite: '整体重写', rounds_extended: '增加修复轮次', noop: '拒收无改动', flip_to_tests: '转修测试',
+};
+const suiteName = (id: string, catalog: BenchCatalog) => SUITE_NAMES[id] ?? catalog.suites[id]?.title ?? id;
+const taskName = (id: string, catalog: BenchCatalog) => catalog.tasks.find((task) => task.id === id)?.title ?? id;
+const duration = (seconds: number) => fmtDuration(seconds * 1000);
+const percent = (value: number | null) => value == null ? '—' : `${Math.round(100 * value)}%`;
+const inRange = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
 
 export function BenchSection() {
   const qc = useQueryClient();
-  const catalog = useQuery({ queryKey: ['bench', 'tasks'], queryFn: () => api<BenchCatalog>('/bench/tasks'), staleTime: Infinity });
+  const catalog = useBenchTasks();
   const status = useQuery({
-    queryKey: ['bench', 'status'],
-    queryFn: () => api<BenchResult>('/bench/status'),
-    refetchInterval: (q) => (['running', 'starting'].includes(q.state.data?.state ?? '') ? 1500 : 5000),
+    queryKey: ['bench', 'status'], queryFn: () => api<BenchResult>('/bench/status'),
+    refetchInterval: (q) => ['running', 'starting'].includes(q.state.data?.state ?? '') ? 1500 : 5000,
   });
-  const history = useQuery({ queryKey: ['bench', 'results'], queryFn: async () => (await api<{ results: BenchSummary[] }>('/bench/results')).results, refetchInterval: 8000 });
-  const cat = catalog.data;
+  const history = useQuery({
+    queryKey: ['bench', 'results'], refetchInterval: 8000,
+    queryFn: async () => (await api<{ results: BenchSummary[] }>('/bench/results')).results,
+  });
+  const selectedModels = useUi((x) => x.selectedModels);
+  const profiles = useProfiles();
+  const ready = (profiles.data?.profiles ?? []).filter(profileReady).sort(byRouting);
+  const [pinnedProfile, setPinnedProfile] = useState('');
+  // 评测可单独锁定一个模型，也可沿用新任务的路由候选。 Pin one evaluation profile or use the task's routing selection.
+  const chosen = ready.filter((p) => pinnedProfile ? p.id === pinnedProfile : !selectedModels || selectedModels.includes(p.id));
+  const includesCloud = chosen.some((p) => p.model_type === 'cloud');
+
   const [suite, setSuite] = useState('canary');
   const [repeats, setRepeats] = useState(1);
   const [tokens, setTokens] = useState(120_000);
   const [minutes, setMinutes] = useState(15);
   const [scale, setScale] = useState(100);
   const [picked, setPicked] = useState<string[]>([]);
-  const [shown, setShown] = useState<string | null>(null);
+  const [shown, setShown] = useState('');
   const [baseId, setBaseId] = useState('');
-  // 评测用“模型与次序”里勾选的模型（和新任务一致）；没有勾选就用全部已启用的。
-  // The benchmark uses the models ticked in "Model order" (same as new tasks); all enabled models when nothing is ticked.
-  const selectedModels = useUi((x) => x.selectedModels);
-  const profiles = useProfiles().data?.profiles ?? [];
-  const chosen = profiles.filter((p) => p.enabled && (!selectedModels || selectedModels.includes(p.id))).sort(byRouting);
 
+  const cat = catalog.data;
   const preset = cat?.suites[suite];
   useEffect(() => {
     if (!preset) return;
@@ -65,383 +62,212 @@ export function BenchSection() {
     setTokens(preset.total_cloud_tokens);
     setMinutes(preset.total_minutes);
     setPicked(preset.tasks);
-  }, [suite, preset]);
+  }, [preset]);
 
-  const running = ['running', 'starting'].includes(status.data?.state ?? '');
+  const current = status.data;
+  const running = current?.state === 'running' || current?.state === 'starting';
+  const refreshBench = () => qc.invalidateQueries({ queryKey: ['bench'] });
   const start = useMutation({
-    mutationFn: () => api('/bench/start', { suite, task_ids: picked, repeats, total_cloud_tokens: tokens, total_minutes: minutes, per_run_scale: scale, ...(selectedModels ? { model_ids: selectedModels } : {}) }),
-    onSuccess: () => {
-      setShown(null);
-      qc.invalidateQueries({ queryKey: ['bench'] });
-    },
+    mutationFn: () => api('/bench/start', {
+      suite, task_ids: picked, repeats, total_cloud_tokens: tokens, total_minutes: minutes, per_run_scale: scale,
+      model_ids: chosen.map((p) => p.id),
+    }),
+    onSuccess: () => { setShown(''); return refreshBench(); },
   });
-  const stop = useMutation({ mutationFn: () => api('/bench/stop', {}), onSuccess: () => qc.invalidateQueries({ queryKey: ['bench'] }) });
+  const stop = useMutation({ mutationFn: () => api('/bench/stop', {}), onSuccess: refreshBench });
 
-  const latestId = history.data?.[0]?.id;
-  const viewId = running ? null : (shown ?? latestId ?? null);
-  const loaded = useQuery({ queryKey: ['bench', 'result', viewId], queryFn: () => api<BenchResult>('/bench/results/' + viewId), enabled: Boolean(viewId) });
-  const base = useQuery({ queryKey: ['bench', 'result', baseId], queryFn: () => api<BenchResult>('/bench/results/' + baseId), enabled: Boolean(baseId) });
-  const result = running ? status.data : loaded.data;
-  const ordered = useMemo(() => [...(cat?.tasks ?? [])].sort((a, b) => a.level - b.level), [cat]);
+  const results = history.data ?? [];
+  const viewId = shown || current?.id || results[0]?.id || '';
+  const compareId = baseId === viewId ? '' : baseId;
+  const loaded = useQuery({
+    queryKey: ['bench', 'result', viewId], queryFn: () => api<BenchResult>('/bench/results/' + viewId),
+    enabled: !running && results.some((entry) => entry.id === viewId),
+  });
+  const base = useQuery({
+    queryKey: ['bench', 'result', compareId], queryFn: () => api<BenchResult>('/bench/results/' + compareId),
+    enabled: !running && Boolean(compareId),
+  });
+  const result = loaded.data ?? (current?.id === viewId ? current : undefined);
+  const validLimits = inRange(repeats, 1, 10) && inRange(minutes, 1, 2000) && inRange(tokens, 1000, 50_000_000) && inRange(scale, 20, 400);
+  const canStart = validLimits && picked.length > 0 && chosen.length > 0 && !start.isPending && !status.isPending;
+  const actionError = start.error ?? stop.error;
 
-  if (!cat) return <p className="muted">读取中…</p>;
+  if (!cat) return catalog.error ? <Notice tone="bad">读取评测任务失败。{catalog.error.message}</Notice> : <p className="muted">正在读取评测任务…</p>;
   return (
     <div className="bench">
-      <h2>评测</h2>
-      <p className="muted">
-        一键跑一组固定的 Go 命令行任务（L0–L9 共 10 个难度等级），用<b>独立判官</b>（评测自带的参考实现，真的构建并运行生成的程序）复核系统自己的 Gate，输出通过率与成本，
-        用来判断对 runtime 的修改有没有让系统变强。评测会调用真实模型：本地免费、云端计费，所以有三层上限。
-      </p>
-
-      <Card title="运行评测" subtitle="评测在独立的临时目录里跑，不会写入你的历史；它占用 GPU 和云端额度，所以不能与正在执行的任务同时运行。">
-        <Segmented value={suite} onChange={setSuite} options={[...Object.entries(cat.suites).map(([id, s]) => [id, s.title.split('（')[0]] as [string, string]), ['custom', '自选']]} />
-        {preset && suite !== 'custom' && (
-          <p className="muted">
-            {preset.title} — {preset.desc}
-          </p>
-        )}
-        <div className="grid2">
-          <Field label="每个任务重复次数" hint="重复才能区分“运气”和“能力”">
-            <input type="number" min={1} max={10} value={repeats} disabled={running} onChange={(e) => setRepeats(Number(e.target.value))} />
-          </Field>
-          <Field label="整个评测的云端 token 上限" hint="到顶后剩下的运行标为“跳过”">
-            <input type="number" min={1000} step={10000} value={tokens} disabled={running} onChange={(e) => setTokens(Number(e.target.value))} />
-          </Field>
-          <Field label="整个评测的时间上限（分钟）">
-            <input type="number" min={1} value={minutes} disabled={running} onChange={(e) => setMinutes(Number(e.target.value))} />
-          </Field>
-          <Field label="单次运行上限（占默认的 %）" hint="默认按等级给：时间 3–16 分钟，云端 4–17.5 万 token">
-            <input type="number" min={20} max={400} step={10} value={scale} disabled={running} onChange={(e) => setScale(Number(e.target.value))} />
-          </Field>
-        </div>
-        <p className="hint">
-          使用的模型与次序：{chosen.map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '（没有可用模型）'}。
-          <Link to="/settings/order?from=new"> 在“模型与次序”里调整</Link>
-        </p>
-        <details>
-          <summary>任务（{picked.length} 个）与各自的等级</summary>
-          <ul className="bench-tasks">
-            {ordered.map((t) => (
-              <li key={t.id} title={t.goal}>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(t.id)}
-                    disabled={running}
-                    onChange={(e) => {
-                      setSuite('custom');
-                      setPicked(e.target.checked ? [...picked, t.id] : picked.filter((x) => x !== t.id));
-                    }}
-                  />
-                  <Badge>L{t.level}</Badge> <strong>{t.title}</strong>{' '}
-                  <span className="muted">
-                    {t.cases} 用例 · ≤{fmtDuration(t.max_seconds * 1000)} · ≤{fmtTokens(t.max_cloud_tokens)} tok
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <p className="hint">{Object.entries(cat.levels).map(([k, v]) => `L${k} ${v}`).join(' · ')}</p>
-        </details>
-        <div className="row">
-          {!running ? (
-            <Button variant="primary" disabled={start.isPending || !picked.length} onClick={() => start.mutate()}>
-              ▶ 开始评测
-            </Button>
-          ) : (
-            <Button variant="danger" disabled={stop.isPending} onClick={() => stop.mutate()}>
-              ■ 停止（取消当前运行，剩下的跳过）
-            </Button>
-          )}
-          <span className="hint">
-            最坏情况：{fmtTokens(tokens)} 云端 token · {minutes} 分钟。
-          </span>
-        </div>
-        {(start.error || stop.error) && <Notice tone="bad">{((start.error ?? stop.error) as Error).message}</Notice>}
-      </Card>
-
-      {running && status.data && <Progress r={status.data} cat={cat} />}
-
-      {!running && (history.data?.length ?? 0) > 0 && (
-        <div className="row wrap">
-          <Field label="查看历史结果">
-            <select value={viewId ?? ''} onChange={(e) => setShown(e.target.value)}>
-              {history.data!.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.id} · {h.suite} · {h.passed}/{h.runs} 通过 · {h.commit ?? '未知版本'}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="与之对比（基线）">
-            <select value={baseId} onChange={(e) => setBaseId(e.target.value)}>
-              <option value="">不对比</option>
-              {history.data!
-                .filter((h) => h.id !== viewId)
-                .map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.id} · {h.suite} · {h.commit ?? '?'}
-                  </option>
+      <h2>开发评测</h2>
+      {running ? <Progress result={current} catalog={cat} stopping={stop.isPending} onStop={() => stop.mutate()} /> : (
+        <Card title="运行评测">
+          <div className="bench-fields">
+            <Field label="测试范围">
+              <select value={suite} onChange={(e) => setSuite(e.target.value)}>
+                {Object.keys(cat.suites).map((id) => <option key={id} value={id}>{suiteName(id, cat)}</option>)}
+                <option value="custom">自选任务</option>
+              </select>
+            </Field>
+            <Field label="使用模型">
+              <select value={pinnedProfile} onChange={(e) => setPinnedProfile(e.target.value)}>
+                <option value="">按任务路由配置</option>
+                {pinnedProfile && !ready.some((p) => p.id === pinnedProfile) && <option value={pinnedProfile}>所选模型当前不可用</option>}
+                {ready.map((p) => <option key={p.id} value={p.id}>{profileLabel(p)}</option>)}
+              </select>
+            </Field>
+          </div>
+          {suite === 'custom' && (
+            <fieldset className="bench-picker">
+              <legend>选择任务</legend>
+              <ul className="bench-tasks">
+                {cat.tasks.map((task) => (
+                  <li key={task.id} title={task.goal}>
+                    <label className="check">
+                      <input type="checkbox" checked={picked.includes(task.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, task.id] : picked.filter((id) => id !== task.id))} />
+                      {task.title}
+                    </label>
+                  </li>
                 ))}
-            </select>
-          </Field>
-        </div>
+              </ul>
+            </fieldset>
+          )}
+          <div className="row wrap">
+            <Button variant="primary" disabled={!canStart} onClick={() => start.mutate()}>{start.isPending ? '正在启动…' : '开始评测'}</Button>
+            <span className="muted" aria-live="polite">
+              {picked.length} 个任务 × {repeats} 轮 · 最多 {minutes} 分钟{includesCloud ? ` · 云端上限 ${fmtTokens(tokens)} token` : chosen.length ? ' · 仅本地模型' : ''}
+            </span>
+          </div>
+          {profiles.isSuccess && !chosen.length && <Notice tone="warn">没有可用于本次评测的模型。<Link to="/settings/local">打开本地运行时</Link></Notice>}
+          {profiles.error && <Notice tone="bad">读取模型失败。{profiles.error.message}</Notice>}
+          <details className="bench-disclosure">
+            <summary>运行设置与任务清单</summary>
+            <div className="bench-fields">
+              <Field label="每个任务的重复次数"><input type="number" min={1} max={10} value={repeats} onChange={(e) => setRepeats(Number(e.target.value))} /></Field>
+              <Field label="时间上限（分钟）"><input type="number" min={1} max={2000} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} /></Field>
+              <Field label="云端 token 上限"><input type="number" min={1000} max={50_000_000} step={1000} value={tokens} onChange={(e) => setTokens(Number(e.target.value))} /></Field>
+              <Field label="单次任务预算（默认的百分比）"><input type="number" min={20} max={400} step={10} value={scale} onChange={(e) => setScale(Number(e.target.value))} /></Field>
+            </div>
+            {!validLimits && <Notice tone="warn">请检查运行设置中的数字范围。</Notice>}
+            <p>{picked.map((id) => taskName(id, cat)).join('、') || '尚未选择任务'}</p>
+            <p className="muted">模型候选：{chosen.map(profileLabel).join('、') || '无'}。<Link to="/settings/order">调整任务路由</Link></p>
+          </details>
+        </Card>
       )}
-      {result?.records && <ResultView r={result} cat={cat} base={baseId ? base.data : undefined} />}
-      {!running && !history.data?.length && <Notice>还没有评测结果。先跑一次“金丝雀”（约 5 分钟）。</Notice>}
+      {(actionError || status.error) && <Notice tone="bad">{(actionError ?? status.error)?.message}</Notice>}
+      {!running && result?.aggregate && <ResultView key={result.id} result={result} catalog={cat} base={compareId ? base.data : undefined} />}
+      {!running && loaded.isFetching && !result && <p className="muted">正在载入结果…</p>}
+      {!running && (loaded.error || base.error || history.error) && <Notice tone="bad">读取评测结果失败。{(loaded.error ?? base.error ?? history.error)?.message}</Notice>}
+      {!running && !result && !history.isPending && !history.error && !results.length && <p className="muted">还没有评测结果。可以从最小检查开始。</p>}
+      {!running && results.length > 0 && (
+        <details className="card-details bench-disclosure">
+          <summary>历史结果与对比</summary>
+          <div className="bench-fields">
+            <Field label="查看结果">
+              <select value={shown} onChange={(e) => { setShown(e.target.value); setBaseId(''); }}>
+                <option value="">最新一次</option>
+                {results.map((r) => <option key={r.id} value={r.id}>{new Date(r.started * 1000).toLocaleString()} · {suiteName(r.suite, cat)} · {r.passed}/{r.runs} 通过</option>)}
+              </select>
+            </Field>
+            <Field label="对比基线">
+              <select value={compareId} onChange={(e) => setBaseId(e.target.value)}>
+                <option value="">不对比</option>
+                {results.filter((r) => r.id !== viewId).map((r) => <option key={r.id} value={r.id}>{r.id} · {suiteName(r.suite, cat)} · {r.passed}/{r.runs} 通过</option>)}
+              </select>
+            </Field>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
 
-/** 每秒走一次的本地时钟，并用服务端时间校正偏差：数字在两次轮询之间也会动。 A 1 s local clock corrected by the server time, so numbers move between polls. */
-function useClock(serverTime?: number) {
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  const [skew, setSkew] = useState(0);
-  useEffect(() => {
-    if (serverTime) setSkew(serverTime - Date.now() / 1000);
-  }, [serverTime]);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return now + skew;
-}
-
-function Progress({ r, cat }: { r: BenchResult; cat: BenchCatalog }) {
-  const now = useClock(r.server_time);
-  const cur = r.current;
-  const title = cur ? cat.tasks.find((t) => t.id === cur.task)?.title : null;
-  const elapsed = Math.max(0, now - r.started);
-  const runElapsed = cur ? Math.max(0, now - cur.started) : 0;
-  const finished = new Map(r.records.map((x) => [x.task + '#' + x.repeat, x]));
-  const doneCount = r.records.length;
+function Progress({ result, catalog, stopping, onStop }: { result: BenchResult; catalog: BenchCatalog; stopping: boolean; onStop: () => void }) {
+  const cur = result.current;
+  const o = result.aggregate.overall;
+  const elapsed = result.server_time == null ? result.used.seconds : Math.max(result.used.seconds, result.server_time - result.started);
+  const recordByRun = new Map(result.records.map((r) => [`${r.task}#${r.repeat}`, r]));
   return (
-    <Card title="进行中" tone="running">
-      <div className="bench-live">
-        <span className="spin" aria-hidden />
-        <strong>已用 {fmtDuration(elapsed * 1000)}</strong>
-        <span className="muted">/ 上限 {r.config.total_minutes} 分钟</span>
-        <span className="muted">· 已完成 {doneCount}/{r.total}</span>
-      </div>
-      <div className="budget">
-        <Bar label="总进度" used={doneCount} limit={r.total} fmt={String} />
-        <Bar label="总时间" used={elapsed} limit={r.config.total_minutes * 60} fmt={(n) => fmtDuration(n * 1000)} />
-        <Bar label="云端 token（累计）" used={r.used.cloud_tokens + (cur?.run_cloud_tokens ?? 0)} limit={r.config.total_cloud_tokens} fmt={fmtTokens} />
-      </div>
-      {cur && (
-        <div className="bench-current">
-          <p>
-            正在跑 <Badge>L{cur.level}</Badge> <strong>{title}</strong> 第 {cur.repeat} 次 · 已 <b>{fmtDuration(runElapsed * 1000)}</b>
-            {cur.stage && <> · 阶段 <b>{stageLabels[cur.stage] ?? cur.stage}</b></>}
-            {cur.live_chars ? <> · 正在生成 <b>{cur.live_chars.toLocaleString()}</b> 字</> : null}
-            {cur.model && <> · <span className="chip-static">{cur.kind === 'local' ? '本地 ' : cur.kind === 'cloud' ? 'API ' : ''}{cur.model}</span></>}
-          </p>
-          <div className="budget">
-            {cur.limit_seconds ? <Bar label="本次时间" used={runElapsed} limit={cur.limit_seconds} fmt={(n) => fmtDuration(n * 1000)} /> : null}
-            {cur.limit_cloud_tokens ? <Bar label="本次云端 token" used={cur.run_cloud_tokens ?? 0} limit={cur.limit_cloud_tokens} fmt={fmtTokens} /> : null}
-          </div>
-        </div>
-      )}
-      {r.plan && (
+    <Card title="评测进行中" actions={<Button variant="danger" disabled={stopping} onClick={onStop}>{stopping ? '正在停止…' : '停止评测'}</Button>}>
+      <p aria-live="polite"><strong>{result.records.length} / {result.total} 项已处理</strong> · {o.passed} 项通过{cur && <> · 正在运行 {taskName(cur.task, catalog)}{cur.stage ? ` · ${stageLabels[cur.stage] ?? cur.stage}` : ''}</>}</p>
+      <progress className="bench-progress" max={Math.max(1, result.total)} value={result.records.length} aria-label="评测进度" />
+      <details className="bench-disclosure">
+        <summary>运行队列与用量</summary>
+        <p className="muted">已用 {duration(elapsed)} · 云端 {fmtTokens(result.used.cloud_tokens + (cur?.run_cloud_tokens ?? 0))} / {fmtTokens(result.config.total_cloud_tokens)} token{cur?.model ? ` · 当前模型 ${cur.model}` : ''}</p>
         <ol className="bench-queue">
-          {r.plan.map((p, i) => {
-            const rec = finished.get(p.task + '#' + p.repeat);
-            const isCur = cur?.task === p.task && cur.repeat === p.repeat;
-            const mark = rec ? GLYPH[rec.status][0] : isCur ? '▶' : '○';
-            return (
-              <li key={i} className={rec ? 'run-' + rec.status : isCur ? 'q-now' : 'q-wait'} title={rec ? `${GLYPH[rec.status][1]} · ${rec.seconds}s · 云端 ${rec.cloud_tokens} tok` : isCur ? '正在进行' : '等待中'}>
-                <span className="q-mark">{mark}</span> L{p.level} {cat.tasks.find((t) => t.id === p.task)?.title ?? p.task}
-                {p.repeat > 1 || r.config.repeats > 1 ? ` #${p.repeat}` : ''}
-                {rec && <small className="muted"> {fmtDuration(rec.seconds * 1000)}</small>}
-              </li>
-            );
+          {(result.plan ?? result.records).map((p) => {
+            const key = `${p.task}#${p.repeat}`;
+            const record = recordByRun.get(key);
+            return <li key={key}>{taskName(p.task, catalog)}{result.config.repeats > 1 ? ` #${p.repeat}` : ''} · {record ? OUTCOMES[record.status] : cur?.task === p.task && cur.repeat === p.repeat ? '进行中' : '待运行'}</li>;
           })}
         </ol>
-      )}
-      <p className="hint">每个任务完成后会立即保存结果；关闭页面不会中断评测。</p>
+      </details>
     </Card>
   );
 }
 
-function Bar({ label, used, limit, fmt }: { label: string; used: number; limit: number; fmt: (n: number) => string }) {
-  const share = Math.min(100, (used / Math.max(1, limit)) * 100);
+function ResultView({ result, catalog, base }: { result: BenchResult; catalog: BenchCatalog; base?: BenchResult }) {
+  const o = result.aggregate.overall;
+  const byTask = new Map<string, BenchRecord[]>();
+  for (const record of result.records) {
+    const group = byTask.get(record.task) ?? [];
+    group.push(record);
+    byTask.set(record.task, group);
+  }
+  const status = result.state === 'stopped' ? '已停止' : result.state === 'error' ? '运行出错' : '已结束';
+  const activeMechanisms = Object.entries(o.mechanisms).filter(([, count]) => count > 0);
   return (
-    <div className="budget-row">
-      <span>{label}</span>
-      <div className="budget-bar">
-        <i className={share >= 90 ? 'hot' : ''} style={{ width: share + '%' }} />
+    <Card title="评测结果" subtitle={`${suiteName(result.config.suite, catalog)} · ${status}`}>
+      {result.message && <Notice tone={result.state === 'error' ? 'bad' : 'warn'}>{result.message}</Notice>}
+      <div className="bench-summary">
+        <div><span>独立验收通过</span><strong>{o.passed} / {o.runs}</strong><small>{percent(o.rate)}</small></div>
+        <div><span>总耗时</span><strong>{duration(result.used.seconds)}</strong></div>
+        <div><span>云端 token</span><strong>{fmtTokens(o.cloud_tokens)}</strong></div>
       </div>
-      <span className="mono">
-        {fmt(used)} / {fmt(limit)}
-      </span>
-    </div>
-  );
-}
-
-function Delta({ a, b, fmt = (x: number) => String(x), goodWhen = 'up' }: { a?: number | null; b?: number | null; fmt?: (x: number) => string; goodWhen?: 'up' | 'down' }) {
-  if (a == null || b == null) return <span className="muted">—</span>;
-  const d = b - a;
-  if (Math.abs(d) < 1e-9) return <span className="muted">±0</span>;
-  const good = goodWhen === 'up' ? d > 0 : d < 0;
-  return (
-    <span className={good ? 'delta-good' : 'delta-bad'}>
-      {d > 0 ? '+' : '-'}
-      {fmt(Math.abs(d))}
-    </span>
-  );
-}
-
-function Kpi({ label, value, sub, d }: { label: string; value: string; sub?: string; d?: ReactNode }) {
-  return (
-    <div className="kpi">
-      <span className="muted">{label}</span>
-      <strong>
-        {value} {d}
-      </strong>
-      {sub && <small className="muted">{sub}</small>}
-    </div>
-  );
-}
-
-function ResultView({ r, cat, base }: { r: BenchResult; cat: BenchCatalog; base?: BenchResult }) {
-  const o = r.aggregate.overall;
-  const bo = base?.aggregate.overall;
-  const levels = Object.keys(r.aggregate.by_level).sort((a, b) => Number(a) - Number(b));
-  const byTask = useMemo(() => {
-    const map = new Map<string, BenchRecord[]>();
-    for (const rec of r.records) map.set(rec.task, [...(map.get(rec.task) ?? []), rec]);
-    return [...map.entries()].sort((a, b) => a[1][0].level - b[1][0].level);
-  }, [r.records]);
-  const lvl = (x: number | null) => (x == null ? '—' : 'L' + x);
-  return (
-    <Card title={`结果 · ${r.id}`} subtitle={`${r.config.suite} · ${r.commit ?? '未知版本'} · ${(r.models ?? []).join(' / ') || '—'}`}>
-      {r.state === 'error' && <Notice tone="bad">评测运行出错：{r.message}</Notice>}
-      <div className="row wrap bench-kpis">
-        <Kpi label="通过率" value={pct(o.rate)} sub={`${o.passed}/${o.runs}`} d={bo && <Delta a={bo.rate} b={o.rate} fmt={(x) => Math.round(x * 100) + '%'} />} />
-        <Kpi label="稳定等级" value={lvl(o.stable_level)} sub="通过率 ≥ 67% 的最高等级" d={bo && <Delta a={bo.stable_level} b={o.stable_level} />} />
-        <Kpi label="最高通过等级" value={lvl(o.ceiling_level)} sub="至少通过过一次" d={bo && <Delta a={bo.ceiling_level} b={o.ceiling_level} />} />
-        <Kpi label="加权得分" value={num(o.weighted_score)} sub="高等级的通过更值钱" d={bo && <Delta a={bo.weighted_score} b={o.weighted_score} />} />
-        <Kpi label="假通过" value={String(o.false_pass)} sub="Gate 过了但判官不认" d={bo && <Delta a={bo.false_pass} b={o.false_pass} goodWhen="down" />} />
-        <Kpi
-          label="每次通过的云端 token"
-          value={o.cloud_tokens_per_pass == null ? '—' : fmtTokens(o.cloud_tokens_per_pass)}
-          sub={`总计 ${fmtTokens(o.cloud_tokens)}`}
-          d={bo && <Delta a={bo.cloud_tokens_per_pass} b={o.cloud_tokens_per_pass} fmt={fmtTokens} goodWhen="down" />}
-        />
-        <Kpi
-          label="每次通过的耗时"
-          value={o.seconds_per_pass == null ? '—' : fmtDuration(o.seconds_per_pass * 1000)}
-          sub={`总计 ${fmtDuration(o.seconds * 1000)}`}
-          d={bo && <Delta a={bo.seconds_per_pass} b={o.seconds_per_pass} fmt={(x) => fmtDuration(x * 1000)} goodWhen="down" />}
-        />
-      </div>
-      {o.skipped > 0 && <Notice tone="warn">有 {o.skipped} 次运行因为超出评测上限（或被停止）而跳过，统计里不含它们。</Notice>}
-
-      <h3>按等级</h3>
-      <div className="scroll-x">
-        <table className="bench-table">
-          <thead>
-            <tr>
-              <th>等级</th>
-              <th>含义</th>
-              <th>通过率</th>
-              <th>通过/运行</th>
-              <th>云端 tok(均)</th>
-              <th>秒(均)</th>
-              <th>验证轮(均)</th>
-              {base && <th>相对基线</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {levels.map((lv) => {
-              const row: BenchRow = r.aggregate.by_level[lv];
-              const brow = base?.aggregate.by_level[lv];
-              return (
-                <tr key={lv}>
-                  <td>
-                    <Badge>L{lv}</Badge>
-                  </td>
-                  <td className="muted">{cat.levels[lv]}</td>
-                  <td>
-                    <div className="rate-bar">
-                      <i style={{ width: row.rate * 100 + '%' }} className={row.rate >= 0.67 ? 'ok' : row.rate > 0 ? 'mid' : 'bad'} />
-                    </div>{' '}
-                    {pct(row.rate)}
-                  </td>
-                  <td className="mono">
-                    {row.passed}/{row.runs}
-                    {row.false_pass ? ` (≠${row.false_pass})` : ''}
-                  </td>
-                  <td className="mono">{row.mean_cloud_tokens == null ? '—' : fmtTokens(row.mean_cloud_tokens)}</td>
-                  <td className="mono">{num(row.mean_seconds)}</td>
-                  <td className="mono">{num(row.mean_rounds)}</td>
-                  {base && <td>{brow ? <Delta a={brow.rate} b={row.rate} fmt={(x) => Math.round(x * 100) + '%'} /> : <span className="muted">—</span>}</td>}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <h3>
-        按任务 <span className="muted">每个符号是一次运行：✓通过 ✗未通过 ≠假通过 ■停止 ⏱超时 !出错 ·跳过（悬停看原因）</span>
-      </h3>
-      <div className="scroll-x">
-        <table className="bench-table">
-          <thead>
-            <tr>
-              <th>等级</th>
-              <th>任务</th>
-              <th>运行</th>
-              <th>云端 tok(均)</th>
-              <th>秒(均)</th>
-              <th>调用(均)</th>
-              <th>升级(均)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byTask.map(([id, recs]) => {
-              const t = cat.tasks.find((x) => x.id === id);
-              const row = r.aggregate.by_task[id];
-              return (
-                <tr key={id}>
-                  <td>
-                    <Badge>L{recs[0].level}</Badge>
-                  </td>
-                  <td title={t?.goal}>{t?.title ?? id}</td>
-                  <td className="runs">
-                    {recs.map((x, i) => (
-                      <span
-                        key={i}
-                        className={'run-' + x.status}
-                        title={`${GLYPH[x.status][1]}${x.oracle_reason ? '：' + x.oracle_reason : ''}${x.note ? '：' + x.note : ''}${x.stop_reason ? '（' + x.stop_reason + '）' : ''}`}
-                      >
-                        {GLYPH[x.status][0]}
-                      </span>
-                    ))}
-                  </td>
-                  <td className="mono">{row?.mean_cloud_tokens == null ? '—' : fmtTokens(row.mean_cloud_tokens)}</td>
-                  <td className="mono">{num(row?.mean_seconds)}</td>
-                  <td className="mono">{num(row?.mean_calls)}</td>
-                  <td className="mono">{num(row?.mean_escalations)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <h3>
-        触发的 runtime 机制 <span className="muted">改动有没有在线上起作用的直接证据</span>
-      </h3>
-      <div className="row wrap">
-        {Object.entries(MECH).map(([k, label]) => (
-          <span key={k} className={'chip-static' + (o.mechanisms[k] ? '' : ' dim')}>
-            {label} × {o.mechanisms[k] ?? 0}
-            {bo ? `（基线 ${bo.mechanisms[k] ?? 0}）` : ''}
-          </span>
-        ))}
-      </div>
+      {(o.false_pass > 0 || o.skipped > 0) && (
+        <p className="row wrap">
+          {o.false_pass > 0 && <Badge tone="warn">{o.false_pass} 项假通过（独立验收未通过）</Badge>}
+          {o.skipped > 0 && <Badge>{o.skipped} 项未运行，未计入通过率</Badge>}
+        </p>
+      )}
+      {base && <p className="muted">基线 {base.id} · {base.aggregate.overall.passed}/{base.aggregate.overall.runs} 通过（{percent(base.aggregate.overall.rate)}） · {duration(base.used.seconds)} · 云端 {fmtTokens(base.aggregate.overall.cloud_tokens)} token</p>}
+      {byTask.size > 0 && (
+        <div className="bench-outcomes" aria-label="各任务结果">
+          {[...byTask].map(([id, records]) => {
+            const counts = new Map<BenchStatus, number>();
+            for (const r of records) counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
+            return (
+              <details key={id} className="bench-task-result">
+                <summary>
+                  <strong>{taskName(id, catalog)}</strong>
+                  <span className="bench-outcome-labels">{[...counts].map(([s, count]) => <span key={s} className={`run-${s}`}>{OUTCOMES[s]}{records.length > 1 ? ` ${count}` : ''}</span>)}</span>
+                </summary>
+                <ol className="bench-attempts">
+                  {records.map((r) => (
+                    <li key={r.repeat}>
+                      第 {r.repeat} 轮 · {OUTCOMES[r.status]}{r.status !== 'skipped' && ` · ${duration(r.seconds)} · ${r.calls} 次模型调用 · 云端 ${fmtTokens(r.cloud_tokens)} token`}
+                      {[r.oracle_reason, r.note, r.stop_reason].filter(Boolean).map((reason, i) => <p key={i}>{reason}</p>)}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            );
+          })}
+        </div>
+      )}
+      <details className="bench-disclosure">
+        <summary>更多指标与运行信息</summary>
+        <p>运行编号 {result.id} · 版本 {result.commit ?? '未知'} · 模型 {result.models?.join('、') || '—'}</p>
+        <p>每次通过的耗时 {o.seconds_per_pass == null ? '—' : duration(o.seconds_per_pass)} · 每次通过的云端 token {o.cloud_tokens_per_pass == null ? '—' : fmtTokens(o.cloud_tokens_per_pass)}</p>
+        <p>稳定等级 {o.stable_level == null ? '—' : `L${o.stable_level}`} · 最高通过等级 {o.ceiling_level == null ? '—' : `L${o.ceiling_level}`} · 加权分 {o.weighted_score ?? '—'}</p>
+        {Object.keys(result.aggregate.by_level).length > 0 && (
+          <div className="scroll-x">
+            <table className="bench-table">
+              <thead><tr><th>等级</th><th>通过 / 已运行</th><th>平均耗时</th><th>平均云端 token</th></tr></thead>
+              <tbody>{Object.values(result.aggregate.by_level).map((r) => (
+                <tr key={r.level}><td>L{r.level} {catalog.levels[r.level]}</td><td>{r.passed} / {r.runs}</td><td>{r.mean_seconds == null ? '—' : duration(r.mean_seconds)}</td><td>{r.mean_cloud_tokens == null ? '—' : fmtTokens(r.mean_cloud_tokens)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+        {activeMechanisms.length > 0 && <p>触发机制：{activeMechanisms.map(([key, count]) => `${MECHANISMS[key] ?? key} × ${count}`).join('、')}</p>}
+      </details>
     </Card>
   );
 }
