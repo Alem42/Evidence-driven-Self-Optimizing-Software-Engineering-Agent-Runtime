@@ -53,6 +53,12 @@ python -m masa run --repo <dir> --language go  # run verification on a project
 python -m masa status <run_id>                 # also: events, report, resume, cancel
 ```
 
+### Strata on Windows
+
+Load the model in the official Strata app. In MASA, add a **Local / OpenAI compatible** profile with the app's local API base URL (for example, `http://127.0.0.1:47831/v1`) and the model ID returned by `GET /v1/models`. Enter an API key if the app requires one. Set the profile's context limit to match the app. The profile also carries the output-token limit, timeouts, and streaming preference. In Advanced parameters, set reasoning effort to control how much output the server spends on reasoning. The provider default leaves the request field unset. Use the Strata app to unload the model or set its idle-unload timer.
+
+The managed engine catalog in MASA covers llama.cpp and Ollama. Older Strata entries in the catalog are skipped. Update any older MASA profile pointing at its former Strata port to use the app's URL and model ID.
+
 ### MCP server (independent verification for other agents)
 
 Expose the Gate as a tool so another agent (Claude Code, Cursor, …) can ask "is this really correct?" before declaring success.

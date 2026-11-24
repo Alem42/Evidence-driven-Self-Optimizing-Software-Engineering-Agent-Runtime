@@ -71,6 +71,7 @@ export function ModelsSection() {
   }
 
   const local = values.model_type === 'local';
+  const acceptsKey = values.protocol === 'openai';
   const num = (key: keyof Form, min?: number, max?: number) => (
     <input type="number" min={min} max={max} value={(values[key] as number | null | undefined) ?? ''} onChange={(e) => set({ [key]: e.target.value === '' ? null : Number(e.target.value) } as Form)} />
   );
@@ -124,8 +125,8 @@ export function ModelsSection() {
           <label className="check"><input type="checkbox" checked={values.enabled !== false} onChange={(e) => set({ enabled: e.target.checked })} /> 启用此模型</label>
           <Field label="配置名称"><input required value={values.name ?? ''} onChange={(e) => set({ name: e.target.value })} /></Field>
           <Field label="Base URL"><input required value={values.base_url ?? ''} onChange={(e) => set({ base_url: e.target.value })} /></Field>
-          <Field label="模型 ID" hint={local ? 'Ollama 填完整 tag，例如 gemma4:12b' : undefined}><input required value={values.model ?? ''} onChange={(e) => set({ model: e.target.value })} /></Field>
-          {!local && (
+          <Field label="模型 ID" hint={values.protocol === 'ollama' ? '填写完整 tag，例如 gemma4:12b' : local ? '填写本机 API 的 /v1/models 返回的模型 ID' : undefined}><input required value={values.model ?? ''} onChange={(e) => set({ model: e.target.value })} /></Field>
+          {acceptsKey && (
             <>
               <Field label="API Key" hint="密钥不回显；留空保留已有密钥。修改后先保存再测试。">
                 <input type="password" autoComplete="off" value={values.api_key ?? ''} onChange={(e) => set({ api_key: e.target.value })} />
@@ -180,6 +181,17 @@ export function ModelsSection() {
                 <option value="auto">提供商默认</option>
               </select>
             </Field>
+            {local && values.protocol === 'openai' && (
+              <Field label="推理强度（支持此参数的本机 API）">
+                <select value={values.reasoning_effort ?? 'auto'} onChange={(e) => set({ reasoning_effort: e.target.value })}>
+                  <option value="auto">提供商默认</option>
+                  <option value="none">关闭推理</option>
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high">高</option>
+                </select>
+              </Field>
+            )}
           </div>
         </details>
         <details className="card-details">
@@ -195,7 +207,7 @@ export function ModelsSection() {
           <Button disabled={busy || !values.id} onClick={test}>测试连接（真实调用）</Button>
           <Button disabled={busy || !values.id} onClick={() => save({ action: 'select', id: values.id })}>设为默认</Button>
           <span className="spacer" />
-          {!local && <Button variant="ghost" disabled={busy || !values.id} onClick={() => save({ id: values.id, clear_key: true })}>清除密钥</Button>}
+          {acceptsKey && <Button variant="ghost" disabled={busy || !values.id} onClick={() => save({ id: values.id, clear_key: true })}>清除密钥</Button>}
           <Button variant="danger" disabled={busy || !values.id} onClick={() => save({ action: 'delete', id: values.id })}>删除</Button>
         </div>
       </form>

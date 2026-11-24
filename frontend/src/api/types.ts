@@ -243,6 +243,7 @@ export interface Profile {
   max_output_tokens?: number;
   token_parameter?: string;
   thinking?: string;
+  reasoning_effort?: string;
   input_price_per_million?: number | null;
   output_price_per_million?: number | null;
   last_test?: { ok: boolean; [k: string]: unknown } | null;

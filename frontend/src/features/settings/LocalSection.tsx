@@ -6,10 +6,83 @@ import { qk } from '../../api/queries';
 import { useActivity } from '../../app/activity';
 import { gib, nsToSeconds } from '../../entities/text';
 import { Button, Card, Notice, Spinner } from '../../shared/ui';
+import { useTaskDraft } from '../../stores/ui';
 
 interface OllamaModel { name: string; size: number; digest: string; details?: { parameter_size?: string; quantization_level?: string } }
 interface OllamaRunning { name: string; size: number; size_vram: number; context_length?: number }
 interface Catalog { version: string; models: OllamaModel[]; running: OllamaRunning[] }
+
+interface LocalCatalog {
+  path: string;
+  log: string;
+  error?: string | null;
+  active_id: string | null;
+  models: { id: string; name: string; engine: string; model: string; base_url: string; path: string | null; executable: string }[];
+}
+
+function ManagedModels() {
+  const qc = useQueryClient();
+  const { working } = useActivity();
+  const catalog = useQuery({ queryKey: ['local-models'], queryFn: () => api<LocalCatalog>('/local-models'), refetchInterval: 5000 });
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const data = catalog.data;
+  function act(id: string, action: 'start' | 'stop') {
+    setPending(true); setMessage(''); setError('');
+    const label = action === 'start' ? '启动本地模型' : '卸载本地模型';
+    startJob('/local-models/action', { id, action }, {
+      label,
+      onDone: (job) => {
+        setPending(false);
+        qc.invalidateQueries({ queryKey: ['local-models'] });
+        qc.invalidateQueries({ queryKey: qk.profiles });
+        qc.invalidateQueries({ queryKey: qk.ollama });
+        if (job.status !== 'completed') {
+          setError(job.error || '模型操作中断。');
+          return;
+        }
+        const profile = job.result?.profile_id;
+        if (profile) useTaskDraft.getState().edit({ model: profile, strategy: 'fixed' });
+        if (action === 'stop') useTaskDraft.getState().edit({ model: '' });
+        setMessage(job.result?.message || label + '完成。');
+      },
+    }).catch((e: Error) => { setPending(false); setError(e.message); });
+  }
+
+  return (
+    <Card title="启动本地模型" subtitle="管理 llama.cpp 和 Ollama。请在 Strata 官方应用加载或卸载模型，在 MASA 的模型设置中填写其本机 API。">
+      {catalog.isLoading && <Spinner />}
+      {(catalog.isError || data?.error || error) && <Notice tone="bad">{error || data?.error || catalog.error?.message}</Notice>}
+      {pending && <Notice tone="running"><Spinner /> 正在处理。大模型加载需要一些时间。</Notice>}
+      {message && <Notice tone="ok">{message}</Notice>}
+      {data?.models.length === 0 && <Notice>请在 <code>{data.path}</code> 配置本地引擎路径与模型，再重启 MASA。</Notice>}
+      {data?.models.map((model) => {
+        const loaded = model.id === data.active_id;
+        return (
+          <div className="list-item" key={model.id}>
+            <div className="row wrap">
+              <strong>{model.name}</strong>
+              <small>{model.engine} · {loaded ? '已加载' : '未启动'}</small>
+              <Button size="sm" variant={loaded ? 'default' : 'primary'} disabled={working || pending}
+                onClick={() => act(model.id, loaded ? 'stop' : 'start')}>
+                {loaded ? '卸载模型' : '启动并选用'}
+              </Button>
+            </div>
+            <details>
+              <summary>引擎与模型路径</summary>
+              <dl className="facts">
+                <dt>引擎</dt><dd>{model.executable}</dd>
+                <dt>模型设置</dt><dd>{model.path ?? model.model}</dd>
+                <dt>本机 API</dt><dd>{model.base_url}</dd>
+              </dl>
+            </details>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
 
 // 本地运行时：模型列表、选择/加载/释放/测速（官方接口，不提供任意 shell）。
 // Local runtime: list/select/load/unload/benchmark via the official API only.
@@ -48,12 +121,13 @@ export function LocalSection() {
   const m = result?.metrics;
   return (
     <div className="stack">
+      <ManagedModels />
       <Card
         title={catalog.data ? `本地模型 · Ollama ${catalog.data.version}` : '本地模型 · Ollama'}
         subtitle="固定连接 127.0.0.1:11434。选择用于新任务；加载/释放影响本机内存；执行中的任务不会切换。"
         actions={<Button size="sm" onClick={() => catalog.refetch()} disabled={catalog.isFetching}>刷新</Button>}
       >
-        {catalog.isError && <Notice tone="bad">{(catalog.error as Error).message}</Notice>}
+        {catalog.isError && <Notice>Ollama 服务暂不可用。可以从上方启动已配置的 Ollama 模型。</Notice>}
         {working && <Notice tone="warn">项目正在运行：仍可查看模型、硬件与诊断；切换、加载、释放和测速待任务结束后恢复。</Notice>}
         {error && <Notice tone="bad">{error}</Notice>}
         <div className="split">
@@ -160,7 +234,7 @@ function OrphanCard() {
   const orphans = (q.data ?? []).filter((r) => r.orphan);
   return (
     <Card
-      title="模型运行进程"
+      title="Ollama 运行进程"
       subtitle="Ollama 的 llama-server 在 ollama serve 被杀、崩溃后可能继续占着显存和内存。"
       actions={orphans.length > 0 && <Button size="sm" variant="danger" disabled={clean.isPending} onClick={() => clean.mutate()}>{clean.isPending ? '清理中…' : `清理 ${orphans.length} 个孤儿进程`}</Button>}
     >
@@ -171,7 +245,7 @@ function OrphanCard() {
           {orphans.map((r) => <div key={r.pid} className="mono">PID {r.pid} · {r.memory_mb ?? '?'} MB · {r.model_blob ?? '未知模型'} · 启动于 {r.started ? new Date(r.started).toLocaleTimeString() : '?'}</div>)}
         </Notice>
       ) : (
-        <p className="muted">{(q.data ?? []).length ? `${q.data!.length} 个运行进程，均有父进程，状态正常。` : '没有模型运行进程。'}</p>
+        <p className="muted">{(q.data ?? []).length ? `${q.data!.length} 个 Ollama 运行进程，均有父进程。` : '未检测到 Ollama 的 llama-server 进程。'}</p>
       )}
       {clean.isSuccess && <p className="ok-text">已清理 {clean.data.killed.length} 个，释放约 {clean.data.freed_memory_mb} MB 内存。</p>}
       {clean.isError && <Notice tone="bad">{(clean.error as Error).message}</Notice>}

@@ -13,9 +13,10 @@ from masa.languages.registry import registry
 
 
 class Settings:
-    def __init__(self, root):
+    def __init__(self, root, local_models=None):
         """加载配置与用户选择保存的本地密钥。 Load profiles and credentials explicitly persisted by the user."""
         self.path = root / "provider.json"
+        self.local_models = local_models
         self.secret_path = root / 'provider-keys.local.json'
         self.routing_path = root / 'routing.json'
         self.languages_path = root / 'languages.json'
@@ -117,7 +118,7 @@ class Settings:
                     **p,
                     "id": i,
                     "key_configured": bool(self.keys.get(i)),
-                    "ready": p['enabled'] and (capability.local_allowed() if p['model_type']=='local' else bool(self.keys.get(i))),
+                    "ready": self._ready(i, p),
                     "last_test": self.tests.get(i),
                 }
                 for i, p in sorted(self.profiles.items(),key=lambda item:(item[1]['level'],item[1]['priority'],item[0]))
@@ -389,7 +390,22 @@ class Settings:
         """已启用且凭据就绪（本地无需密钥）的配置，按等级与优先级排序。 Enabled, credentialed profiles in routing order."""
         with self.lock:
             return [(i, dict(p)) for i, p in sorted(self.profiles.items(), key=lambda item: (item[1]['level'], item[1]['priority'], item[0]))
-                    if p['enabled'] and (capability.local_allowed() if p['model_type'] == 'local' else bool(self.keys.get(i)))]
+                    if self._ready(i, p)]
+
+    def _ready(self, ident, profile):
+        if not profile['enabled']:
+            return False
+        if profile['model_type'] == 'cloud':
+            return bool(self.keys.get(ident))
+        return capability.local_allowed() and (self.local_models is None or self.local_models.availability(profile))
+
+    def _chat_provider(self, ident, config):
+        provider = ChatProvider(config, self.keys.get(ident, ''))
+        if self.local_models is not None and config['model_type'] == 'local':
+            if not self.local_models.availability(config):
+                raise MasaError('请先在「设置 → 本地运行时」启动任务所选模型。')
+            provider.keep_loaded = self.local_models.pinned(config)
+        return provider
 
     def provider(self, ident=None, expected=None, snapshot=None):
         """绑定配置，恢复时匹配原运行身份。 Bind configuration and match frozen identity on resume."""
@@ -406,7 +422,7 @@ class Settings:
                 current=self.profiles.get(ident)
                 if not current or not current['enabled'] or current['base_url']!=config['base_url'] or current['model_type']!=config['model_type']:
                     raise MasaError('snapshot destination unavailable or disabled; restore the original profile')
-                provider=ChatProvider(config,self.keys.get(ident,''))
+                provider=self._chat_provider(ident, config)
                 if expected is not None and provider.profile!=expected:
                     raise MasaError('snapshot provider identity mismatch')
                 provider.snapshot=snapshot
@@ -417,7 +433,10 @@ class Settings:
             for ident in candidates:
                 if ident not in self.profiles or not self.profiles[ident]['enabled'] or (self.profiles[ident]['model_type']=='cloud' and not self.keys.get(ident)):
                     continue
-                provider = ChatProvider(self.profiles[ident], self.keys.get(ident,''))
+                config = self.profiles[ident]
+                if expected is not None and self.local_models is not None and not self._ready(ident, config):
+                    continue
+                provider = self._chat_provider(ident, config)
                 if expected is None or provider.profile == expected:
                     provider.snapshot={'version':1,'mode':'fixed','profile_id':ident,'config':dict(provider.config)}
                     return provider

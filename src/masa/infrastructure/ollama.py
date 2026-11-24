@@ -44,7 +44,10 @@ class OllamaControl:
         raw=self.request('/api/show',{'model':model})
         return {k:raw.get(k) for k in ('details','model_info','capabilities','parameters','modified_at')}
 
-    def residency(self,model,load):
+    def residency(self,model,load,*,keep_alive='5m',context_limit=None):
         """空生成请求加载/释放模型；不执行代码或shell。 Load/unload with an empty generation, never code or shells."""
         self.installed(model)
-        return self.request('/api/generate',{'model':model,'stream':False,'keep_alive':'5m' if load else 0},timeout=600)
+        body = {'model': model, 'stream': False, 'keep_alive': keep_alive if load else 0}
+        if load and context_limit is not None:
+            body['options'] = {'num_ctx': context_limit}
+        return self.request('/api/generate', body, timeout=600)

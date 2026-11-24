@@ -112,10 +112,11 @@ class BenchRunner:
     """一次评测的执行者。可注入 run_task 做离线测试（不调用任何模型）。
     Executes one benchmark; run_task can be injected for offline tests (no model is called)."""
 
-    def __init__(self, main_root, runner_path, go_path, project, config, *, run_task=None, clock=time.time, on_change=None):
+    def __init__(self, main_root, runner_path, go_path, project, config, *, run_task=None, clock=time.time, on_change=None, local_models=None):
         self.main_root = Path(main_root)
         self.runner_path, self.go_path, self.project = Path(runner_path), Path(go_path), Path(project)
         self.config = config
+        self.local_models = local_models
         # 评测臂的策略覆盖项：只作用于这次评测的任务，从不写入用户的设置。构造时就校验，不合法立即报错。
         # The policy overrides of an evaluation arm: they apply to this benchmark's tasks only and never touch the user's settings; validated here so an illegal one fails at once.
         self.overrides = None
@@ -277,7 +278,7 @@ class BenchRunner:
             for profile in raw['profiles']:
                 profile['enabled'] = profile['id'] in set(self.config['model_ids'])
             settings.write_text(json.dumps(raw, ensure_ascii=False), encoding='utf-8')
-        self.console = Console(self.scratch, self.runner_path, self.go_path, self.project)
+        self.console = Console(self.scratch, self.runner_path, self.go_path, self.project, local_models=self.local_models)
         return self.console
 
     def _run_task_for_real(self, task, repeat, limits):

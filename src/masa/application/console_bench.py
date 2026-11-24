@@ -19,7 +19,7 @@ class BenchMixin:
             if (self.job_thread and self.job_thread.is_alive()) or self.active:
                 raise MasaError('a task is running; start the benchmark after it finishes')
             config=resolve_config(body)
-            self.bench=BenchRunner(self.root,self.runner_path,self.go_path,self.project,config)
+            self.bench=BenchRunner(self.root,self.runner_path,self.go_path,self.project,config,local_models=self.local_models)
             self.bench_thread=threading.Thread(target=self.bench.run,daemon=True,name='masa-bench')
             self.bench_thread.start()
             return {'id':self.bench.id}

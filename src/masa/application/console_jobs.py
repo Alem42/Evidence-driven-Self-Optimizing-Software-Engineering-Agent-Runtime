@@ -13,6 +13,57 @@ from masa.languages.registry import registry as languages
 
 
 class JobsMixin:
+    def local_model_action(self, body):
+        """Start or release a catalog entry using the same worker slot as inference."""
+        action, model_id = body.get('action'), body.get('id')
+        if not capability.local_allowed():
+            raise MasaError('local models are disabled on this host: ' + capability.STATE['reason'])
+        if action not in ('start', 'stop') or not isinstance(model_id, str) or model_id not in self.local_models.models:
+            raise MasaError('unknown local model action or ID')
+        with self.lock:
+            self._available()
+            ident = uuid.uuid4().hex
+            self.jobs[ident] = {'status': 'running', 'mode': 'local-model', 'phase': action, 'run_id': None,
+                                'started': time.time(), 'model': self.local_models.models[model_id].name}
+
+            def work():
+                try:
+                    if action == 'start':
+                        model = self.local_models.start(model_id, self.local_model_cancel)
+                        try:
+                            profile_id = self._select_local_profile(model)
+                            if self.local_model_cancel.is_set():
+                                raise MasaError('local model startup cancelled')
+                        except Exception:
+                            self.local_models.stop()
+                            raise
+                        result = {'profile_id': profile_id, 'message': '模型已启动，可用于新任务。'}
+                    else:
+                        active = self.local_models.active
+                        if active is not None and active.id != model_id:
+                            raise MasaError('The loaded model changed. Refresh before unloading.')
+                        self.local_models.stop()
+                        result = {'message': '模型已卸载。'}
+                    self.jobs[ident].update(status='completed', result=result)
+                except Exception as exc:
+                    self._fail_job(ident, exc, 'worker:local-model')
+
+            self.job_thread = threading.Thread(target=work, daemon=True, name='masa-local-model')
+            self.job_thread.start()
+            return {'job_id': ident}
+
+    def _select_local_profile(self, model):
+        with self.settings.lock:
+            matches = [i for i, p in self.settings.profiles.items() if model.matches(p)]
+            values = {'model_type': 'local', 'protocol': model.protocol, 'base_url': model.base_url,
+                      'model': model.model, 'enabled': True, 'context_limit': model.context_limit}
+            if matches:
+                values['id'] = matches[0]
+            else:
+                values.update(new=True, name=model.name, timeout_seconds=600, max_output_tokens=4096,
+                              token_parameter='max_tokens', thinking='disabled' if model.protocol == 'ollama' else 'auto')
+            return self.settings.save(values)['active_id']
+
     def _release_if_idle(self):
         if not (self.job_thread and self.job_thread.is_alive()):
             self._release_local_models()
@@ -412,6 +463,9 @@ class JobsMixin:
         if action not in {'select','load','unload','test'}:raise MasaError('unsupported Ollama action')
         with self.lock:
             self._available()
+            active = self.local_models.loaded()
+            if active and (active.engine != 'ollama' or active.model != model or action in {'load', 'unload'}):
+                raise MasaError('请从本地运行时的模型列表切换或卸载当前模型。')
             installed=control.installed(model)
             if action=='select':
                 matches=[i for i,p in self.settings.profiles.items() if p['model_type']=='local' and p['protocol']=='ollama' and p['base_url']==control.base and p['model']==model]
@@ -428,6 +482,9 @@ class JobsMixin:
                         from masa.infrastructure.llm import ChatProvider
                         provider=ChatProvider({'model_type':'local','base_url':control.base,'model':model,'timeout_seconds':600,
                                                'context_limit':8192,'max_output_tokens':256,'thinking':'disabled'})
+                        if active is not None:
+                            provider.keep_loaded = True
+                            provider.config['context_limit'] = active.context_limit
                         output=provider.respond({'operation':'go_test','goal':'Request the allowed go_test tool.','tool_results':[]})
                         result={'output':output,'usage':provider.usage,'metrics':provider.metrics}
                     else:result=control.residency(model,action=='load')

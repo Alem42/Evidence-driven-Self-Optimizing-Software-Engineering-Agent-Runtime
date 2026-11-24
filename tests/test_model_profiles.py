@@ -1,7 +1,10 @@
 """多模型配置与无密钥本地协议边界。 Multi-model metadata and keyless local protocol boundaries."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import URLError
 from masa.infrastructure.llm import ChatProvider,validate_config
 from masa.infrastructure.settings import Settings
 from masa.domain.models import MasaError
@@ -9,6 +12,20 @@ from masa.agents.protocol import validate_response
 
 
 class ModelProfileTests(unittest.TestCase):
+    def test_local_openai_reasoning_effort_is_frozen_and_sent(self):
+        provider = ChatProvider({'model_type': 'local', 'protocol': 'openai',
+                                 'base_url': 'http://127.0.0.1:47831/v1', 'model': 'iq3_s',
+                                 'thinking': 'enabled', 'reasoning_effort': 'none'})
+        self.assertEqual(provider.profile['reasoning_effort'], 'none')
+        with patch('masa.infrastructure.llm.urllib.request.build_opener') as opener:
+            open_request = opener.return_value.open
+            open_request.side_effect = URLError('synthetic')
+            with self.assertRaises(MasaError):
+                provider.respond({'operation': 'go_test'})
+            payload = json.loads(open_request.call_args.args[0].data)
+        self.assertEqual(payload['reasoning_effort'], 'none')
+        self.assertNotIn('thinking', payload)
+
     def test_snapshot_restores_options_without_moving_credentials(self):
         """冻结参数可恢复，删除/禁用/换地址不能带走凭据。 Restore frozen options without moving credentials."""
         with tempfile.TemporaryDirectory() as tmp:

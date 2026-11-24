@@ -12,6 +12,7 @@ from masa.domain.models import Budget, Graph, MasaError
 from masa.languages.registry import registry
 from masa.runtime.engine import Runtime
 from masa.infrastructure.settings import Settings
+from masa.infrastructure.local_models import LocalModels
 from masa.runtime.graph import full_verification_policy, collaboration_policy, harness_policy
 from masa.languages.go.single_file import CodeGeneration
 from masa.infrastructure.workspaces import verify_snapshot
@@ -31,7 +32,7 @@ from masa.application.console_jobs import JobsMixin
 
 
 class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
-    def __init__(self, state_dir, runner, go, project):
+    def __init__(self, state_dir, runner, go, project, *, local_models=None):
         self.root = Path(state_dir).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.runner_path, self.go_path, self.project = (
@@ -39,7 +40,9 @@ class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
             Path(go),
             Path(project),
         )
-        self.settings = Settings(self.root)
+        self._owns_local_models = local_models is None
+        self.local_models = LocalModels(self.root) if local_models is None else local_models
+        self.settings = Settings(self.root, self.local_models)
         # 如果跑过 scripts/eval/calibrate_tokens.py，就用真实调用拟合的系数。 Use fitted coefficients when calibration has been run.
         from masa.domain.tokens import configure as configure_tokens
         configure_tokens(self.root / 'token-calibration.json')
@@ -52,6 +55,7 @@ class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
         self.closing = False
         self.jobs = Jobs(self.root)
         self.app_cancel = threading.Event()
+        self.local_model_cancel = threading.Event()
         self.app_run_id = None
         self.job_thread = None
         self.bench = None
@@ -464,6 +468,7 @@ class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
 
     def close(self):
         self.app_cancel.set()
+        self.local_model_cancel.set()
         with self.lock:
             self.closing = True
             rid, worker = self.active, self.worker
@@ -480,3 +485,10 @@ class Console(LanguageMixin, BenchMixin, ViewsMixin, JobsMixin):
             worker.join(timeout=15)
         if self.app_run_id and self.job_thread:
             self.job_thread.join(timeout=15)
+        if self.job_thread and self.job_thread.name == 'masa-local-model' and self.job_thread.is_alive():
+            self.job_thread.join(timeout=15)
+        if self._owns_local_models and not (self.job_thread and self.job_thread.name == 'masa-local-model' and self.job_thread.is_alive()):
+            try:
+                self.local_models.stop()
+            except (MasaError, OSError, TimeoutError) as exc:
+                self.diagnostics.record('worker:local-model-shutdown', exc)

@@ -96,6 +96,11 @@ def validate_config(config):
     values["thinking"] = config.get("thinking", "auto")
     if values["thinking"] not in {"auto", "enabled", "disabled"}:
         raise MasaError("invalid thinking mode")
+    effort = config.get("reasoning_effort", "auto")
+    if effort not in ("auto", "none", "low", "medium", "high"):
+        raise MasaError("invalid reasoning effort")
+    if kind == "local" and protocol == "openai" and effort != "auto":
+        values["reasoning_effort"] = effort
     return values
 
 
@@ -168,9 +173,12 @@ class ChatProvider:
         if self.config['model_type']=='local':
             self.profile.update(provider='ollama-native' if self.config['protocol']=='ollama' else 'local-openai-compatible',
                 context_limit=self.config['context_limit'],timeout_seconds=self.config['timeout_seconds'])
+            if "reasoning_effort" in self.config:
+                self.profile["reasoning_effort"] = self.config["reasoning_effort"]
         self.usage = None
         self.metrics = None
         self.contract_diagnostic = None
+        self.keep_loaded = False
         self.loaded = False  # 这个实例是否可能让本地模型驻留在显存里 / may this instance have left a local model resident in VRAM
         # 流式传输的钩子：由 RoleRuntime 在每次调用前设置。should_cancel() 为真就中断连接；on_progress(info) 收到实时进度。
         # Streaming hooks set by RoleRuntime before every call: should_cancel() true aborts the connection; on_progress(info) receives live progress.
@@ -181,7 +189,7 @@ class ChatProvider:
     def unload(self):
         """立刻把本地模型从显存里释放（Ollama: keep_alive=0）。尽力而为：失败只返回 False，绝不抛异常。
         Release the local model from VRAM right away (Ollama: keep_alive=0). Best effort: never raises."""
-        if self.config['model_type'] != 'local' or self.config['protocol'] != 'ollama':
+        if self.keep_loaded or self.config['model_type'] != 'local' or self.config['protocol'] != 'ollama':
             return False
         body = json.dumps({'model': self.config['model'], 'keep_alive': 0, 'stream': False}).encode()
         request = urllib.request.Request(self.config['base_url'].rstrip('/') + '/api/generate', data=body,
@@ -255,7 +263,9 @@ class ChatProvider:
         }
         if streaming:
             payload['stream_options'] = {'include_usage': True}  # OpenAI 兼容服务在末尾块里给用量 / usage arrives in a trailing chunk
-        if self.config["thinking"] != "auto":
+        if "reasoning_effort" in self.config:
+            payload["reasoning_effort"] = self.config["reasoning_effort"]
+        elif self.config["thinking"] != "auto":
             payload["thinking"] = {"type": self.config["thinking"]}
         endpoint='/chat/completions'
         if self.config['protocol']=='ollama':
@@ -263,7 +273,7 @@ class ChatProvider:
             # Native options bound context/output without streaming; role contracts remain shared.
             # 多文件源码的复杂语法约束会导致部分模型重复；JSON模式后仍严格做路径/模块校验。
             # Complex code grammars can loop on some models; JSON mode still requires strict path/module validation.
-            payload={'keep_alive':LOCAL_KEEP_ALIVE,'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':streaming,
+            payload={'keep_alive':-1 if self.keep_loaded else LOCAL_KEEP_ALIVE,'model':self.config['model'],'messages':payload['messages'],'format':'json' if purpose=='project_developer' and context.get('generation_mode')!='files-v1' else response_schema(context),'stream':streaming,
                      'options':{'num_ctx':self.config['context_limit'],'num_predict':self.config['max_output_tokens']}}
             if self.config['thinking']!='auto':payload['think']=self.config['thinking']=='enabled'
             endpoint='/api/chat'

@@ -165,7 +165,7 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
             if demo and not (path.startswith(DEMO_GET) if not write else path in DEMO_POST):
                 self.send(403, {"error": DEMO_MESSAGE})
                 return
-            if (path == '/api/ollama' or path.startswith('/api/ollama/')) and not capability.local_allowed():
+            if any(path == prefix or path.startswith(prefix + '/') for prefix in ('/api/ollama', '/api/local-models')) and not capability.local_allowed():
                 self.send(403, {"error": 'local models are disabled on this host: ' + capability.STATE['reason']})
                 return
             try:
@@ -239,6 +239,10 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                 elif path == '/api/ollama' and not write:
                     from masa.infrastructure.ollama import OllamaControl
                     result = OllamaControl().catalog()
+                elif path == '/api/local-models' and not write:
+                    result = console.local_models.catalog()
+                elif path == '/api/local-models/action' and write:
+                    result = console.local_model_action(body)
                 elif path == '/api/ollama/action' and write:
                     result = console.ollama_action(body)
                 elif path == '/api/ollama/orphans' and not write:
