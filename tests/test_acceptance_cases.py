@@ -201,7 +201,7 @@ class EndToEndTests(unittest.TestCase):
             self.paths.append(context['target_path'])
             return validate_response(context, {'files': {context['target_path']: self.files[context['target_path']]}}, '')
 
-    def run_flow(self, app):
+    def run_flow(self, app, auditor=None):
         with tempfile.TemporaryDirectory() as temp:
             store = Store(Path(temp))
             runner = Runner(RUNNER)
@@ -210,9 +210,9 @@ class EndToEndTests(unittest.TestCase):
                 from masa.runtime.engine import Runtime
                 model = self.Scripted({**{'calc/__main__.py': MAIN, 'calc/app.py': app}, 'tests/test_app.py': TEST})
                 planning = ProjectPlanning(store, runner)
-                parent = planning.generate(model, 'sum integers', language='python', acceptance_cases=True)
+                parent = planning.generate(model, 'sum integers', language='python', acceptance_cases=True, audit_provider=auditor)
                 meta = store.run(parent)['data']['project_plan']
-                planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': store.read(meta['spec_ref']), 'checks': store.read(meta['checks_ref'])})
+                planning.approve(parent, {'spec_ref': meta['spec_ref'], 'checks_ref': meta['checks_ref'], 'spec': store.read(meta['spec_ref']), 'checks': store.read(meta['checks_ref']), 'review_mode': 'automatic'})
                 service = ProjectGeneration(store, runner)
                 draft = service.generate(parent, model)
                 meta = store.run(draft)['data']['project_plan']
@@ -230,6 +230,24 @@ class EndToEndTests(unittest.TestCase):
         self.assertNotIn(acceptance.PATH, paths)  # 模型一次都没有被要求写它 / no model call was ever made to write it
         self.assertIn("'stdin': '5 -7'", generated[acceptance.PATH])  # 用例是文件里的数据，一行一个 / the cases are data in the file, one per line
         self.assertEqual(len(tools), 2)  # py_test 与 py_static 都跑了 / both checks ran
+
+    def test_audit_cannot_remove_the_only_case_for_a_criterion(self):
+        from unittest.mock import patch
+        proposal = answer()
+        proposal['spec']['acceptance'].append('negative sums keep their sign')
+        proposal['spec']['cases'][2]['accepts'] = [1]
+
+        class Auditor:
+            profile = {'model': 'audit'}
+            def respond(self, context):
+                if context['purpose'] == 'case_deriver':
+                    return {'answers': [{'index': c['index'], 'result': 'derived'} for c in context['cases']]}
+                return {'answers': [{'index': c['index'], 'same': c['index'] != 2} for c in context['pairs']]}
+
+        with patch(__name__ + '.answer', return_value=proposal):
+            result, generated, *_ = self.run_flow(APP.replace('int(item)', 'abs(int(item))'), Auditor())
+        self.assertIn("'stdin': '5 -7'", generated[acceptance.PATH])
+        self.assertEqual(result['status'], 'failed')
 
     def test_a_wrong_implementation_fails_the_gate_on_the_acceptance_case(self):
         wrong = APP.replace('sum(int(item) for item in text.split())', 'sum(abs(int(item)) for item in text.split())')

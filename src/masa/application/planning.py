@@ -268,6 +268,14 @@ class ProjectPlanning:
         try:
             status=audit_cases(test['cases'],derive,judge,samples=samples or AUDIT_SAMPLES)
             kept,dropped=apply(test['cases'],status)
+            if dropped and spec.get('cases'):
+                structured = spec['cases']
+                before = {index for case in structured for index in case.get('accepts', [])}
+                remaining = {index for i,case in enumerate(structured) if i not in dropped
+                             for index in case.get('accepts', [])}
+                if before - remaining:
+                    plan['coverage_warning'] = '用例审计有异议，保留原用例以覆盖验收项：' + ', '.join(str(i+1) for i in sorted(before-remaining))
+                    kept, dropped = test['cases'], []
             if dropped:
                 trial=[dict(c,cases=kept) if c is test else c for c in checks]
                 validate_checks(trial,spec,require_coverage=False,language=pack.id)  # 丢弃之后仍须是合法计划 / the plan must stay valid after dropping
@@ -316,6 +324,13 @@ class ProjectPlanning:
             spec = validate_spec(body.get('spec'), pack.id)
             checks = body.get('checks')
             graph = Runtime.compile_project_checks(spec, checks, pack.id)
+            if spec.get('cases') and body.get('review_mode') == 'automatic':
+                covered = {index for case in spec['cases'] for index in case.get('accepts', [])}
+                claimed = {index for check in checks if check['operation'] == pack.op_id('test')
+                           for index in check['acceptance_indices']}
+                if claimed - covered:
+                    raise MasaError('automatic approval requires executable cases for claimed test coverage: '
+                                    + ', '.join(str(i+1) for i in sorted(claimed-covered)))
             review=review_test_plan(spec,checks,pack.id)
             if review['status']=='blocked':
                 raise MasaError('test plan review blocked: '+next(f['message'] for f in review['findings'] if f['severity']=='blocking'))
