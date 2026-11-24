@@ -136,7 +136,8 @@ class Ops:
                     route = store.read(row['route_ref'])
                 except Exception:
                     continue
-                if (route or {}).get('model_type') == 'local':
+                from masa.application.usage import is_local_route
+                if is_local_route(route or {}):
                     continue  # 免费本地调用会自动重试 / free local calls retry on their own
                 granted = sum(1 for e in store.events(row['run_id']) if e['type'] == 'uncertain_call_resolved' and e['payload'].get('step_id') == row['purpose']
                               and e['payload'].get('invocation_id') == row['invocation_id'])
@@ -148,7 +149,8 @@ class Ops:
                         'message': '请求发出后没有收到结果：远端可能已受理并计费。默认不重发；选择 retry 才会发起新的一次付费尝试。',
                         'actions': ['retry']}
                 items.append(item)
-                blocked.setdefault(row['run_id'], []).append(ident)
+                if granted <= used:
+                    blocked.setdefault(row['run_id'], []).append(ident)
         finally:
             store.close()
         for ident, job in list(self.console.jobs.items()):

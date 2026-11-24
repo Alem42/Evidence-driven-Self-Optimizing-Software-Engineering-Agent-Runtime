@@ -240,10 +240,8 @@ class V2Generation(ProjectGeneration):
             try:
                 action = roles.call(rid, provider, 'package_worker', context, invocation_id=invocation, continue_after_failure=True)
             except TransportFailure as exc:
-                # 服务没有回答（网络抖动）：一步只值几分钱，让整个任务因为一次抖动失败（真实运行里 28 次调用中的一次就让 bank 失败）比偶尔多付一步更贵。
-                # 把它当作这一步失败，稍等再试下一步；连续失败 3 次才放弃。这是对“付费云调用不自动重放”的有意例外，只用于单步很小的工人循环。
-                # The service did not answer (a network blip): a step costs a few fen, and failing the whole task over one blip (one of 28 calls failed a real bank run) costs more than occasionally paying for a step twice.
-                # Treat it as a failed step, wait a moment and try the next one; give up only after 3 in a row. A deliberate exception to "paid cloud calls are never replayed", limited to worker loops whose steps are tiny.
+                if (getattr(provider, 'config', {}) or {}).get('model_type') != 'local' and not getattr(provider, 'retry_unknown_paid', False):
+                    raise
                 silent += 1
                 self.store.event(rid, 'worker_step', {'package': directory, 'step': step, 'tool': None, 'path': None, 'ok': False, 'keys': [], 'summary': 'the model service did not answer: ' + str(exc)[:160], 'transport_failure': True})
                 if silent >= TRANSPORT_GIVE_UP:

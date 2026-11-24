@@ -218,6 +218,8 @@ def make_server(console, port=8765, origins=DEFAULT_ORIGINS, *, bind='127.0.0.1'
                     result = console.project_env_install(parts[2], body)
                 elif path == '/api/pick-file' and write:
                     result = console.pick_file(body)
+                elif path == '/api/routing/preview' and write:
+                    result = console.routing_preview(body)
                 elif path == '/api/routing':
                     result = console.settings.save_routing(body) if write else console.settings.routing()
                 elif path == '/api/settings/order' and write:

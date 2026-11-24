@@ -221,7 +221,20 @@ class Settings:
             return self.public()
 
     # ───────────── 路由默认值（可在设置页编辑）/ routing defaults editable in Settings ─────────────
-    def routing(self):
+    @staticmethod
+    def _routing_overrides(raw, normalized):
+        overrides = {}
+        for section, defaults in normalized.items():
+            explicit = raw.get(section) or {}
+            overrides[section] = {key: defaults[key] for key in explicit if key in defaults}
+        attempts = overrides['policy'].get('attempts_per_level')
+        if attempts is not None:
+            overrides['policy']['attempts_per_level'] = {
+                key: attempts[key] for key in raw['policy']['attempts_per_level']
+            }
+        return overrides
+
+    def routing(self, *, saved_only=False):
         """已保存的路由默认值（策略与预算）；文件缺失或损坏时回到内置默认。 Saved routing defaults, built-in defaults when absent."""
         from masa.application.orchestration.routing import validate_budget, validate_policy
         raw = {}
@@ -230,20 +243,23 @@ class Settings:
         except (ValueError, OSError):
             raw = {}
         try:
-            return {'policy': validate_policy(raw.get('policy')), 'budget': validate_budget(raw.get('budget'))}
-        except MasaError:
+            normalized = {'policy': validate_policy(raw.get('policy')), 'budget': validate_budget(raw.get('budget'))}
+            return self._routing_overrides(raw, normalized) if saved_only else normalized
+        except (MasaError, TypeError, AttributeError):
+            if saved_only:
+                return {'policy': {}, 'budget': {}}
             return {'policy': validate_policy(None), 'budget': validate_budget(None)}
 
     def save_routing(self, body):
         """校验后原子保存。只保存与默认值不同的部分之外的完整规范化结果。 Validate, then save atomically."""
         from masa.application.orchestration.routing import validate_budget, validate_policy
-        policy = validate_policy(body.get('policy'))
-        budget = validate_budget(body.get('budget'))
+        normalized = {'policy': validate_policy(body.get('policy')), 'budget': validate_budget(body.get('budget'))}
+        overrides = self._routing_overrides(body, normalized)
         with self.lock:
             temp = self.routing_path.with_suffix('.tmp')
-            temp.write_text(json.dumps({'policy': policy, 'budget': budget}, ensure_ascii=False, indent=2), encoding='utf-8')
+            temp.write_text(json.dumps(overrides, ensure_ascii=False, indent=2), encoding='utf-8')
             os.replace(temp, self.routing_path)
-        return {'policy': policy, 'budget': budget}
+        return normalized
 
     # ───────────── 模型次序 / model order ─────────────
     def reorder(self, order, levels=None):

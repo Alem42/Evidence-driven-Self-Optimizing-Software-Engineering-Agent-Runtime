@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useActivity } from '../../app/activity';
 import { startJob } from '../../api/jobs';
@@ -13,7 +14,7 @@ import { TriageView } from '../decisions/TriageView';
 import { byRouting, profileLevel } from '../../entities/profiles';
 import { Link } from 'react-router-dom';
 import { profileLabel, profileReady } from '../../entities/profiles';
-import { useToasts, useUi } from '../../stores/ui';
+import { useTaskDraft, useToasts, useUi } from '../../stores/ui';
 import { Button, Notice, Segmented } from '../../shared/ui';
 
 // 新任务页：一个大输入框 + 模型与执行方式。提交后任务图在任务页出现。
@@ -24,19 +25,15 @@ export function NewTask() {
   const { bootstrap, working } = useActivity();
   const boot = bootstrap;
   const push = useToasts((s) => s.push);
-  const [goal, setGoal] = useState('');
+  const { goal, language, model, runtime, auto, strategy, apiTokens, tokenSource, edit } = useTaskDraft();
   // 语言：默认取后端的默认语言；只有一种语言时不显示选择器。 Language: the backend default; no selector when there is only one.
-  const [language, setLanguage] = useState('');
   const languages = bootstrap?.languages ?? [];
   const chosen = language || bootstrap?.language || 'go';
   const chosenInfo = languages.find((l) => l.id === chosen);
-  const [model, setModel] = useState('');
   // 运行方式：v2repair = 生成沿用标准流程，验证失败后只重开出问题的包（真实样本上最稳最便宜，默认）；v1 = 标准流程；v2 = 全程按包推进的工人循环（实验）。只在“自动执行”下生效。
   // Runtime: v2repair = standard generation, then only the failing package is reopened after a failed verification (the steadiest and cheapest on real samples, the default); v1 = the standard flow; v2 = per-package worker loops all the way (experimental). Only in automatic mode.
-  const [runtime, setRuntime] = useState<'v1' | 'v2repair' | 'v2'>('v2repair');
-  // 默认：自动执行 + 本地优先有界升级。需要逐步确认或固定模型时再手动切换。
-  // Defaults: automatic execution + local-first bounded escalation; switch manually for step-by-step review or a fixed model.
-  const [auto, setAuto] = useState<'review' | 'automatic'>('automatic');
+  // 默认：自动执行 + 按阶段选模型和有界升级。需要逐步确认或固定模型时再手动切换。
+  // Defaults: automatic execution + stage-specific model selection and bounded escalation; switch manually for step-by-step review or a fixed model.
   // 推荐任务：内置的丰富题库（含故意写得模糊的需求）+ 评测题库里的低等级题，抽 3 个不同类型的；只在题库加载或点“换一批”时重抽（输入时不闪烁）。
   // Suggestions: the built-in rich pool (with deliberately vague requirements) plus low-level benchmark tasks, three of different kinds; redrawn only when the set loads or on "refresh" (no flicker while typing).
   const { data: catalog } = useBenchTasks();
@@ -48,10 +45,7 @@ export function NewTask() {
     return drawn;
   }, [catalog, batch]);
   const [starting, setStarting] = useState(false);
-  const [strategy, setStrategy] = useState<'fixed' | 'ladder'>('ladder');
-  const [apiTokens, setApiTokens] = useState('');
   // API token 上限的来源：默认跟着“开跑前估计”选的档位；用户在高级设置里手填后就不再被覆盖。 Where the API token limit comes from: the tier chosen in the pre-run estimate, until the user types one by hand in the advanced settings.
-  const [tokenSource, setTokenSource] = useState<'estimate' | 'manual'>('estimate');
   const selectedModels = useUi((x) => x.selectedModels);
   const [triage, setTriage] = useState<Triage | null>(null);
   const [force, setForce] = useState(false);
@@ -72,7 +66,18 @@ export function NewTask() {
   const profile = ready.find((p) => p.id === model)?.id || ready.find((p) => p.id === profiles?.active_id)?.id || ready[0]?.id || '';
   // 就绪看所选语言的工具链（旧后端没有语言列表时退回 runner_ready）。 Readiness follows the chosen language's toolchain (falls back to runner_ready on an old backend).
   const toolchainReady = chosenInfo ? chosenInfo.ready : Boolean(bootstrap?.runner_ready);
-  const blocked = !ready.length || !toolchainReady || working;
+  const ladder = strategy === 'ladder' && auto === 'automatic';
+  const candidates = ready.filter((p) => !selectedModels || selectedModels.includes(p.id)).sort(byRouting);
+  const blocked = !ready.length || (ladder && !candidates.length) || !toolchainReady || working;
+
+  const [advanced, setAdvanced] = useState(false);
+  const routingRequest = { runtime, model_ids: selectedModels, budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {} };
+  const preview = useQuery({
+    queryKey: ['routing-preview', routingRequest, profiles, boot?.routing_defaults],
+    queryFn: () => api<Record<string, string>>('/routing/preview', routingRequest),
+    enabled: advanced && ladder && candidates.length > 0,
+    retry: false,
+  });
 
   async function start() {
     if (!goal.trim() || blocked || starting || blockedByTriage || blockedByPackages) return;
@@ -83,12 +88,12 @@ export function NewTask() {
         await api(`/languages/${chosen}/packages`, { packages: pkg.missing, approve: true });
       }
       useUi.getState().set({ follow: true });
-      const ladder = strategy === 'ladder' && auto === 'automatic';
       await startJob(
         '/projects/plan',
         { goal, language: chosen, api_profile_id: profile, auto_verify: auto === 'automatic', ...(force ? { force: true } : {}), ...(ladder ? { routing: 'ladder', ...(runtime !== 'v1' ? { runtime } : {}), budget: apiTokens ? { max_cloud_tokens: Number(apiTokens) } : {}, ...(selectedModels ? { model_ids: selectedModels } : {}) } : {}) },
         { label: '项目规划' },
       );
+      useTaskDraft.getState().reset();
       push({ tone: 'info', text: '任务已启动，正在规划…' });
     } catch (e) {
       push({ tone: 'bad', text: (e as Error).message });
@@ -97,7 +102,7 @@ export function NewTask() {
     }
   }
 
-  const summary = [auto === 'automatic' ? '自动执行' : '逐步确认', strategy === 'ladder' && auto === 'automatic' ? '本地优先 · 有界升级' : '固定模型', languageTitle(languages, chosen)].join(' · ');
+  const summary = [auto === 'automatic' ? '自动执行' : '逐步确认', strategy === 'ladder' && auto === 'automatic' ? '按阶段选模型 · 有界升级' : '固定模型', languageTitle(languages, chosen)].join(' · ');
 
   return (
     <div className="newtask">
@@ -113,7 +118,7 @@ export function NewTask() {
             rows={6}
             maxLength={16000}
             value={goal}
-            onChange={(e) => setGoal(e.target.value)}
+            onChange={(e) => edit({ goal: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) start();
             }}
@@ -121,18 +126,19 @@ export function NewTask() {
           />
           <div className="composer-bar">
             <span className="hint">⌘/Ctrl + Enter 开始</span>
+            {bootstrap?.local_models?.allowed && <Link to="/settings/local" className="btn btn-ghost btn-sm">启动本地模型</Link>}
             <Button variant="primary" disabled={!goal.trim() || blocked || starting || blockedByTriage || blockedByPackages} onClick={start}>
               {starting ? '正在启动…' : '开始任务'}
             </Button>
           </div>
         </div>
-        <EstimatePanel goal={goal} language={chosen} enabled={tokenSource === 'estimate'} onTokens={(n) => setApiTokens(n ? String(n) : '')} />
+        <EstimatePanel goal={goal} language={chosen} enabled={tokenSource === 'estimate'} onTokens={(n) => edit({ apiTokens: n ? String(Math.min(n, boot?.routing_defaults?.budget.max_cloud_tokens ?? n)) : '' })} />
         {pkg && pkg.missing.length > 0 && (
           <PackagesNotice
             packages={pkg}
             language={chosen}
             onInstalled={refreshTriage}
-            onStdlibOnly={() => setGoal((g) => (g.includes('只用 Python 标准库') ? g : g.trim() + '（只用 Python 标准库，不要第三方包）'))}
+            onStdlibOnly={() => edit({ goal: goal.includes('只用 Python 标准库') ? goal : goal.trim() + '（只用 Python 标准库，不要第三方包）' })}
           />
         )}
         {triage && triage.verdict !== 'ok' && (
@@ -143,21 +149,21 @@ export function NewTask() {
             )}
           </div>
         )}
-        <details className="advanced">
+        <details className="advanced" onToggle={(e) => setAdvanced(e.currentTarget.open)}>
           <summary>高级设置 <span className="muted">· {summary}</span></summary>
           <div className="advanced-body">
             <div className="row wrap">
-              <Segmented value={auto} onChange={setAuto} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
-              <Segmented value={strategy} onChange={setStrategy} options={[['fixed', '固定模型'], ['ladder', '本地优先 · 有界升级']]} />
+              <Segmented value={auto} onChange={(auto) => edit({ auto })} options={[['review', '逐步确认'], ['automatic', '自动执行']]} />
+              <Segmented value={strategy} onChange={(strategy) => edit({ strategy })} options={[['fixed', '固定模型'], ['ladder', '按阶段选模型 · 有界升级']]} />
               {languages.length > 1 && (
-                <select aria-label="语言" value={chosen} onChange={(e) => setLanguage(e.target.value)} title="生成项目使用的语言（设置 → 语言 可配置）">
+                <select aria-label="语言" value={chosen} onChange={(e) => edit({ language: e.target.value })} title="生成项目使用的语言（设置 → 语言 可配置）">
                   {languages.map((l) => (
                     <option key={l.id} value={l.id}>{(l.title ?? l.id) + (l.ready ? '' : '（未就绪）')}</option>
                   ))}
                 </select>
               )}
               {auto === 'automatic' && strategy === 'ladder' && (
-                <select aria-label="运行方式" value={runtime} onChange={(e) => setRuntime(e.target.value as 'v1' | 'v2repair' | 'v2')} title="验证失败后怎么修：只重开出问题的包（推荐），还是沿用整包补丁；v2 = 全程按包推进（实验）">
+                <select aria-label="运行方式" value={runtime} onChange={(e) => edit({ runtime: e.target.value as typeof runtime })} title="验证失败后怎么修：只重开出问题的包（推荐），还是沿用整包补丁；v2 = 全程按包推进（实验）">
                   <option value="v2repair">修复时只重开出问题的包（推荐）</option>
                   <option value="v1">标准流程</option>
                   <option value="v2">全程按包推进（实验）</option>
@@ -165,7 +171,7 @@ export function NewTask() {
               )}
               {/* 有界升级下模型由设置里的次序决定，不需要在这里选；只有「固定模型」或「逐步确认」才需要选一个。 */}
               {(strategy === 'fixed' || auto !== 'automatic') && (
-                <select aria-label="使用模型" value={profile} onChange={(e) => setModel(e.target.value)}>
+                <select aria-label="使用模型" value={profile} onChange={(e) => edit({ model: e.target.value })}>
                   {!ready.length && <option value="">没有可用模型</option>}
                   {ready.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -179,15 +185,17 @@ export function NewTask() {
             {strategy === 'ladder' && auto === 'automatic' && (
               <div className="strategy-body">
                 <p className="muted">
-                  本任务使用的模型与次序：{[...ready].filter((p) => !selectedModels || selectedModels.includes(p.id)).sort(byRouting).map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。规格、测试方案、测试修订与诊断由最高等级模型负责（token 少、决定一切）；代码实现与修复从本地模型起步，失败后逐级上推；预算耗尽会停止并保留证据。
+                  本任务使用的模型与次序：{candidates.map((p) => `L${profileLevel(p)} ${p.name || p.model}`).join(' → ') || '无'}。实际选择受角色权限、上下文和剩余预算影响。
                 </p>
+                {preview.data && <p>起步模型预览（空历史） · 规划 {preview.data.project_architect} · 生成 {preview.data.project_developer} · 修复 {preview.data.project_repair}</p>}
+                {preview.error && <p className="muted">模型预览不可用。{(preview.error as Error).message}</p>}
                 <div className="row wrap">
                   <Link to="/settings/order?from=new" className="btn btn-default btn-sm">模型与次序 · 调整 / 勾选</Link>
                   <Link to="/settings/accounts" className="btn btn-ghost btn-sm">API 账户</Link>
                 </div>
                 <label className="field inline">
                   <span className="field-label">API token 上限</span>
-                  <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => { setTokenSource('manual'); setApiTokens(e.target.value); }} />
+                  <input type="number" min={1000} step={1000} placeholder={String(boot?.routing_defaults?.budget.max_cloud_tokens ?? 200000)} value={apiTokens} onChange={(e) => { edit({ tokenSource: 'manual', apiTokens: e.target.value }); }} />
                 </label>
               </div>
             )}
@@ -209,7 +217,7 @@ export function NewTask() {
         {working && <Notice tone="warn">另一个任务正在执行；后端目前串行，完成后才能开始新任务。你仍可浏览历史。</Notice>}
         <div className="examples">
           {examples.slice(0, 3).map((e) => (
-            <button key={e.text} className="example" onClick={() => setGoal(e.text)} title={e.kind === 'vague' ? '故意写得模糊：看系统会先问你，还是选常见约定并写进验收' : undefined}>
+            <button key={e.text} className="example" onClick={() => edit({ goal: e.text })} title={e.kind === 'vague' ? '故意写得模糊：看系统会先问你，还是选常见约定并写进验收' : undefined}>
               <span className="tag">{e.kind === 'clear' && e.level !== null ? `L${e.level}` : KIND_LABEL[e.kind]}</span> {e.text}
             </button>
           ))}

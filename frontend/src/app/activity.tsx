@@ -64,6 +64,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         return;
       }
       const job = r.data;
+      if (job?.status === 'running') handled.current.delete(id);
       if (!job || job.status === 'running' || handled.current.has(id)) return;
       handled.current.add(id);
       const hooks = hooksFor(id);
@@ -83,9 +84,13 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
           .catch(() => undefined);
       const newRun: string | undefined = job.result?.id;
       if (job.status === 'failed') push({ tone: 'bad', text: `${label}失败：${job.error ?? '未知错误'}`, to: job.run_id ? '/task/' + job.run_id : undefined, action: '查看记录' });
-      else if (job.status === 'interrupted') push({ tone: 'bad', text: `${label}被中断，可在侧栏恢复。` });
+      else if (job.status === 'interrupted') push({ tone: 'bad', text: job.note || `${label}被中断，可在侧栏恢复。` });
+      else if (job.status === 'cancelled') push({ tone: 'info', text: `${label}已取消。` });
       else if (job.status === 'waiting_for_input') push({ tone: 'info', text: 'Architect 需要你补充需求。', to: newRun ? '/task/' + newRun : undefined, action: '去回答' });
-      else if (newRun && newRun !== currentRun) {
+      else if (job.mode === 'auto' && job.status === 'completed' && (job.run_status !== 'succeeded' || job.note)) {
+        push({ tone: 'bad', text: job.note || '任务停止，最终验证未通过。', to: reportRun ? '/task/' + reportRun : undefined, action: '查看记录' });
+        if (follow && newRun && newRun !== currentRun) navigate('/task/' + newRun + location.search);
+      } else if (newRun && newRun !== currentRun) {
         if (follow) navigate('/task/' + newRun + location.search);
         else push({ tone: 'ok', text: `${label}已完成，生成了新版本。`, to: '/task/' + newRun, action: '查看' });
       } else if (job.status === 'completed' && !hooks?.onDone) push({ tone: 'ok', text: `${label}已完成。` });

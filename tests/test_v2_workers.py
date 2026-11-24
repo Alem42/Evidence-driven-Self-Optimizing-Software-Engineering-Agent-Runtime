@@ -118,18 +118,21 @@ class WorkerLoopTests(unittest.TestCase):
         self.assertIn('not valid JSON', worker.contexts[2]['last_results'][-1]['result'])
         self.assertEqual(store.run(draft)['model_calls'], len(GOOD) + 1)
 
-    def test_one_silent_model_call_does_not_fail_the_whole_task(self):
+    def test_local_or_explicitly_authorized_cloud_worker_can_retry(self):
         # 真实运行：28 次调用里有一次服务没有回答，整个 bank 任务因此失败。现在这一步算失败，稍等后继续；连续 3 次才放弃。
         # Real run: one of 28 calls got no answer and the whole bank task failed. Now that step counts as failed, the loop waits a moment and goes on; only 3 in a row give up.
         from unittest.mock import patch
         from masa.domain.models import TransportFailure
-        with patch('masa.application.v2.workers.time') as clock:
+        with patch.object(ScriptedWorker, 'config', {'model_type': 'local'}, create=True), patch('masa.application.v2.workers.time') as clock:
             store, draft, worker, files, result, events = self.run_flow([write('calc/app.py', APP), TransportFailure('no response received'), *GOOD[1:]])
         self.assertEqual(result['status'], 'succeeded')
         steps = [e['payload'] for e in events if e['type'] == 'worker_step']
         self.assertTrue(steps[1]['transport_failure'])
         self.assertEqual(clock.sleep.call_count, 1)
-        with patch('masa.application.v2.workers.time'), self.assertRaises(MasaError):
+        with patch('masa.application.v2.workers.time') as clock, self.assertRaises(TransportFailure):
+            self.run_flow([TransportFailure('uncertain paid request'), *GOOD], execute=False)
+        clock.sleep.assert_not_called()
+        with patch.object(ScriptedWorker, 'retry_unknown_paid', True, create=True), patch('masa.application.v2.workers.time'), self.assertRaises(MasaError):
             self.run_flow([TransportFailure('no response received')] * 3, execute=False)
 
     def test_four_unusable_replies_in_a_row_are_stuck(self):
@@ -435,6 +438,30 @@ class SeveralPackagesTests(unittest.TestCase):
         self.assertEqual(first['repair']['feedback'], 'fix the app')
         self.assertEqual([f['path'] for f in first['own_files']], ['calc/app/app.py'])
         self.assertNotIn('tests/test_app.py', first['files'])  # 冻结的测试不是工人的文件 / the frozen tests are not the worker's files
+
+    def test_a_paused_paid_repair_resumes_the_same_revision_after_authorization(self):
+        from masa.domain.models import PendingPaidCall, TransportFailure
+        from masa.runtime.roles import RoleRuntime
+
+        verified, _ = self.failed_verification()
+        worker = ScriptedWorker([TransportFailure('uncertain paid request')])
+        revision = []
+        with self.assertRaises(PendingPaidCall):
+            self.service.repair(verified, worker, 'fix the app', on_created=revision.append)
+        rid, = revision
+        worker = ScriptedWorker([{'tool': 'edit_file', 'path': 'calc/app/app.py', 'old': ' + 1', 'new': ''}])
+        with self.assertRaises(PendingPaidCall):
+            self.service.resume_revision(rid, worker)
+        self.assertFalse(worker.contexts)
+        pending, = RoleRuntime(self.store).states(rid)
+        self.store.event(rid, 'uncertain_call_resolved', {'step_id': pending['purpose'],
+                         'invocation_id': pending['invocation_id'], 'action': 'retry'})
+        self.assertEqual(self.service.resume_revision(rid, worker), rid)
+        _, result = self.finish(rid)
+        self.assertEqual(result['status'], 'succeeded')
+        self.assertEqual(len(worker.contexts), 1)
+        self.assertEqual(worker.contexts[0]['repair']['feedback'], 'fix the app')
+        self.assertEqual(len(self.events(rid, 'model_requested')), 2)
 
     def test_a_repair_worker_cannot_finish_before_it_changed_something(self):
         # 真实运行：修复工人第一步就 finish，连续三次，什么都没改。 Real run: the repair worker answered finish at once, three times, changing nothing.

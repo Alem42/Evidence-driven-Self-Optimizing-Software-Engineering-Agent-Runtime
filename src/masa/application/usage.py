@@ -1,16 +1,28 @@
 """任务报告：从已有事件与工具账本投影 token、耗时与工具调用，不新增任何业务状态。
 Task report: project token usage, timing and tool calls from existing events and ledgers; no new state."""
-from masa.application.projects import Projects
+import json
+from urllib.parse import urlsplit
 
 _LOOPBACK = ('127.0.0.1', 'localhost', '::1')
 # 终态与等待态用于结论；运行中的版本没有“结论”。 Terminal vs waiting states decide the outcome.
 _WAITING = {'waiting_for_input', 'awaiting_review'}
 
 
-def _is_local(route):
+def is_local_route(route):
     """本地模型：Ollama 原生协议或回环地址。 Local = native Ollama protocol or a loopback address."""
-    host = (route.get('base_url') or '').split('://')[-1].split('/')[0].rsplit(':', 1)[0].strip('[]')
-    return route.get('provider') == 'ollama-native' or host in _LOOPBACK
+    if route.get('model_type') in ('cloud', 'local'):
+        return route['model_type'] == 'local'
+    provider = route.get('provider')
+    if provider in ('ollama-native', 'local-openai-compatible'):
+        return True
+    if provider == 'openai-compatible':
+        return False
+    url = route.get('base_url') or ''
+    try:
+        host = urlsplit(url if '://' in url else '//' + url).hostname
+    except ValueError:
+        return False
+    return host in _LOOPBACK
 
 
 def _int(value):
@@ -31,16 +43,18 @@ def _model_calls(store, run, events=None):
         p = e['payload'] if isinstance(e['payload'], dict) else {}
         key = (p.get('step_id'), p.get('invocation_id'), p.get('attempt_no'))
         if e['type'] == 'model_requested':
-            pending[key] = (e, p.get('route') or {})
+            route = dict(p.get('route') or {})
+            route.update({k: p[k] for k in ('reserved_tokens', 'model_type', 'prices') if k in p})
+            pending[key] = (e, route)
         elif e['type'] == 'model_abandoned':
             req, route = pending.pop(key, (None, {}))
             if req:
                 calls.append({
                     'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'), 'attempt_no': p.get('attempt_no'),
                     'status': 'abandoned', 'model': route.get('model') or '未知模型', 'provider': route.get('provider'),
-                    'kind': 'local' if _is_local(route) else 'cloud', 'started': req['created'], 'finished': e['created'], 'duration_ms': None,
+                    'kind': 'local' if is_local_route(route) else 'cloud', 'started': req['created'], 'finished': e['created'], 'duration_ms': None,
                     'prompt_tokens': None, 'completion_tokens': None, 'total_tokens': None, 'cache_hit_tokens': None, 'cache_miss_tokens': None, 'tokens_per_second': None,
-                    'error': '进程中断或请求丢失，已作为新尝试重试', 'reserved_tokens': _int(route.get('context_limit'))})
+                    'error': '进程中断或请求丢失，已作为新尝试重试', 'prices': route.get('prices'), 'reserved_tokens': _int(route.get('reserved_tokens', route.get('context_limit')))})
         elif e['type'] in ('model_completed', 'model_failed'):
             req, route = pending.pop(key, (None, {}))
             usage = p.get('usage') or {}
@@ -59,14 +73,14 @@ def _model_calls(store, run, events=None):
                 'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'),
                 'attempt_no': p.get('attempt_no'), 'status': 'completed' if e['type'] == 'model_completed' else 'failed',
                 'model': route.get('model') or '未知模型', 'provider': route.get('provider'),
-                'kind': 'local' if route and _is_local(route) else 'cloud' if route else 'unknown',
+                'kind': 'local' if route and is_local_route(route) else 'cloud' if route else 'unknown',
                 'started': started, 'finished': e['created'], 'duration_ms': duration,
                 'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': total,
                 'cache_hit_tokens': hit, 'cache_miss_tokens': miss,
                 'tokens_per_second': metrics.get('generation_tokens_per_second'),
                 'error': p.get('error') or p.get('reason') or (p.get('contract_diagnostic') and '响应不符合契约') or None,
                 # 上下文上限是单次调用 token 的上界：用量未知时按它预留，不当作 0。 Upper bound used when usage is unknown.
-                'reserved_tokens': _int(route.get('context_limit')),
+                'prices': route.get('prices'), 'reserved_tokens': _int(route.get('reserved_tokens', route.get('context_limit'))),
             })
     # 只有请求没有结果：说明仍在进行或结果未知，如实标记。 Requests without outcomes are in flight or unknown.
     for req, route in pending.values():
@@ -74,10 +88,10 @@ def _model_calls(store, run, events=None):
         calls.append({
             'run_id': run['id'], 'step_id': p.get('step_id'), 'invocation_id': p.get('invocation_id'),
             'attempt_no': p.get('attempt_no'), 'status': 'pending', 'model': route.get('model') or '未知模型',
-            'provider': route.get('provider'), 'kind': 'local' if _is_local(route) else 'cloud',
+            'provider': route.get('provider'), 'kind': 'local' if is_local_route(route) else 'cloud',
             'started': req['created'], 'finished': None, 'duration_ms': None, 'prompt_tokens': None,
             'completion_tokens': None, 'total_tokens': None, 'cache_hit_tokens': None, 'cache_miss_tokens': None, 'tokens_per_second': None, 'error': None,
-            'reserved_tokens': _int(route.get('context_limit')),
+            'prices': route.get('prices'), 'reserved_tokens': _int(route.get('reserved_tokens', route.get('context_limit'))),
         })
     return calls
 
@@ -117,11 +131,27 @@ def _tool_calls(store, run, events=None):
     return out
 
 
+def task_spend(store, run_id, prices):
+    """Budget projection inside admission transactions; only read accounting events and timestamps."""
+    from masa.application.orchestration.routing import spend_from_report
+    _, ids = store.task_family(run_id)
+    calls, tools = [], []
+    for rid in ids:
+        rows = store.db.execute("""SELECT type,created,payload FROM events WHERE run_id=? AND type IN
+            ('model_requested','model_abandoned','model_completed','model_failed') ORDER BY seq""", (rid,))
+        events = ({'type': r['type'], 'created': r['created'], 'payload': json.loads(r['payload'])} for r in rows)
+        calls.extend(_model_calls(store, {'id': rid}, events))
+        for attempt in store.db.execute("SELECT started,finished FROM attempts WHERE run_id=? AND step_id!='gate' AND finished IS NOT NULL", (rid,)):
+            tools.append({'kind': 'tool', 'duration_ms': round((attempt['finished']-attempt['started'])*1000)})
+    totals = {'calls': len(calls), 'model_ms': sum(c['duration_ms'] or 0 for c in calls)}
+    return spend_from_report({'calls': calls, 'tools': tools, 'totals': totals}, prices)
+
+
 def task_report(store, run_id):
     """汇总同一任务（版本链所有成员）的用量、耗时与工具调用。 Aggregate every version of one task."""
-    runs = {r['id']: r for r in store.all_runs()}
-    root = Projects.root_id(run_id, runs)
-    members = [r for r in runs.values() if Projects.root_id(r['id'], runs) == root]
+    root, ids = store.task_family(run_id)
+    runs = {rid: store.run(rid) for rid in ids}
+    members = list(runs.values())
     calls, tools, versions = [], [], []
     budget_events, decisions, process = [], [], []
     for run in members:

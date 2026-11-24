@@ -7,7 +7,12 @@ export interface RanModel {
   local: boolean;
 }
 
-export const isLocalRoute = (route: Record<string, any> | undefined): boolean => route?.provider === 'ollama-native' || /127\.0\.0\.1|localhost/.test(String(route?.base_url ?? ''));
+export function isLocalRoute(route: Record<string, any> | undefined): boolean {
+  if (route?.provider === 'local-openai-compatible' || route?.provider === 'ollama-native') return true;
+  if (route?.provider === 'openai-compatible') return false;
+  try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(route?.base_url).hostname); }
+  catch { return false; }
+}
 
 export function ranModel(e: RunEvent): RanModel | null {
   const route = e.payload?.route;

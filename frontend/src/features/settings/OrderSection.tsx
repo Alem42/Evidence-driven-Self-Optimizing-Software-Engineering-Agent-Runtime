@@ -63,7 +63,7 @@ export function OrderSection() {
     <div className="stack">
       {params.get('from') === 'new' && (
         <Notice tone="ok">
-          这里调整的是「本地优先 · 有界升级」任务的尝试顺序和参与的模型。
+          这里调整的是「按阶段选模型 · 有界升级」任务的尝试顺序和参与的模型。
           <button className="link" onClick={() => navigate('/')}>返回新建任务</button>
         </Notice>
       )}
@@ -142,7 +142,7 @@ export function OrderSection() {
             ))}
           </div>
         ) : <p className="muted">没有勾选任何可用模型。</p>}
-        <p className="hint">等级沿列表只增不减；把高等级模型拖到前面时，它会自动跟随上方邻居的等级。「严格按顺序」会让每个模型独立成一级（此时「最多升级次数」要够用，在「路由与预算」里调）。勾选只影响「本地优先 · 有界升级」任务，固定模型任务按新建页上选的那个模型执行。</p>
+        <p className="hint">等级沿列表只增不减；把高等级模型拖到前面时，它会自动跟随上方邻居的等级。「严格按顺序」会让每个模型独立成一级（此时「最多升级次数」要够用，在「路由与预算」里调）。勾选只影响「按阶段选模型 · 有界升级」任务，固定模型任务按新建页上选的那个模型执行。</p>
       </Card>
     </div>
   );

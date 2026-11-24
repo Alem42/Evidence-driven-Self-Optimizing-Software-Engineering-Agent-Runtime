@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../api/client';
 import { startJob } from '../../../api/jobs';
-import { useProfiles, useResults } from '../../../api/queries';
+import { useResults } from '../../../api/queries';
 import type { Detail } from '../../../api/types';
 import { useActivity } from '../../../app/activity';
 import { useOpenRun } from '../../../app/nav';
@@ -66,11 +66,9 @@ function RepairBox({ detail, advice, ownership }: { detail: Detail; advice?: { a
   const cycle = formatOnly || advice?.action === 'revise_tests';
   // 推荐路径：从这次失败继续自动修复。系统自己判断“修实现还是改测试”，必要时升级到更强的模型，用户不必选。
   // Recommended: continue automatic repair from this failure; the system decides implementation vs tests and escalates models itself.
-  const profiles = useProfiles().data?.profiles ?? [];
-  const ladderOk = profiles.some((p) => p.enabled && p.model_type === 'local') && profiles.some((p) => p.enabled && p.model_type === 'cloud');
-  const auto = useAction(() => startJob('/runs/' + detail.run.id + '/auto-fix', { api_profile_id: choice.id, ...(ladderOk ? { routing: 'ladder' } : {}) }, { label: '自动修复' }));
+  const auto = useAction(() => startJob('/runs/' + detail.run.id + '/auto-fix', {}, { label: '自动修复' }));
   const busy = repair.busy || revise.busy || format.busy || auto.busy;
-  const error = auto.error ?? repair.error ?? revise.error ?? format.error;
+  const error = repair.error ?? revise.error ?? format.error;
 
   return (
     <div className="repair">
@@ -82,9 +80,10 @@ function RepairBox({ detail, advice, ownership }: { detail: Detail; advice?: { a
         </Notice>
       )}
       <div className="row wrap">
-        <Button variant="primary" disabled={busy || working || !choice.any} onClick={auto.run}>自动修复（推荐）</Button>
-        <span className="hint">系统判断该修实现还是改测试，无进展时自动升级模型；本地模型换云端时会先释放。</span>
+        <Button variant="primary" disabled={busy || working} onClick={auto.run}>自动修复（推荐）</Button>
+        <span className="hint">沿用原任务的模型、预算和修复方式。</span>
       </div>
+      {auto.error && <Notice tone="bad">{auto.error.message}</Notice>}
       <details>
         <summary>手动选择</summary>
       <p className="muted">修改实现（测试冻结），或在测试本身有缺陷时创建单独的测试修订；每次修订都是新版本并重新验证。</p>

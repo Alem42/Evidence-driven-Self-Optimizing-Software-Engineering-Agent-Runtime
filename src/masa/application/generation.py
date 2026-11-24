@@ -8,7 +8,7 @@ import json
 import re
 import subprocess
 import os
-from masa.domain.models import Budget, MasaError, canonical, stage_error
+from masa.domain.models import PendingPaidCall, Budget, MasaError, canonical, stage_error
 from masa.runtime.engine import Runtime
 from masa.application.planning import ProjectPlanning, validate_spec
 from masa.infrastructure.workspaces import verify_snapshot
@@ -196,6 +196,8 @@ class ProjectGeneration:
             if metadata.get('status') in {'cancelled', 'failed'}:
                 raise MasaError(metadata.get('error', 'project generation cancelled'))
             return rid
+        except PendingPaidCall:
+            raise
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'generation failed')
             self.planning.update(rid, metadata, 'failed', 'project_code_generation_failed')
@@ -309,7 +311,14 @@ class ProjectGeneration:
             Budget(model_calls=self._repair_calls(approved),tool_calls=3,deadline_seconds=86400),
             graph=Runtime.compile_project_checks(approved['spec'],approved['checks'],self.pack.id),
             parent_run_id=parent,project_plan=metadata)
+        if hasattr(self, '_worker_steps'):
+            metadata['worker_repair_ref'] = self.store.put({'evidence': evidence, 'feedback': feedback,
+                'repair_count': getattr(self, '_repairs', 0), 'use_intelligence': use_intelligence})
+            self.planning.update(rid,metadata,'created','worker_repair_prepared')
         if on_created:on_created(rid)
+        return self._finish_repair(rid, provider, metadata, data, approved, base, evidence, feedback, use_intelligence)
+
+    def _finish_repair(self, rid, provider, metadata, data, approved, base, evidence, feedback, use_intelligence):
         try:
             original_files,changes=self._propose_repair(rid,provider,data,approved,base,evidence,feedback,use_intelligence)
             if any(path not in original_files for path in changes):
@@ -324,6 +333,8 @@ class ProjectGeneration:
                             changed_files=[p for p in files if files[p]!=base['files'][p]])
             self.planning.update(rid,metadata,'paused','project_repair_review_requested')
             return rid
+        except PendingPaidCall:
+            raise
         except Exception as exc:
             metadata.update(status='failed',error=str(exc) if isinstance(exc,MasaError) else 'repair generation failed')
             self.planning.update(rid,metadata,'failed','project_repair_failed')
@@ -343,6 +354,12 @@ class ProjectGeneration:
             return rid
         if metadata.get('status')!='generating':
             raise MasaError('only interrupted revision generation can resume')
+        if metadata.get('worker_repair_ref'):
+            saved = self.store.read(metadata['worker_repair_ref'])
+            self._repairs = saved['repair_count']
+            return self._finish_repair(rid, provider, metadata, self.store.run(metadata['repair_of'])['data'],
+                                       self.store.read(metadata['spec_approval_ref']), self.store.read(metadata['base_approval_ref']),
+                                       saved['evidence'], saved['feedback'], saved['use_intelligence'])
         roles=RoleRuntime(self.store)
         purpose='project_test_revision' if metadata.get('revision_scope')=='tests' else 'project_repair'
         saved=next((row for row in roles.states(rid) if row['purpose']==purpose),None)

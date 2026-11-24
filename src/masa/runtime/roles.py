@@ -1,6 +1,6 @@
 """持久角色调用：结果复用与不确定状态保护。 Durable role calls with conservative recovery."""
 import time
-from masa.domain.models import MasaError, TransportFailure
+from masa.domain.models import MasaError, TransportFailure, PendingPaidCall
 from masa.infrastructure.locking import owner_lock
 from masa.infrastructure.llm import ChatProvider
 from masa.runtime import live, user_input
@@ -76,6 +76,8 @@ class RoleRuntime:
                     # An uncertain paid call: the provider may have accepted the request while no result reached us, and the real state cannot be known. By default it pauses (pending); a new paid attempt is made only when explicitly allowed:
                     # policy unknown_paid_calls = retry, or someone chose retry for this very call in the pending queue (an uncertain_call_resolved event in the ledger).
                     if not self._paid_retry(rid, purpose, invocation_id, row, provider):
+                        if purpose == 'package_worker' and row['status'] == 'running' and (getattr(provider, 'config', {}) or {}).get('model_type') != 'local':
+                            raise PendingPaidCall('付费包工人请求结果未知，请在待处理队列授权后继续。')
                         raise MasaError('role call '+row['status']+': result unavailable; resolve it in the pending queue (retry) or create an explicit retry revision')
                     paid_retry = True
                 retry_same = True
@@ -98,6 +100,10 @@ class RoleRuntime:
             # 意图、预算和开始事件原子提交，崩溃不能绕过预算。
             # Commit intent and budget together before any network request.
             with self.store.transaction():
+                reserve = getattr(provider, 'reserve_call', None)
+                charge = reserve(rid, context) if reserve else {}
+                if not charge and (config := getattr(provider, 'config', {}) or {}).get('model_type') == 'cloud':
+                    charge = {'reserved_tokens': config.get('context_limit'), 'model_type': 'cloud'}
                 if retry_same:
                     # 同一次逻辑调用的新尝试：不再占用调用次数预算，旧尝试在事件里标记为被放弃。
                     # A new attempt of the same logical call: no extra budget; the old attempt is marked abandoned in the events.
@@ -120,7 +126,7 @@ class RoleRuntime:
                     self.store.db.execute('UPDATE runs SET model_calls=model_calls+1 WHERE id=?',(rid,))
                     self.store.db.execute('INSERT INTO role_invocations VALUES(?,?,?,?,?,?,?,?,?,?)',
                         (rid,purpose,invocation_id,attempt_no,context_ref,route_ref,'running',None,time.time(),None))
-                self.store._event(rid,'model_requested',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'route':provider.profile,'context_ref':context_ref})
+                self.store._event(rid,'model_requested',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'route':provider.profile,'context_ref':context_ref,**charge})
             started=time.monotonic()
             try:
                 # 真实网络调用不能超过任务剩余时间；旧测试提供商仍使用原签名。
@@ -139,12 +145,18 @@ class RoleRuntime:
                     output=provider.respond(context)
             except Exception as failure:
                 live.clear(rid)
+                uncertain = (purpose == 'package_worker' and isinstance(failure, TransportFailure)
+                             and (getattr(provider, 'config', {}) or {}).get('model_type') != 'local'
+                             and not getattr(provider, 'retry_unknown_paid', False))
                 with self.store.transaction():
-                    self.store.db.execute("UPDATE role_invocations SET status='failed',finished=? WHERE run_id=? AND purpose=? AND invocation_id=?",(time.time(),rid,purpose,invocation_id))
+                    if not uncertain:
+                        self.store.db.execute("UPDATE role_invocations SET status='failed',finished=? WHERE run_id=? AND purpose=? AND invocation_id=?", (time.time(),rid,purpose,invocation_id))
                     self.store._event(rid,'model_failed',{'step_id':purpose,'invocation_id':invocation_id,'attempt_no':attempt_no,'usage':getattr(provider,'usage',None),'metrics':getattr(provider,'metrics',None),
                         'contract_diagnostic':getattr(provider,'contract_diagnostic',None),
                         # 没有收到响应：免费本地调用可以安全重试。 No response received: safe to retry for free local calls.
                         'transport':isinstance(failure,TransportFailure)})
+                if uncertain:
+                    raise PendingPaidCall('付费包工人请求结果未知，请在待处理队列授权后继续。') from failure
                 raise
             live.clear(rid)
             output_ref=self.store.put(output)

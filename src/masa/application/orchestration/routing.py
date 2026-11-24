@@ -120,16 +120,20 @@ def spend_from_report(report: dict, prices: dict | None = None) -> dict:
             local_calls += 1
             continue
         cloud_calls += 1
-        p_in, p_out = prices.get(call.get('model'), (None, None))
+        p_in, p_out = call.get('prices') or prices.get(call.get('model'), (None, None))
         if call.get('total_tokens') is not None:
             cloud_tokens += call['total_tokens']
             if p_in is not None and p_out is not None:
-                cost += ((call.get('prompt_tokens') or 0) * p_in + (call.get('completion_tokens') or 0) * p_out) / 1e6
+                prompt, completion = call.get('prompt_tokens'), call.get('completion_tokens')
+                if prompt is None or completion is None:
+                    cost += call['total_tokens'] * max(p_in, p_out) / 1e6
+                else:
+                    cost += (prompt * p_in + completion * p_out) / 1e6
             else:
                 cost_known = False
         else:
             # 请求已发出但没有用量：结果未知，仍占预留。 Request sent without usage: still reserved.
-            reserve = call.get('reserved_tokens') or 0
+            reserve = call.get('reserved_tokens') or 262144  # historical requests without a frozen window
             cloud_tokens += reserve
             reserved_calls += 1
             if p_in is not None and p_out is not None:
@@ -154,6 +158,10 @@ def _blocked(c: Candidate, need_tokens: int, spend: dict, budget: dict) -> str |
     """候选被上下文或预算挡住的原因；None 表示可用。 Why a candidate cannot be used now (None = usable)."""
     if need_tokens + min(c.max_output, CONTEXT_OUTPUT_RESERVE) > c.context_limit:
         return 'context'
+    return budget_block(c, need_tokens + c.max_output, spend, budget)
+
+
+def budget_block(c: Candidate, reserve: int, spend: dict, budget: dict) -> str | None:
     if c.model_type == 'cloud':
         limit = budget.get('max_model_calls')
         if limit is not None and spend.get('cloud_calls', spend.get('calls', 0)) + 1 > limit:
@@ -166,13 +174,12 @@ def _blocked(c: Candidate, need_tokens: int, spend: dict, budget: dict) -> str |
     if limit is not None and spend.get('active_seconds', 0) >= limit:
         return 'budget_time'
     if c.model_type == 'cloud':
-        reserve = need_tokens + c.max_output
         limit = budget.get('max_cloud_tokens')
         if limit is not None and spend.get('cloud_tokens', 0) + reserve > limit:
             return 'budget_cloud_tokens'
         limit = budget.get('max_cost')
         if limit is not None:
-            if c.price_in is None or c.price_out is None:
+            if c.price_in is None or c.price_out is None or spend.get('cost_known') is False:
                 return 'price_unknown'  # 缺价格不能宣称费用上限有保证 / no price, no cost guarantee
             if spend.get('cost', 0) + reserve * max(c.price_in, c.price_out) / 1e6 > limit:
                 return 'budget_cost'

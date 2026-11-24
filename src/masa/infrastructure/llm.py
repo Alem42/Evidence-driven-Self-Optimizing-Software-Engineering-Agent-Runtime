@@ -217,17 +217,7 @@ class ChatProvider:
                 return False
             sleep(interval)
 
-    def respond(self, context, *, timeout=None):
-        """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
-        self.usage = None
-        self.metrics = None
-        if not self.config['enabled']:raise MasaError('model profile is disabled')
-        purpose=context.get('purpose','verifier')
-        if self.config['roles'] and purpose not in self.config['roles']:
-            raise MasaError('model profile does not allow role '+purpose)
-        deadline = time.monotonic() + min(
-            self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
-        )
+    def messages(self, context):
         instruction = instruction_for(context)
         if context.get('user_notes'):  # 只有用户追加了提示时才出现，默认的提示词逐字节不变 / only when the user added notes, so default prompts stay byte-identical
             from masa.runtime.user_input import NOTES_INSTRUCTION
@@ -235,15 +225,30 @@ class ChatProvider:
         if self.config['protocol']=='ollama':
             # 本地传输的补充说明因语言而异：由语言包给出。 The local-transport additions differ by language: they come from the language pack.
             instruction+=languages.for_run(context).transport_hint(context)
+        return [{"role": "system", "content": instruction}, {"role": "user", "content": render_prompt(context)}]
+
+    def respond(self, context, *, timeout=None):
+        """调用一次模型并严格校验 JSON 提案，不自动重试计费请求。 Call once and validate JSON actions without automatic billed retries."""
+        self.usage = None
+        self.metrics = None
+        self.contract_diagnostic = None
+        if not self.config['enabled']:raise MasaError('model profile is disabled')
+        purpose=context.get('purpose','verifier')
+        allowed = registry.effective_roles(self.config['roles'])
+        required = purpose
+        if purpose == 'package_worker':
+            required = 'project_repair' if context.get('repair') else 'project_developer'
+        if allowed and required not in allowed:
+            raise MasaError('model profile does not allow role '+purpose)
+        deadline = time.monotonic() + min(
+            self.config["timeout_seconds"], timeout or self.config["timeout_seconds"]
+        )
         # 流式是默认：可以取消、能检测 stall、进度实时可见；config 里 streaming=false 可回到一次性响应。
         # Streaming is the default (cancellable, stall-aware, live progress); streaming=false in the config restores one-shot responses.
         streaming = bool(self.config.get('streaming', True))
         payload = {
             "model": self.config["model"],
-            "messages": [
-                {"role": "system", "content": instruction},
-                {"role": "user", "content": render_prompt(context)},  # 稳定内容在前，利于服务端前缀缓存（见 domain/prompt_layout.py）/ stable content first for the server's prefix cache
-            ],
+            "messages": self.messages(context),
             "response_format": {"type": "json_object"},
             self.config["token_parameter"]: self.config["max_output_tokens"],
             "stream": streaming,

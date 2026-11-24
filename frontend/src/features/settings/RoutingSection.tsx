@@ -63,7 +63,7 @@ export function RoutingSection() {
 
   return (
     <div className="stack">
-      <Notice tone="ok">选择「本地优先 · 有界升级」（需自动执行）即启用。固定模型仍是默认行为。这里的值是新任务的默认值，新建任务时还能单独覆盖 API token 上限。</Notice>
+      <Notice tone="ok">新任务默认使用「自动执行 · 按阶段选模型 · 有界升级」。这里的值是新任务的默认值，新建任务时还能单独覆盖 API token 上限。</Notice>
 
       <Card title="候选模型（等级 ↑ 优先级 ↑）" subtitle="调整顺序、勾选参与的模型：去「模型与次序」。" actions={<Link to="/settings/order" className="link">模型与次序 →</Link>}>
         <ol className="route-list">

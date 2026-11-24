@@ -69,6 +69,27 @@ export const useDrafts = create<DraftState>((set) => ({
     }),
 }));
 
+interface TaskDraft {
+  goal: string;
+  language: string;
+  model: string;
+  runtime: 'v1' | 'v2repair' | 'v2';
+  auto: 'review' | 'automatic';
+  strategy: 'fixed' | 'ladder';
+  apiTokens: string;
+  tokenSource: 'estimate' | 'manual';
+}
+
+const emptyTask: TaskDraft = {
+  goal: '', language: '', model: '', runtime: 'v2repair', auto: 'automatic',
+  strategy: 'ladder', apiTokens: '', tokenSource: 'estimate',
+};
+
+export const useTaskDraft = create<TaskDraft & {
+  edit: (fields: Partial<TaskDraft>) => void;
+  reset: () => void;
+}>((set) => ({ ...emptyTask, edit: (fields) => set(fields), reset: () => set(emptyTask) }));
+
 export interface Toast {
   id: number;
   tone: 'info' | 'ok' | 'bad';

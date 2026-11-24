@@ -8,13 +8,14 @@ Router: glue between the pure route() policy, the store, providers and events.
 Snapshots contain no secrets; on resume the frozen candidate set is used and credentials come from the live profile.
 """
 from masa.application.orchestration.routing import (Candidate, DEFAULT_BUDGET, DEFAULT_POLICY, FIXED_POLICY, STOP_TEXT, estimate_tokens, route,
-                                      spend_from_report, unlimited_budget, validate_budget, validate_policy)
-from masa.domain.models import MasaError
+                                      budget_block, unlimited_budget, validate_budget, validate_policy)
+from functools import partial
+from masa.domain.models import MasaError, TaskBudgetStop, canonical
 
 SNAPSHOT_VERSION = 1
 
 
-class RoutingStop(MasaError):
+class RoutingStop(TaskBudgetStop):
     """路由决定停止（预算/等级/上下文）。不是故障，调用方应保留证据并结束任务。 A deliberate stop, not a fault."""
 
     def __init__(self, reason, detail=''):
@@ -25,10 +26,8 @@ class RoutingStop(MasaError):
 def _roles_of(entry):
     """模型配置里的角色白名单。旧配置写着 project_planner / project_tester：它们合并成了 project_architect，白名单要跟着带上，否则这个模型就再也当不了规划者。
     A model profile's role allow-list. Old profiles name project_planner / project_tester, which were merged into project_architect; the allow-list must follow or that model could never plan again."""
-    roles = tuple(entry.get('roles') or ())
-    if roles and ('project_planner' in roles or 'project_tester' in roles) and 'project_architect' not in roles:
-        roles += ('project_architect',)
-    return roles
+    from masa.roles.registry import effective_roles
+    return effective_roles(entry.get('roles'))
 
 
 def _candidate_from(entry) -> Candidate:
@@ -64,6 +63,17 @@ def build_snapshot(settings, *, mode='ladder', budget=None, policy=None, digests
         raise MasaError('no usable model profile; configure and enable at least one model')
     return {'version': SNAPSHOT_VERSION, 'mode': mode, 'policy': validate_policy(merged_policy) if mode == 'ladder' else dict(FIXED_POLICY),
             'budget': validate_budget(merged_budget) if mode == 'ladder' else unlimited_budget(), 'candidates': entries}
+
+
+def starting_models(snapshot):
+    """Zero-spend preview using the same role, level and budget policy as execution."""
+    candidates = [_candidate_from(entry) for entry in snapshot['candidates']]
+    names = {c.id: c.model for c in candidates}
+    result = {}
+    for role, chain in (('project_architect', 'planning'), ('project_developer', 'generation'), ('project_repair', 'fix')):
+        decision = route(role, chain, candidates, [], {}, snapshot['budget'], snapshot['policy'])
+        result[role] = names.get(decision.candidate) or STOP_TEXT.get(decision.reason, decision.reason)
+    return result
 
 
 class Router:
@@ -102,8 +112,24 @@ class Router:
             provider.retry_unknown_calls = bool(self.policy.get('retry_unknown_local'))
             # 付费调用的不确定状态默认暂停等人处理；只有策略明确写了 retry 才允许发起新的一次付费尝试。 Uncertain paid calls pause by default; only an explicit `retry` policy allows a new paid attempt.
             provider.retry_unknown_paid = self.policy.get('unknown_paid_calls') == 'retry'
+            if self.mode == 'ladder':
+                candidate = next(c for c in self.candidates if c.id == candidate_id)
+                provider.reserve_call = partial(self.reserve_call, candidate, provider)
             self._providers[candidate_id] = provider
         return self._providers[candidate_id]
+
+    def reserve_call(self, candidate, provider, rid, context):
+        # Called under the ledger's BEGIN IMMEDIATE, immediately before model_requested.
+        reserve = 0
+        if candidate.model_type == 'cloud':
+            messages = provider.messages(context) if hasattr(provider, 'messages') else context
+            # UTF-8 bytes bound byte-token input; allow for chat framing and the full output cap.
+            reserve = len(canonical(messages).encode('utf-8')) + 64 + candidate.max_output
+        reason = budget_block(candidate, reserve, self.spend(rid), self.budget)
+        if reason:
+            raise RoutingStop(reason)
+        return {'reserved_tokens': reserve, 'model_type': candidate.model_type,
+                'prices': [candidate.price_in, candidate.price_out]}
 
     def local_provider(self, role):
         """最低等级的、允许该角色的本地模型；没有就返回 None。用于只许用本地模型的判断（例如可行性预检），绝不会选到云端。
@@ -152,8 +178,8 @@ class Router:
         """已花费 + 保守预留；固定模式不跟踪。 Settled spend plus reservations; not tracked in fixed mode."""
         if self.mode == 'fixed' or not anchor_run:
             return {'calls': 0, 'cloud_calls': 0, 'local_calls': 0, 'cloud_tokens': 0, 'active_seconds': 0, 'cost': 0.0, 'cost_known': True, 'reserved_calls': 0}
-        from masa.application.usage import task_report
-        spent = spend_from_report(task_report(self.store, anchor_run), self.prices)
+        from masa.application.usage import task_spend
+        spent = task_spend(self.store, anchor_run, self.prices)
         # 工作项在已有项目的版本链上继续：任务报告汇总整条链（项目的全部历史），预算只算这个任务自己。开始时记下的链上花费在这里减掉。
         # A work item continues an existing project's version chain: the task report sums the whole chain (the project's history), the budget counts only this task. The chain's spend recorded at the start is subtracted here.
         offset = self.snapshot.get('spend_offset') or {}

@@ -17,6 +17,8 @@ describe('modelsByRole', () => {
   it('classifies local routes by provider or loopback address', () => {
     expect(isLocalRoute(LOCAL)).toBe(true);
     expect(isLocalRoute({ base_url: 'http://localhost:11434' })).toBe(true);
+    expect(isLocalRoute({ provider: 'local-openai-compatible', base_url: 'http://192.168.1.10:8000' })).toBe(true);
     expect(isLocalRoute(CLOUD)).toBe(false);
+    expect(isLocalRoute({ ...CLOUD, base_url: 'http://localhost:8000' })).toBe(false);
   });
 });

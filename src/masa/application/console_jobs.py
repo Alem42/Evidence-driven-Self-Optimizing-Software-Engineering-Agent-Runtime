@@ -6,7 +6,7 @@ from masa.infrastructure.store import Store
 from masa.domain.models import MasaError
 from masa.application.planning import ProjectPlanning
 from masa.application.generation import ProjectGeneration
-from masa.application.orchestration.router import Router, build_snapshot
+from masa.application.orchestration.router import Router, build_snapshot, starting_models
 from masa.infrastructure.ollama import OllamaControl
 from masa.infrastructure import capability
 from masa.languages.registry import registry as languages
@@ -185,17 +185,69 @@ class JobsMixin:
             return {**(budget if isinstance(budget,dict) else {}),'max_model_calls':150}
         return budget
 
+    def _task_routing(self, body, *, digests=None):
+        saved = self.settings.routing(saved_only=True)
+        runtime_policy = self._runtime_policy(body) or {}
+        task_policy = body.get('policy')
+        task_budget = body.get('budget')
+        if any(value is not None and not isinstance(value, dict) for value in (task_policy, task_budget)):
+            raise MasaError('policy and budget must be objects')
+        task_policy = task_policy or {}
+        policy = {**runtime_policy, **saved['policy'], **task_policy}
+        for key in ('start_level_by_role', 'attempts_per_level'):
+            override = task_policy.get(key, {})
+            if not isinstance(override, dict):
+                raise MasaError(f'{key} must be an object')
+            policy[key] = {**runtime_policy.get(key, {}), **saved['policy'].get(key, {}), **override}
+        budget = {**(self._v2_budget(body) or {}), **saved['budget'], **(task_budget or {})}
+        ids = body.get('model_ids')
+        if ids is not None and (not isinstance(ids, list) or any(not isinstance(ident, str) for ident in ids)):
+            raise MasaError('model_ids must be a list of profile IDs')
+        return build_snapshot(self.settings, budget=budget, policy=policy, digests=digests,
+                              profile_ids=set(ids) if ids is not None else None)
+
+    def routing_preview(self, body):
+        return starting_models(self._task_routing(body))
+
     def auto_fix(self, rid, body):
         """从一次失败的验证继续自动修复：跳过规划与生成，沿用任务的路由与预算设置。
         Continue the automatic repair from a failed verification (no re-planning); history is rebuilt from the version lineage."""
         store=Store(self.root)
         try:
             run=store.run(rid)
-            goal=run['data'].get('goal')
-        finally:store.close()
-        request=dict(body or {})
-        request.update(goal=goal,continue_from=rid,auto_verify=True)
-        return self.start_autonomous_project_job(request)
+            if run['status'] != 'failed' or not run['data'].get('project_bundle'):
+                raise MasaError('automatic repair requires a failed project verification')
+            request = {'goal': run['data']['goal'], 'continue_from': rid, 'auto_verify': True}
+            original = None
+            snapshot = None
+            profile = None
+            ancestor = rid
+            seen = set()
+            jobs = sorted(self.jobs.values(), key=lambda j: j.get('started', 0), reverse=True)
+            while ancestor and ancestor not in seen:
+                seen.add(ancestor)
+                original = next((j for j in jobs if j.get('mode') == 'auto' and ancestor in
+                                 (j.get('run_id'), j.get('draft_id'), j.get('plan_id'), (j.get('result') or {}).get('id'))), None)
+                data = store.run(ancestor)['data']
+                if snapshot is None and data.get('model_snapshot_ref'):
+                    snapshot = store.read(data['model_snapshot_ref'])
+                profile = profile or (data.get('project_plan') or {}).get('provider')
+                if original:
+                    profile = original.get('provider') or profile
+                    break
+                ancestor = data.get('parent_run_id')
+            if original:
+                request['runtime'] = original['request'].get('runtime')
+                snapshot = original.get('model_snapshot') or snapshot
+                request['api_profile_id'] = original['request'].get('api_profile_id')
+            routing = (original or {}).get('routing')
+            if not (snapshot or routing):
+                if not profile:
+                    raise MasaError('original model configuration unavailable; explicitly select a model for manual repair')
+                snapshot = self.settings.provider(expected=profile).snapshot
+        finally:
+            store.close()
+        return self.start_autonomous_project_job(request, inherited_routing=routing, inherited_snapshot=snapshot)
 
     def change_project(self, verified, body):
         """工作项：在一次通过了的验证之上加一个功能（body.change 是自然语言的变更请求）。沿用基线的语言；运行方式固定为“V1 生成 + 工人修复”（实现由修复工人对着新旧用例完成）。
@@ -218,7 +270,7 @@ class JobsMixin:
         body.update(goal=goal,change_of=verified,change=change.strip(),language=language,runtime='v2repair',auto_verify=True)
         return self.start_autonomous_project_job(body)
 
-    def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None):
+    def start_autonomous_project_job(self, body, resume_job=None, *, workflow=None, inherited_routing=None, inherited_snapshot=None):
         """一次选择后有界完成生成、校验与最多四轮修复。 Complete a bounded project loop after one explicit choice."""
         with self.lock:
             self._available()
@@ -238,10 +290,9 @@ class JobsMixin:
                 body=previous['request']
             # 路由：ladder = 本地优先、有界升级、任务级预算；固定模式保持原行为。恢复时沿用任务开始时冻结的候选集合。
             # Routing: ladder = local first, bounded escalation, task budget; fixed keeps legacy behaviour. Resume reuses the frozen set.
-            routing=previous.get('routing') if resume_job else None
+            routing=previous.get('routing') if resume_job else inherited_routing
             if not resume_job and body.get('routing')=='ladder':
-                routing=build_snapshot(self.settings,mode='ladder',budget=self._v2_budget(body),policy=self._runtime_policy(body),
-                                       profile_ids=set(body['model_ids']) if isinstance(body.get('model_ids'),list) else None,digests=self._local_digests())
+                routing=self._task_routing(body, digests=self._local_digests())
                 if body.get('change_of'):
                     # 工作项沿用项目的版本链：把链上已有的花费记下来，预算只算这个任务自己（见 Router.spend）。 A work item continues the project's chain: record the chain's spend so the budget counts only this task (see Router.spend).
                     from masa.application.usage import task_report
@@ -251,7 +302,7 @@ class JobsMixin:
                         prices={c['model']:(c.get('price_in'),c.get('price_out')) for c in routing['candidates']}
                         routing['spend_offset']=spend_from_report(task_report(store,body['change_of']),prices)
                     finally:store.close()
-            snapshot=previous.get('model_snapshot') if resume_job else None
+            snapshot=previous.get('model_snapshot') if resume_job else inherited_snapshot
             if routing:
                 provider=None
             else:
@@ -269,7 +320,7 @@ class JobsMixin:
             else:self.jobs[ident]={'status':'running','run_id':None,'started':time.time(),
                               'mode':'auto','phase':'planning','attempt':0,
                               'provider':provider.profile if provider else {},'model_snapshot':getattr(provider,'snapshot',None),
-                              'routing':routing,'model':('本地优先 · 有界升级' if routing else None),
+                              'routing':routing,'model':('按阶段选模型 · 有界升级' if routing else None),
                               'request':{'goal':goal,'language':self._language_of(body) if not body.get('continue_from') else None,**({'runtime':body['runtime']} if body.get('runtime') in ('v2','v2repair') else {}),'continue_from':body.get('continue_from'),'api_profile_id':body.get('api_profile_id') or self.settings.active_id,'force':body.get('force') is True,
                                          **({'change_of':body['change_of'],'change':body['change']} if body.get('change_of') else {}),
                                          **({'workflow':workflow} if workflow else {})}}  # workflow 只能由进程内的调用方（评测/调优器）传入，HTTP 接口不接受 / only in-process callers (benchmark/tuner) may pass it; the HTTP API does not
@@ -282,7 +333,7 @@ class JobsMixin:
                     if routing:
                         # 候选按冻结快照重建；本地权重摘要变了的候选自动不可用。 Rebuild from the frozen set; changed local weights make a candidate unavailable.
                         router=Router(store,routing,lambda entry:self.settings.provider(snapshot=entry['snapshot']),
-                                      live_digests=self._local_digests() if resume_job else None)
+                                      live_digests=self._local_digests() if resume_job or inherited_routing else None)
                         if not self.jobs[ident].get('routing_ref'):
                             self.jobs[ident]['routing_ref']=store.put(routing)
                     WorkflowCoordinator(store,runner,provider,self.jobs[ident],resuming=bool(resume_job),router=router).run()
@@ -334,7 +385,8 @@ class JobsMixin:
             if requested:
                 route=requested[-1]['payload'].get('route') or {}
                 job['current_model']=route.get('model')
-                job['current_kind']=('local' if route.get('provider')=='ollama-native' else 'cloud') if route else None
+                from masa.application.usage import is_local_route
+                job['current_kind']=('local' if is_local_route(route) else 'cloud') if route else None
             # 版本切换后仍显示同任务最近的实际速度，不伪造当前请求吞吐。
             # Keep the latest measured speed across revisions, never pretend it is the current live rate.
             store=Store(self.root)

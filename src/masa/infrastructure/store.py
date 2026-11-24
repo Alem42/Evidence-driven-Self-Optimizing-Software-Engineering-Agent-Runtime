@@ -56,6 +56,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS events (
               seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT REFERENCES runs(id),
               type TEXT, payload TEXT, created REAL);
+            CREATE INDEX IF NOT EXISTS runs_parent ON runs(json_extract(data,'$.parent_run_id'));
             CREATE INDEX IF NOT EXISTS events_run ON events(run_id,seq);
             CREATE TABLE IF NOT EXISTS run_controls (
               run_id TEXT PRIMARY KEY REFERENCES runs(id), pause_requested INTEGER NOT NULL DEFAULT 0);
@@ -257,6 +258,27 @@ class Store:
         self.db.execute('UPDATE runs SET data=?,status=?,reason=? WHERE id=?',
                         (canonical(data),status or run['status'],run['reason'] if reason is None else reason,run_id))
         self._event(run_id,event,value if payload is None else payload)
+
+    def task_family(self, rid):
+        """Return one version tree in creation order without loading other projects."""
+        root, seen = rid, set()
+        while True:
+            if root in seen:
+                raise MasaError('cyclic project lineage')
+            seen.add(root)
+            row = self.db.execute("SELECT json_extract(data,'$.parent_run_id') FROM runs WHERE id=?", (root,)).fetchone()
+            if row is None:
+                if root == rid:
+                    raise MasaError(f'unknown run: {rid}')
+                root = child  # historical record whose parent was removed
+                break
+            if not row[0]:
+                break
+            child, root = root, row[0]
+        rows = self.db.execute("""WITH RECURSIVE family(id) AS (
+            SELECT ? UNION ALL SELECT r.id FROM family f JOIN runs r ON json_extract(r.data,'$.parent_run_id')=f.id)
+            SELECT r.id FROM runs r JOIN family f ON f.id=r.id ORDER BY r.rowid""", (root,))
+        return root, [row[0] for row in rows]
 
     def all_runs(self):
         """按创建顺序读取完整运行，供项目/版本视图使用。 Read runs in creation order for project/revision projections."""

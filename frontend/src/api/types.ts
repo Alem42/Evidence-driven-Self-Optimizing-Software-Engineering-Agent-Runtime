@@ -134,6 +134,7 @@ export interface Job {
   error?: string;
   result?: any;
   run_status?: string;
+  note?: string;
   generation_progress?: { completed: number; total: number; current?: string } | null;
   last_model_metrics?: { generation_tokens_per_second?: number; [k: string]: unknown } | null;
 }

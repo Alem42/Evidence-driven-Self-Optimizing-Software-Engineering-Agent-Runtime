@@ -112,6 +112,13 @@ def _parse(path, raw, folder):
                     tools=tuple(raw.get('tools', [])), input=tuple(raw.get('input', [])))
 
 
+def effective_roles(roles):
+    roles = tuple(roles or ())
+    if ('project_planner' in roles or 'project_tester' in roles) and 'project_architect' not in roles:
+        return roles + ('project_architect',)
+    return roles
+
+
 class Registry:
     def __init__(self, specs):
         self._specs = dict(sorted(specs.items(), key=lambda item: (item[1].order, item[0])))

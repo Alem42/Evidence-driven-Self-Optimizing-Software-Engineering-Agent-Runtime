@@ -7,7 +7,7 @@ from masa.application.orchestration.router import Router, RoutingStop
 from masa.application.checks import ownership
 from masa.languages.registry import registry as languages
 from masa.runtime.engine import Runtime
-from masa.domain.models import ContextOverflow, ExpectationSuspected, MasaError, TransportFailure
+from masa.domain.models import PendingPaidCall, ContextOverflow, ExpectationSuspected, MasaError, TransportFailure
 from masa.application.orchestration.limits import NoChange, NoProgress, BASE_ROUNDS, MAX_PROGRESS_BONUS, REWRITE_AFTER_STALLS, MAX_REWRITES  # noqa: F401 (re-exported)
 import time
 from masa.application.orchestration.fixflow import FixFlowMixin
@@ -214,6 +214,8 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         if reject_noop and int(self.job.get('noop_streak',0))>0:
             raise NoProgress('the fix returned the files unchanged on every attempt, including the strongest available model')
 
+        raise MasaError(f'{stage or chain}: model attempts exhausted; inspect the last failed run')
+
     def _stopped(self, stop, run_id):
         """路由决定停止：保留证据，任务以说明结束，而不是报错。 A routing stop ends the task with a note and keeps all evidence."""
         self._emit('task_stopped',{'reason':stop.reason,'detail':stop.detail},run_id)
@@ -224,6 +226,13 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         Advance the workflow. However it ends, release local models: no idle model may stay in VRAM."""
         try:
             self._run()
+        except PendingPaidCall as error:
+            self.job.update(status='interrupted', note=str(error))
+        except RoutingStop as stop:
+            rid = self.job.get('run_id')
+            if not rid:
+                raise
+            self._stopped(stop, rid)
         finally:
             released=self.router.release()
             if released and self._ladder:
@@ -262,6 +271,12 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
         if continue_from:
             self._seed_history_from_lineage(continue_from)
             draft=None
+            if self.resuming and checkpoint.get('phase') == 'repair' and checkpoint.get('run_id'):
+                revision = checkpoint['run_id']
+                if store.run(revision)['data'].get('project_plan', {}).get('worker_repair_ref'):
+                    draft = generation.resume_revision(revision, self._provider_of(revision))
+                    checkpoint['draft_id'] = draft
+                    continue_from = None
         elif self.job['request'].get('change_of'):  # 工作项：在已验证的项目上加一个功能 / a work item: one feature on a verified project
             draft=self._prepare_change(planning,generation,goal)
         else:
@@ -361,7 +376,9 @@ class WorkflowCoordinator(FixFlowMixin, PrepareMixin):
                 self._stopped(stop,verified)
                 return
             if outcome['outcome']=='halt':
-                reason=outcome['facts'].get('halt_reason') or 'the repair workflow halted'
+                facts = outcome['facts']
+                reason = facts.get('halt_reason') or ('修复未改变实现，验证仍失败。' if facts.get('noop')
+                         else (facts.get('diagnosis') or {}).get('rationale') or '修复已停止，请查看未通过的验证项。')
                 self._emit('task_stopped',{'reason':'halted','detail':reason},verified,always=True)
                 self.job.update(status='completed',result={'id':verified},note='halted: '+reason)
                 return

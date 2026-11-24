@@ -138,7 +138,7 @@ export function ModelsSection() {
           )}
         </Card>
 
-        <Card title="能力与限制" subtitle="等级由你指定，不是自动评测；目前仍是固定模型选择，尚不自动升级。">
+        <Card title="能力与限制" subtitle="等级和优先级决定自动路由的候选次序；固定模型任务始终使用所选模型。">
           <div className="grid2">
             <Field label="能力等级（越大越强）">{num('level', 1, 100)}</Field>
             <Field label="同等级优先级（越小越先）">{num('priority', 0, 10000)}</Field>
@@ -150,7 +150,7 @@ export function ModelsSection() {
 
         <details className="card-details">
           <summary>可承担角色与可选价格</summary>
-          <p className="hint">不选角色表示全部允许。价格为人民币/百万 token，仅保存配置，尚不计算任务费用。</p>
+          <p className="hint">不选角色表示全部允许。价格为人民币/百万 token，用于任务费用估算和预算检查。</p>
           <div className="check-grid">
             {Object.entries(ROLE_NAMES).map(([key, label]) => (
               <label className="check" key={key}>

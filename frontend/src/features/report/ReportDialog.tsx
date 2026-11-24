@@ -41,7 +41,7 @@ function RoutingBlock({ r }: { r: NonNullable<TaskReport['routing']> }) {
   const t0 = r.decisions[0]?.at ?? 0;
   return (
     <>
-      <h3>路由与预算 <span className="muted">{r.mode === 'ladder' ? '本地优先 · 有界升级' : '固定模型'}</span></h3>
+      <h3>路由与预算 <span className="muted">{r.mode === 'ladder' ? '按阶段选模型 · 有界升级' : '固定模型'}</span></h3>
       {r.mode === 'ladder' && (
         <div className="budget">
           <BudgetBar label="API token" used={r.spend.cloud_tokens} limit={b.max_cloud_tokens} fmt={fmtTokens} />

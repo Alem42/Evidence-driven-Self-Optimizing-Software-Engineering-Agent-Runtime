@@ -102,7 +102,7 @@ Generate files ──► per-file syntax check, import repair, in-place rewrite
    ▼
 Verify in sandbox ──► Gate: real tests / static analysis / format, snapshot matches, tool ledger matches
    ├─ pass ──► report with evidence
-   └─ fail ──► ownership analysis ─► Diagnoser = the Architect in adjudication mode (the only way a test gets revised)
+   └─ fail ──► ownership analysis ─► Diagnoser = a separate top-level role that presents itself as the same Architect and sees its cases and assumptions (the only way a test gets revised)
                  ├─ code wrong ─► reopen ONLY the failing package (worker loop, writes limited to that package, tests frozen)
                  ├─ test wrong ─► revise tests in a new version (old versions are never overwritten)
                  └─ "cannot fix the code" is NOT evidence that the test is wrong: ask the Diagnoser once, then hand over to a human
